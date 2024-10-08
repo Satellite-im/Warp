@@ -11,7 +11,7 @@ use tokio::sync::{broadcast, RwLock};
 #[cfg(not(target_arch = "wasm32"))]
 use rust_ipfs::p2p::MultiaddrExt;
 
-use crate::rt::JoinHandle;
+use crate::rt::{Executor, JoinHandle, LocalExecutor};
 
 use tokio_util::sync::{CancellationToken, DropGuard};
 use warp::{crypto::DID, error::Error};
@@ -339,6 +339,7 @@ pub struct DiscoveryEntry {
     drop_guard: Arc<RwLock<Option<DropGuard>>>,
     sender: broadcast::Sender<DID>,
     relays: Vec<Multiaddr>,
+    executor: LocalExecutor,
 }
 
 impl PartialEq for DiscoveryEntry {
@@ -370,6 +371,7 @@ impl DiscoveryEntry {
             drop_guard: Arc::default(),
             sender,
             relays,
+            executor: LocalExecutor,
         }
     }
 
@@ -461,7 +463,7 @@ impl DiscoveryEntry {
             }
         };
 
-        crate::rt::spawn(async move {
+        self.executor.dispatch(async move {
             futures::pin_mut!(fut);
 
             tokio::select! {

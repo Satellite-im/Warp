@@ -40,11 +40,6 @@ use warp::{
     tesseract::Tesseract,
 };
 
-use crate::{
-    config::{self, Discovery as DiscoveryConfig},
-    store::{discovery::Discovery, topics::PeerTopic, DidExt, PeerIdExt},
-};
-
 use super::payload::PayloadBuilder;
 use super::{
     connected_to_peer,
@@ -60,6 +55,11 @@ use super::{
     topics::IDENTITY_ANNOUNCEMENT,
     MAX_IMAGE_SIZE, MAX_METADATA_ENTRIES, MAX_METADATA_KEY_LENGTH, MAX_METADATA_VALUE_LENGTH,
     SHUTTLE_TIMEOUT,
+};
+use crate::rt::{Executor, LocalExecutor};
+use crate::{
+    config::{self, Discovery as DiscoveryConfig},
+    store::{discovery::Discovery, topics::PeerTopic, DidExt, PeerIdExt},
 };
 
 // TODO: Split into its own task
@@ -94,6 +94,8 @@ pub struct IdentityStore {
     span: Span,
 
     event: EventSubscription<MultiPassEventKind>,
+
+    executor: LocalExecutor,
 }
 
 #[derive(Debug, Clone, Eq, Serialize, Deserialize)]
@@ -416,11 +418,12 @@ impl IdentityStore {
             phonebook: phonebook.clone(),
             signal,
             span: span.clone(),
+            executor: LocalExecutor,
         };
 
         // Move shuttle logic logic into its own task
         // TODO: Maybe push into a joinset or futureunordered and poll?
-        crate::rt::spawn({
+        store.executor.dispatch({
             let mut store = store.clone();
             async move {
                 if let Ok(ident) = store.own_identity().await {
@@ -470,7 +473,7 @@ impl IdentityStore {
             }
         }
 
-        crate::rt::spawn({
+        store.executor.dispatch({
             let mut store = store.clone();
             async move {
                 let event_stream = store
@@ -1323,7 +1326,7 @@ impl IdentityStore {
                                     } else {
                                         let identity_meta_cid =
                                             identity.metadata.arb_data.expect("Cid is provided");
-                                        crate::rt::spawn({
+                                        self.executor.dispatch({
                                             let ipfs = self.ipfs.clone();
                                             let store = self.clone();
                                             let did = in_did.clone();
@@ -1378,7 +1381,7 @@ impl IdentityStore {
                                             .metadata
                                             .profile_picture
                                             .expect("Cid is provided");
-                                        crate::rt::spawn({
+                                        self.executor.dispatch({
                                             let ipfs = self.ipfs.clone();
                                             let store = self.clone();
                                             let did = in_did.clone();
@@ -1445,7 +1448,7 @@ impl IdentityStore {
                                             .metadata
                                             .profile_banner
                                             .expect("Cid is provided");
-                                        crate::rt::spawn({
+                                        self.executor.dispatch({
                                             let ipfs = self.ipfs.clone();
                                             let did = in_did.clone();
                                             let store = self.clone();
@@ -1507,7 +1510,7 @@ impl IdentityStore {
                                         .await?;
                                 } else {
                                     if let Some(picture) = picture {
-                                        crate::rt::spawn({
+                                        self.executor.dispatch({
                                             let ipfs = self.ipfs.clone();
                                             let did = in_did.clone();
                                             let store = self.clone();
@@ -1546,7 +1549,7 @@ impl IdentityStore {
                                         });
                                     }
                                     if let Some(banner) = banner {
-                                        crate::rt::spawn({
+                                        self.executor.dispatch({
                                             let store = self.clone();
                                             let ipfs = self.ipfs.clone();
 
@@ -1600,7 +1603,7 @@ impl IdentityStore {
                 if cache.metadata.profile_picture == Some(cid)
                     || cache.metadata.profile_banner == Some(cid)
                 {
-                    crate::rt::spawn({
+                    self.executor.dispatch({
                         let store = self.clone();
                         let did = in_did.clone();
                         async move {

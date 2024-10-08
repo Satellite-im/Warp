@@ -24,6 +24,7 @@ use tracing::{error, info, warn, Instrument, Span};
 use uuid::Uuid;
 
 use crate::config::{Bootstrap, DiscoveryType};
+use crate::rt::{Executor, LocalExecutor};
 use crate::store::discovery::Discovery;
 use crate::store::phonebook::PhoneBook;
 use crate::store::{ecdh_decrypt, PeerIdExt};
@@ -84,6 +85,7 @@ pub struct WarpIpfs {
     multipass_tx: EventSubscription<MultiPassEventKind>,
     raygun_tx: EventSubscription<RayGunEventKind>,
     constellation_tx: EventSubscription<ConstellationEventKind>,
+    executor: LocalExecutor,
 }
 
 pub type WarpIpfsInstance = Warp<WarpIpfs, WarpIpfs, WarpIpfs>;
@@ -181,11 +183,13 @@ impl WarpIpfs {
             multipass_tx,
             raygun_tx,
             constellation_tx,
+            executor: LocalExecutor,
         };
 
         if !identity.tesseract.is_unlock() {
             let inner = identity.clone();
-            crate::rt::spawn(async move {
+            let executor = inner.executor;
+            executor.dispatch(async move {
                 let mut stream = inner.tesseract.subscribe();
                 while let Some(event) = stream.next().await {
                     if matches!(event, TesseractEvent::Unlocked) {
@@ -509,7 +513,7 @@ impl WarpIpfs {
             };
 
             if self.inner.config.ipfs_setting().relay_client.background {
-                crate::rt::spawn(relay_connection_task);
+                self.executor.dispatch(relay_connection_task);
             } else {
                 relay_connection_task.await;
             }
@@ -545,7 +549,7 @@ impl WarpIpfs {
             }
 
             if !empty_bootstrap {
-                crate::rt::spawn({
+                self.executor.dispatch({
                     let ipfs = ipfs.clone();
                     async move {
                         loop {

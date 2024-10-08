@@ -27,15 +27,15 @@ use warp::{
 use parking_lot::RwLock;
 use warp::constellation::item::{Item, ItemType};
 
+use super::{
+    document::root::RootDocumentMap, event_subscription::EventSubscription,
+    MAX_THUMBNAIL_STREAM_SIZE,
+};
+use crate::rt::{GlobalExecutor, LocalExecutor};
 use crate::{
     config::{self, Config},
     thumbnail::ThumbnailGenerator,
     to_file_type,
-};
-
-use super::{
-    document::root::RootDocumentMap, event_subscription::EventSubscription,
-    MAX_THUMBNAIL_STREAM_SIZE,
 };
 
 #[derive(Clone)]
@@ -78,6 +78,7 @@ impl FileStore {
             signal_tx,
             signal_rx,
             command_receiver,
+            executor: LocalExecutor,
         };
 
         if let Err(e) = task.import_v1().await {
@@ -96,7 +97,7 @@ impl FileStore {
 
         let span = span.clone();
 
-        crate::rt::spawn(async move {
+        GlobalExecutor::dispatch(async move {
             tokio::select! {
                 _ = task.run().instrument(span) => {}
                 _ = token.cancelled() => {}
@@ -396,6 +397,8 @@ struct FileTask {
     thumbnail_store: ThumbnailGenerator,
     constellation_tx: EventSubscription<ConstellationEventKind>,
     command_receiver: futures::channel::mpsc::Receiver<FileTaskCommand>,
+    #[allow(dead_code)]
+    executor: LocalExecutor,
 }
 
 impl FileTask {
