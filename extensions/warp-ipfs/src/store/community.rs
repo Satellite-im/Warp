@@ -1,1 +1,134 @@
+use super::PeerIdExt;
+use chrono::{DateTime, Utc};
+use indexmap::IndexSet;
+use rust_ipfs::Keypair;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+use warp::{
+    crypto::DID,
+    error::Error,
+    raygun::community::{
+        Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType,
+        CommunityInvite, CommunityPermissions, Role,
+    },
+};
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CommunityInviteDocument {
+    pub id: Uuid,
+    pub target_user: Option<DID>,
+    pub created: DateTime<Utc>,
+    pub expiry: Option<DateTime<Utc>>,
+}
+impl CommunityInviteDocument {
+    pub fn new(target_user: Option<DID>, expiry: Option<DateTime<Utc>>) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            target_user,
+            created: Utc::now(),
+            expiry,
+        }
+    }
+}
+impl From<CommunityInviteDocument> for CommunityInvite {
+    fn from(value: CommunityInviteDocument) -> Self {
+        let mut community_invite = CommunityInvite::default();
+        community_invite.set_id(value.id);
+        community_invite.set_target_user(value.target_user);
+        community_invite.set_created(value.created);
+        community_invite.set_expiry(value.expiry);
+        community_invite
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CommunityDocument {
+    pub id: Uuid,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub creator: DID,
+    pub created: DateTime<Utc>,
+    pub modified: DateTime<Utc>,
+    pub members: IndexSet<DID>,
+    pub channels: IndexSet<Uuid>,
+    pub roles: IndexSet<Role>,
+    pub permissions: CommunityPermissions,
+    pub invites: IndexSet<Uuid>,
+}
+impl CommunityDocument {
+    pub fn new(keypair: &Keypair, name: String) -> Result<Self, Error> {
+        let did = keypair.to_did()?;
+        Ok(Self {
+            id: Uuid::new_v4(),
+            name,
+            description: None,
+            creator: did,
+            created: Utc::now(),
+            modified: Utc::now(),
+            members: IndexSet::new(),
+            channels: IndexSet::new(),
+            roles: IndexSet::new(),
+            permissions: CommunityPermissions::new(),
+            invites: IndexSet::new(),
+        })
+    }
+}
+impl From<CommunityDocument> for Community {
+    fn from(value: CommunityDocument) -> Self {
+        let mut community = Community::default();
+        community.set_id(value.id);
+        community.set_name(value.name);
+        community.set_description(value.description);
+        community.set_creator(value.creator);
+        community.set_created(value.created);
+        community.set_modified(value.modified);
+        community.set_members(value.members);
+        community.set_channels(value.channels);
+        community.set_roles(value.roles);
+        community.set_permissions(value.permissions);
+        community.set_invites(value.invites);
+        community
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CommunityChannelDocument {
+    pub id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub created: DateTime<Utc>,
+    pub modified: DateTime<Utc>,
+    pub channel_type: CommunityChannelType,
+    pub permissions: CommunityChannelPermissions,
+}
+impl CommunityChannelDocument {
+    pub fn new(
+        name: String,
+        description: Option<String>,
+        channel_type: CommunityChannelType,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            name,
+            description,
+            created: Utc::now(),
+            modified: Utc::now(),
+            channel_type,
+            permissions: CommunityChannelPermissions::new(),
+        }
+    }
+}
+impl From<CommunityChannelDocument> for CommunityChannel {
+    fn from(value: CommunityChannelDocument) -> Self {
+        let mut community_channel = CommunityChannel::default();
+        community_channel.set_id(value.id);
+        community_channel.set_name(value.name);
+        community_channel.set_description(value.description);
+        community_channel.set_created(value.created);
+        community_channel.set_modified(value.modified);
+        community_channel.set_channel_type(value.channel_type);
+        community_channel.set_permissions(value.permissions);
+        community_channel
+    }
+}

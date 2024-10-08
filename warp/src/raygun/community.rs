@@ -10,12 +10,17 @@ pub type Role = String;
 pub type CommunityPermissions = IndexMap<CommunityPermission, IndexSet<Role>>;
 pub type CommunityChannelPermissions = IndexMap<CommunityChannelPermission, IndexSet<Role>>;
 
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct CommunityInvite {
+    id: Uuid,
     target_user: Option<DID>,
     created: DateTime<Utc>,
     expiry: Option<DateTime<Utc>>,
 }
 impl CommunityInvite {
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
     pub fn target_user(&self) -> &Option<DID> {
         &self.target_user
     }
@@ -26,8 +31,22 @@ impl CommunityInvite {
         self.expiry
     }
 }
+impl CommunityInvite {
+    pub fn set_id(&mut self, id: Uuid) {
+        self.id = id;
+    }
+    pub fn set_target_user(&mut self, target_user: Option<DID>) {
+        self.target_user = target_user;
+    }
+    pub fn set_created(&mut self, created: DateTime<Utc>) {
+        self.created = created;
+    }
+    pub fn set_expiry(&mut self, expiry: Option<DateTime<Utc>>) {
+        self.expiry = expiry;
+    }
+}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Community {
     id: Uuid,
     name: String,
@@ -76,8 +95,43 @@ impl Community {
         &self.invites
     }
 }
+impl Community {
+    pub fn set_id(&mut self, id: Uuid) {
+        self.id = id;
+    }
+    pub fn set_name(&mut self, name: String) {
+        self.name = name;
+    }
+    pub fn set_description(&mut self, description: Option<String>) {
+        self.description = description;
+    }
+    pub fn set_creator(&mut self, creator: DID) {
+        self.creator = creator;
+    }
+    pub fn set_created(&mut self, created: DateTime<Utc>) {
+        self.created = created;
+    }
+    pub fn set_modified(&mut self, modified: DateTime<Utc>) {
+        self.modified = modified;
+    }
+    pub fn set_members(&mut self, members: IndexSet<DID>) {
+        self.members = members;
+    }
+    pub fn set_channels(&mut self, channels: IndexSet<Uuid>) {
+        self.channels = channels;
+    }
+    pub fn set_roles(&mut self, roles: IndexSet<Role>) {
+        self.roles = roles;
+    }
+    pub fn set_permissions(&mut self, permissions: CommunityPermissions) {
+        self.permissions = permissions;
+    }
+    pub fn set_invites(&mut self, invites: IndexSet<Uuid>) {
+        self.invites = invites;
+    }
+}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct CommunityChannel {
     id: Uuid,
     name: String,
@@ -111,8 +165,33 @@ impl CommunityChannel {
         &self.permissions
     }
 }
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+impl CommunityChannel {
+    pub fn set_id(&mut self, id: Uuid) {
+        self.id = id;
+    }
+    pub fn set_name(&mut self, name: String) {
+        self.name = name;
+    }
+    pub fn set_description(&mut self, description: Option<String>) {
+        self.description = description;
+    }
+    pub fn set_created(&mut self, created: DateTime<Utc>) {
+        self.created = created;
+    }
+    pub fn set_modified(&mut self, modified: DateTime<Utc>) {
+        self.modified = modified;
+    }
+    pub fn set_channel_type(&mut self, channel_type: CommunityChannelType) {
+        self.channel_type = channel_type;
+    }
+    pub fn set_permissions(&mut self, permissions: CommunityChannelPermissions) {
+        self.permissions = permissions;
+    }
+}
+
+#[derive(Default, Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum CommunityChannelType {
+    #[default]
     Standard,
     VoiceEnabled,
 }

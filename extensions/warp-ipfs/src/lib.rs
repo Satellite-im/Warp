@@ -59,8 +59,8 @@ use warp::multipass::{
 };
 use warp::raygun::{
     community::{
-        Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType, CommunityInvite, CommunityPermissions,
-        RayGunCommunity, Role,
+        Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType,
+        CommunityInvite, CommunityPermissions, RayGunCommunity, Role,
     },
     AttachmentEventStream, Conversation, ConversationImage, EmbedState, GroupPermissionOpt,
     Location, Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference,
