@@ -31,7 +31,7 @@ use super::{
     document::root::RootDocumentMap, event_subscription::EventSubscription,
     MAX_THUMBNAIL_STREAM_SIZE,
 };
-use crate::rt::{GlobalExecutor, LocalExecutor};
+use crate::rt::{Executor, LocalExecutor};
 use crate::{
     config::{self, Config},
     thumbnail::ThumbnailGenerator,
@@ -97,7 +97,7 @@ impl FileStore {
 
         let span = span.clone();
 
-        GlobalExecutor::dispatch(async move {
+        LocalExecutor.dispatch(async move {
             tokio::select! {
                 _ = task.run().instrument(span) => {}
                 _ = token.cancelled() => {}

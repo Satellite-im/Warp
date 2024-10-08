@@ -70,25 +70,3 @@ impl Executor for LocalExecutor {
         }
     }
 }
-
-#[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq, Eq)]
-pub struct GlobalExecutor;
-
-impl GlobalExecutor {
-    #[allow(dead_code)]
-    pub fn spawn<F>(future: F) -> JoinHandle<F::Output>
-    where
-        F: Future + Send + 'static,
-        F::Output: Send + 'static,
-    {
-        LocalExecutor::default().spawn(future)
-    }
-
-    pub fn dispatch<F>(future: F)
-    where
-        F: Future + Send + 'static,
-        F::Output: Send + 'static,
-    {
-        LocalExecutor::default().dispatch(future)
-    }
-}
