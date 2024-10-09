@@ -32,10 +32,14 @@ impl<T> Future for JoinHandle<T> {
 }
 
 pub trait Executor: Clone {
+    /// Spawns a new asynchronous task in the background, returning an Future ['JoinHandle'] for it.
     fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
     where
         F: Future + Send + 'static,
         F::Output: Send + 'static;
+
+    /// Spawns a new asynchronous task in the background without an handle.
+    /// Basically the same as [`Executor::spawn`]. 
     fn dispatch<F>(&self, future: F)
     where
         F: Future + Send + 'static,
