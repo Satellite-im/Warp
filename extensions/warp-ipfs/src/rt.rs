@@ -12,17 +12,19 @@ pub use tokio::task::JoinHandle;
 
 #[cfg(target_arch = "wasm32")]
 pub struct JoinHandle<T> {
-    inner: Option<Abortable<futures::channel::oneshot::Receiver<T>>>,
+    inner: Option<futures::channel::oneshot::Receiver<Result<T, Aborted>>>,
     handle: AbortHandle,
 }
 
 #[cfg(target_arch = "wasm32")]
 impl<T> JoinHandle<T> {
+    #[allow(dead_code)]
     pub fn abort(&mut self) {
         self.handle.abort();
         self.inner.take();
     }
 
+    #[allow(dead_code)]
     pub fn is_finished(&self) -> bool {
         self.handle.is_aborted() || self.inner.is_none()
     }
@@ -87,15 +89,14 @@ impl Executor for LocalExecutor {
         #[cfg(target_arch = "wasm32")]
         {
             let (abort_handle, abort_registration) = AbortHandle::new_pair();
+            let future = Abortable::new(future, abort_registration);
             let (tx, rx) = futures::channel::oneshot::channel();
             let fut = async {
                 let val = future.await;
                 _ = tx.send(val);
             };
 
-            let abortable_task = Abortable::new(fut, abort_registration);
-
-            wasm_bindgen_futures::spawn_local(abortable_task);
+            wasm_bindgen_futures::spawn_local(fut);
             JoinHandle {
                 inner: Some(rx),
                 handle: abort_handle,
