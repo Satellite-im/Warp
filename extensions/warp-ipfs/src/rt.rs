@@ -39,7 +39,7 @@ pub trait Executor: Clone {
         F::Output: Send + 'static;
 
     /// Spawns a new asynchronous task in the background without an handle.
-    /// Basically the same as [`Executor::spawn`]. 
+    /// Basically the same as [`Executor::spawn`].
     fn dispatch<F>(&self, future: F)
     where
         F: Future + Send + 'static,
