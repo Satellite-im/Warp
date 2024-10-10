@@ -77,6 +77,7 @@ impl<T> Future for JoinHandle<T> {
     }
 }
 
+#[derive(Clone)]
 pub struct AbortableJoinHandle<T> {
     handle: Arc<InnerJoinHandle<T>>,
 }
