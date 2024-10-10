@@ -1,19 +1,17 @@
 use std::{collections::HashSet, fmt::Debug, hash::Hash, sync::Arc, time::Duration};
 
 #[cfg(not(target_arch = "wasm32"))]
-use std::collections::{hash_map::Entry, HashMap};
-
-#[cfg(not(target_arch = "wasm32"))]
 use futures::StreamExt;
 use rust_ipfs::{libp2p::swarm::dial_opts::DialOpts, Ipfs, Multiaddr, PeerId};
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::{hash_map::Entry, HashMap};
 use tokio::sync::{broadcast, RwLock};
 
 #[cfg(not(target_arch = "wasm32"))]
 use rust_ipfs::p2p::MultiaddrExt;
 
-use crate::rt::{Executor, JoinHandle, LocalExecutor};
+use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
 
-use tokio_util::sync::{CancellationToken, DropGuard};
 use warp::{crypto::DID, error::Error};
 
 use crate::{
@@ -31,9 +29,10 @@ pub struct Discovery {
     ipfs: Ipfs,
     config: DiscoveryConfig,
     entries: Arc<RwLock<HashSet<DiscoveryEntry>>>,
-    task: Arc<RwLock<Option<JoinHandle<()>>>>,
+    task: Arc<RwLock<Option<AbortableJoinHandle<()>>>>,
     events: broadcast::Sender<DID>,
     relays: Vec<Multiaddr>,
+    executor: LocalExecutor,
 }
 
 impl Discovery {
@@ -46,6 +45,7 @@ impl Discovery {
             task: Arc::default(),
             events,
             relays: relays.to_vec(),
+            executor: LocalExecutor,
         }
     }
 
@@ -62,7 +62,7 @@ impl Discovery {
                     let namespace = namespace.clone().unwrap_or_else(|| "warp-mp-ipfs".into());
                     let cid = self.ipfs.put_dag(format!("discovery:{namespace}")).await?;
 
-                    let task = tokio::spawn({
+                    let task = self.executor.spawn_abortable({
                         let discovery = self.clone();
                         async move {
                             let mut cached = HashSet::new();
@@ -153,7 +153,7 @@ impl Discovery {
                         ));
                     }
 
-                    let task = tokio::spawn({
+                    let task = self.executor.spawn_abortable({
                         let discovery = self.clone();
                         let register_id = register_id;
                         async move {
@@ -336,7 +336,7 @@ pub struct DiscoveryEntry {
     ipfs: Ipfs,
     peer_id: PeerId,
     config: DiscoveryConfig,
-    drop_guard: Arc<RwLock<Option<DropGuard>>>,
+    drop_guard: Arc<RwLock<Option<AbortableJoinHandle<()>>>>,
     sender: broadcast::Sender<DID>,
     relays: Vec<Multiaddr>,
     executor: LocalExecutor,
@@ -381,9 +381,6 @@ impl DiscoveryEntry {
         if holder.is_some() {
             return;
         }
-
-        let token = CancellationToken::new();
-        let drop_guard = token.clone().drop_guard();
 
         let fut = {
             let entry = self.clone();
@@ -463,16 +460,9 @@ impl DiscoveryEntry {
             }
         };
 
-        self.executor.dispatch(async move {
-            futures::pin_mut!(fut);
+        let guard = self.executor.spawn_abortable(fut);
 
-            tokio::select! {
-                _ = token.cancelled() => {}
-                _ = &mut fut => {}
-            }
-        });
-
-        *holder = Some(drop_guard);
+        *holder = Some(guard);
     }
 
     /// Returns a peer id
@@ -483,7 +473,7 @@ impl DiscoveryEntry {
     pub async fn cancel(&self) {
         let task = std::mem::take(&mut *self.drop_guard.write().await);
         if let Some(guard) = task {
-            drop(guard)
+            guard.abort();
         }
     }
 }
