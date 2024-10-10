@@ -1,5 +1,7 @@
-#[allow(dead_code)]
-use futures::future::{AbortHandle, Abortable, Aborted};
+#[allow(unused_imports)]
+use futures::future::Abortable;
+
+use futures::future::{AbortHandle, Aborted};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -197,10 +199,9 @@ async fn default_abortable_task() {
         unreachable!();
     });
 
-    handle.abort();
     drop(handle);
     let result = rx.await;
-    assert_eq!(result.is_err(), true);
+    assert!(result.is_err());
 }
 
 #[test]
@@ -251,8 +252,8 @@ fn custom_abortable_task() {
             unreachable!();
         });
 
-        handle.abort();
+        drop(handle);
         let result = rx.await;
-        assert_eq!(result.is_err(), true);
+        assert!(result.is_err());
     });
 }
