@@ -1,66 +1,144 @@
+#[allow(dead_code)]
+use futures::future::{AbortHandle, Abortable, Aborted};
 use std::future::Future;
-#[cfg(target_arch = "wasm32")]
 use std::pin::Pin;
-#[cfg(target_arch = "wasm32")]
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
-#[cfg(target_arch = "wasm32")]
-use futures::future::{AbortHandle, Abortable, Aborted};
-
-#[cfg(not(target_arch = "wasm32"))]
-pub use tokio::task::JoinHandle;
-
-#[cfg(target_arch = "wasm32")]
-pub struct JoinHandle<T> {
-    inner: Option<futures::channel::oneshot::Receiver<Result<T, Aborted>>>,
-    handle: AbortHandle,
+pub enum JoinHandle<T> {
+    #[cfg(not(target_arch = "wasm32"))]
+    TokioHandle(tokio::task::JoinHandle<T>),
+    #[allow(dead_code)]
+    CustomHandle {
+        inner: Option<futures::channel::oneshot::Receiver<Result<T, Aborted>>>,
+        handle: AbortHandle,
+    },
 }
 
-#[cfg(target_arch = "wasm32")]
 impl<T> JoinHandle<T> {
     #[allow(dead_code)]
-    pub fn abort(&mut self) {
-        self.handle.abort();
-        self.inner.take();
+    pub fn abort(&self) {
+        match self {
+            #[cfg(not(target_arch = "wasm32"))]
+            JoinHandle::TokioHandle(handle) => handle.abort(),
+            JoinHandle::CustomHandle { handle, .. } => handle.abort(),
+        }
     }
 
     #[allow(dead_code)]
     pub fn is_finished(&self) -> bool {
-        self.handle.is_aborted() || self.inner.is_none()
+        match self {
+            #[cfg(not(target_arch = "wasm32"))]
+            JoinHandle::TokioHandle(handle) => handle.is_finished(),
+            JoinHandle::CustomHandle { handle, inner } => handle.is_aborted() || inner.is_none(),
+        }
     }
 }
 
-#[cfg(target_arch = "wasm32")]
 impl<T> Future for JoinHandle<T> {
     type Output = std::io::Result<T>;
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let Some(this) = self.inner.as_mut() else {
-            unreachable!("cannot poll completed future");
-        };
+        match &mut *self {
+            #[cfg(not(target_arch = "wasm32"))]
+            JoinHandle::TokioHandle(handle) => {
+                let fut = futures::ready!(Pin::new(handle).poll(cx));
 
-        let fut = futures::ready!(Pin::new(this).poll(cx));
-        self.inner.take();
-
-        match fut {
-            Ok(Ok(val)) => Poll::Ready(Ok(val)),
-            Ok(Err(e)) => {
-                let e = std::io::Error::other(e);
-                Poll::Ready(Err(e))
+                match fut {
+                    Ok(val) => Poll::Ready(Ok(val)),
+                    Err(e) => {
+                        let e = std::io::Error::other(e);
+                        Poll::Ready(Err(e))
+                    }
+                }
             }
-            Err(e) => {
-                let e = std::io::Error::other(e);
-                Poll::Ready(Err(e))
+            JoinHandle::CustomHandle { inner, .. } => {
+                let Some(this) = inner.as_mut() else {
+                    unreachable!("cannot poll completed future");
+                };
+
+                let fut = futures::ready!(Pin::new(this).poll(cx));
+                inner.take();
+
+                match fut {
+                    Ok(Ok(val)) => Poll::Ready(Ok(val)),
+                    Ok(Err(e)) => {
+                        let e = std::io::Error::other(e);
+                        Poll::Ready(Err(e))
+                    }
+                    Err(e) => {
+                        let e = std::io::Error::other(e);
+                        Poll::Ready(Err(e))
+                    }
+                }
             }
         }
     }
 }
 
-pub trait Executor: Clone {
+pub struct AbortableJoinHandle<T> {
+    handle: Arc<InnerJoinHandle<T>>,
+}
+
+impl<T> From<JoinHandle<T>> for AbortableJoinHandle<T> {
+    fn from(handle: JoinHandle<T>) -> Self {
+        AbortableJoinHandle {
+            handle: Arc::new(InnerJoinHandle {
+                inner: parking_lot::Mutex::new(handle),
+            }),
+        }
+    }
+}
+
+impl<T> AbortableJoinHandle<T> {
+    #[allow(dead_code)]
+    pub fn abort(&self) {
+        self.handle.inner.lock().abort();
+    }
+
+    #[allow(dead_code)]
+    pub fn is_finished(&self) -> bool {
+        self.handle.inner.lock().is_finished()
+    }
+}
+
+struct InnerJoinHandle<T> {
+    pub inner: parking_lot::Mutex<JoinHandle<T>>,
+}
+
+impl<T> Drop for InnerJoinHandle<T> {
+    fn drop(&mut self) {
+        self.inner.lock().abort();
+    }
+}
+
+impl<T> Future for AbortableJoinHandle<T> {
+    type Output = std::io::Result<T>;
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let inner = &mut *self.handle.inner.lock();
+        Pin::new(inner).poll(cx).map_err(std::io::Error::other)
+    }
+}
+
+pub trait Executor {
     /// Spawns a new asynchronous task in the background, returning an Future ['JoinHandle'] for it.
     fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
     where
         F: Future + Send + 'static,
         F::Output: Send + 'static;
+
+    /// Spawns a new asynchronous task in the background, returning an abortable handle that will cancel the task
+    /// once the handle is dropped.
+    ///
+    /// Note: This function is used if the task is expected to run until the handle is dropped. It is recommended to use
+    /// [`Executor::spawn`] or [`Executor::dispatch`] otherwise.
+    fn spawn_abortable<F>(&self, future: F) -> AbortableJoinHandle<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        let handle = self.spawn(future);
+        handle.into()
+    }
 
     /// Spawns a new asynchronous task in the background without an handle.
     /// Basically the same as [`Executor::spawn`].
@@ -84,7 +162,8 @@ impl Executor for LocalExecutor {
     {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            tokio::task::spawn(future)
+            let handle = tokio::task::spawn(future);
+            JoinHandle::TokioHandle(handle)
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -97,10 +176,83 @@ impl Executor for LocalExecutor {
             };
 
             wasm_bindgen_futures::spawn_local(fut);
-            JoinHandle {
+            JoinHandle::CustomHandle {
                 inner: Some(rx),
                 handle: abort_handle,
             }
         }
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[tokio::test]
+async fn default_abortable_task() {
+    let executor = LocalExecutor;
+
+    let (tx, rx) = futures::channel::oneshot::channel::<()>();
+
+    let handle = executor.spawn_abortable(async {
+        futures_timer::Delay::new(std::time::Duration::from_secs(5)).await;
+        _ = tx.send(());
+        unreachable!();
+    });
+
+    handle.abort();
+    drop(handle);
+    let result = rx.await;
+    assert_eq!(result.is_err(), true);
+}
+
+#[test]
+fn custom_abortable_task() {
+    use futures::future::Abortable;
+    struct FuturesExecutor {
+        pool: futures::executor::ThreadPool,
+    }
+
+    impl Default for FuturesExecutor {
+        fn default() -> Self {
+            Self {
+                pool: futures::executor::ThreadPool::new().unwrap(),
+            }
+        }
+    }
+
+    impl Executor for FuturesExecutor {
+        fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
+        where
+            F: Future + Send + 'static,
+            F::Output: Send + 'static,
+        {
+            let (abort_handle, abort_registration) = AbortHandle::new_pair();
+            let future = Abortable::new(future, abort_registration);
+            let (tx, rx) = futures::channel::oneshot::channel();
+            let fut = async {
+                let val = future.await;
+                _ = tx.send(val);
+            };
+
+            self.pool.spawn_ok(fut);
+            JoinHandle::CustomHandle {
+                inner: Some(rx),
+                handle: abort_handle,
+            }
+        }
+    }
+
+    futures::executor::block_on(async move {
+        let executor = FuturesExecutor::default();
+
+        let (tx, rx) = futures::channel::oneshot::channel::<()>();
+
+        let handle = executor.spawn_abortable(async {
+            futures_timer::Delay::new(std::time::Duration::from_secs(5)).await;
+            let _ = tx.send(());
+            unreachable!();
+        });
+
+        handle.abort();
+        let result = rx.await;
+        assert_eq!(result.is_err(), true);
+    });
 }
