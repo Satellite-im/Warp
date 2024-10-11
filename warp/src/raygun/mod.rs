@@ -14,6 +14,7 @@ use chrono::{DateTime, Utc};
 use core::ops::Range;
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeSet, HashSet};
 use std::fmt::Debug;
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -387,6 +388,155 @@ pub enum ConversationType {
 }
 
 pub type GroupPermissions = IndexMap<DID, IndexSet<GroupPermission>>;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
+pub enum GroupPermissionOpt {
+    Map(GroupPermissions),
+    Single((DID, IndexSet<GroupPermission>)),
+}
+
+impl Default for GroupPermissionOpt {
+    fn default() -> Self {
+        GroupPermissionOpt::Map(IndexMap::new())
+    }
+}
+
+impl From<GroupPermissions> for GroupPermissionOpt {
+    fn from(val: GroupPermissions) -> Self {
+        GroupPermissionOpt::Map(val)
+    }
+}
+
+impl From<&GroupPermissions> for GroupPermissionOpt {
+    fn from(val: &GroupPermissions) -> Self {
+        GroupPermissionOpt::Map(val.clone())
+    }
+}
+
+impl From<Vec<(DID, IndexSet<GroupPermission>)>> for GroupPermissionOpt {
+    fn from(val: Vec<(DID, IndexSet<GroupPermission>)>) -> Self {
+        GroupPermissionOpt::Map(IndexMap::from_iter(val))
+    }
+}
+
+impl From<Vec<(&DID, IndexSet<GroupPermission>)>> for GroupPermissionOpt {
+    fn from(val: Vec<(&DID, IndexSet<GroupPermission>)>) -> Self {
+        let val = val.into_iter().map(|(did, perms)| (did.clone(), perms));
+        GroupPermissionOpt::Map(IndexMap::from_iter(val))
+    }
+}
+
+impl From<Vec<(&DID, &IndexSet<GroupPermission>)>> for GroupPermissionOpt {
+    fn from(val: Vec<(&DID, &IndexSet<GroupPermission>)>) -> Self {
+        let val = val
+            .into_iter()
+            .map(|(did, perms)| (did.clone(), perms.clone()));
+        GroupPermissionOpt::Map(IndexMap::from_iter(val))
+    }
+}
+
+impl From<Vec<(&DID, &[GroupPermission])>> for GroupPermissionOpt {
+    fn from(val: Vec<(&DID, &[GroupPermission])>) -> Self {
+        let val = val
+            .into_iter()
+            .map(|(did, perms)| (did.clone(), IndexSet::from_iter(perms.iter().cloned())));
+        GroupPermissionOpt::Map(IndexMap::from_iter(val))
+    }
+}
+
+impl From<Vec<(DID, Vec<GroupPermission>)>> for GroupPermissionOpt {
+    fn from(val: Vec<(DID, Vec<GroupPermission>)>) -> Self {
+        let val = val
+            .into_iter()
+            .map(|(did, perms)| (did, IndexSet::from_iter(perms)));
+        GroupPermissionOpt::Map(IndexMap::from_iter(val))
+    }
+}
+
+impl From<Vec<(&DID, Vec<GroupPermission>)>> for GroupPermissionOpt {
+    fn from(val: Vec<(&DID, Vec<GroupPermission>)>) -> Self {
+        let val = val
+            .into_iter()
+            .map(|(did, perms)| (did.clone(), IndexSet::from_iter(perms)));
+        GroupPermissionOpt::Map(IndexMap::from_iter(val))
+    }
+}
+
+impl From<&[(DID, IndexSet<GroupPermission>)]> for GroupPermissionOpt {
+    fn from(val: &[(DID, IndexSet<GroupPermission>)]) -> Self {
+        GroupPermissionOpt::Map(IndexMap::from_iter(val.iter().cloned()))
+    }
+}
+
+impl From<&[(&DID, IndexSet<GroupPermission>)]> for GroupPermissionOpt {
+    fn from(val: &[(&DID, IndexSet<GroupPermission>)]) -> Self {
+        let val = val
+            .iter()
+            .map(|(did, perms)| (DID::clone(did), perms.clone()));
+        GroupPermissionOpt::Map(IndexMap::from_iter(val))
+    }
+}
+
+impl From<(DID, IndexSet<GroupPermission>)> for GroupPermissionOpt {
+    fn from((did, set): (DID, IndexSet<GroupPermission>)) -> Self {
+        GroupPermissionOpt::Single((did, set))
+    }
+}
+
+impl From<(&DID, IndexSet<GroupPermission>)> for GroupPermissionOpt {
+    fn from((did, set): (&DID, IndexSet<GroupPermission>)) -> Self {
+        GroupPermissionOpt::Single((did.clone(), set))
+    }
+}
+
+impl From<(DID, BTreeSet<GroupPermission>)> for GroupPermissionOpt {
+    fn from((did, set): (DID, BTreeSet<GroupPermission>)) -> Self {
+        GroupPermissionOpt::Single((did, IndexSet::from_iter(set)))
+    }
+}
+
+impl From<(&DID, BTreeSet<GroupPermission>)> for GroupPermissionOpt {
+    fn from((did, set): (&DID, BTreeSet<GroupPermission>)) -> Self {
+        GroupPermissionOpt::Single((did.clone(), IndexSet::from_iter(set)))
+    }
+}
+
+impl From<(DID, HashSet<GroupPermission>)> for GroupPermissionOpt {
+    fn from((did, set): (DID, HashSet<GroupPermission>)) -> Self {
+        GroupPermissionOpt::Single((did, IndexSet::from_iter(set)))
+    }
+}
+
+impl From<(&DID, HashSet<GroupPermission>)> for GroupPermissionOpt {
+    fn from((did, set): (&DID, HashSet<GroupPermission>)) -> Self {
+        GroupPermissionOpt::Single((did.clone(), IndexSet::from_iter(set)))
+    }
+}
+
+impl From<(DID, Vec<GroupPermission>)> for GroupPermissionOpt {
+    fn from((did, set): (DID, Vec<GroupPermission>)) -> Self {
+        GroupPermissionOpt::Single((did, IndexSet::from_iter(set)))
+    }
+}
+
+impl From<(&DID, Vec<GroupPermission>)> for GroupPermissionOpt {
+    fn from((did, set): (&DID, Vec<GroupPermission>)) -> Self {
+        GroupPermissionOpt::Single((did.clone(), IndexSet::from_iter(set)))
+    }
+}
+
+impl From<(DID, &[GroupPermission])> for GroupPermissionOpt {
+    fn from((did, set): (DID, &[GroupPermission])) -> Self {
+        GroupPermissionOpt::Single((did, IndexSet::from_iter(set.iter().copied())))
+    }
+}
+
+impl From<(&DID, &[GroupPermission])> for GroupPermissionOpt {
+    fn from((did, set): (&DID, &[GroupPermission])) -> Self {
+        GroupPermissionOpt::Single((did.clone(), IndexSet::from_iter(set.iter().copied())))
+    }
+}
 
 pub trait ImplGroupPermissions {
     /// Returns true if the permissions exists for the user
@@ -1070,11 +1220,11 @@ pub trait RayGun:
         Err(Error::Unimplemented)
     }
 
-    async fn create_group_conversation(
+    async fn create_group_conversation<P: Into<GroupPermissionOpt> + Send + Sync>(
         &mut self,
         _: Option<String>,
         _: Vec<DID>,
-        _: GroupPermissions,
+        _: P,
     ) -> Result<Conversation, Error> {
         Err(Error::Unimplemented)
     }
@@ -1181,10 +1331,10 @@ pub trait RayGun:
     ) -> Result<(), Error>;
 
     /// Update conversation permissions
-    async fn update_conversation_permissions(
+    async fn update_conversation_permissions<P: Into<GroupPermissionOpt> + Send + Sync>(
         &mut self,
         conversation_id: Uuid,
-        permissions: GroupPermissions,
+        permissions: P,
     ) -> Result<(), Error>;
 
     /// Provides [`ConversationImage`] of the conversation icon

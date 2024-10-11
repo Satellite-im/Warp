@@ -16,10 +16,10 @@ use crate::multipass::{
     MultiPass, MultiPassEvent, MultiPassEventStream, MultiPassImportExport,
 };
 use crate::raygun::{
-    AttachmentEventStream, Conversation, ConversationImage, EmbedState, GroupPermissions, Location,
-    Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus,
-    Messages, PinState, RayGun, RayGunAttachment, RayGunConversationInformation, RayGunEventStream,
-    RayGunEvents, RayGunGroupConversation, RayGunStream, ReactionState,
+    AttachmentEventStream, Conversation, ConversationImage, EmbedState, GroupPermissionOpt,
+    Location, Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference,
+    MessageStatus, Messages, PinState, RayGun, RayGunAttachment, RayGunConversationInformation,
+    RayGunEventStream, RayGunEvents, RayGunGroupConversation, RayGunStream, ReactionState,
 };
 use crate::tesseract::Tesseract;
 use crate::warp::dummy::Dummy;
@@ -684,11 +684,11 @@ where
         self.raygun.create_conversation(identity).await
     }
 
-    async fn create_group_conversation(
+    async fn create_group_conversation<P: Into<GroupPermissionOpt> + Send + Sync>(
         &mut self,
         name: Option<String>,
         members: Vec<DID>,
-        permissions: GroupPermissions,
+        permissions: P,
     ) -> Result<Conversation, Error> {
         self.raygun
             .create_group_conversation(name, members, permissions)
@@ -817,10 +817,10 @@ where
         unreachable!()
     }
 
-    async fn update_conversation_permissions(
+    async fn update_conversation_permissions<P: Into<GroupPermissionOpt> + Send + Sync>(
         &mut self,
         conversation_id: Uuid,
-        permissions: GroupPermissions,
+        permissions: P,
     ) -> Result<(), Error> {
         self.raygun
             .update_conversation_permissions(conversation_id, permissions)

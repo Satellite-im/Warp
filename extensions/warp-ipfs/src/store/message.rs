@@ -23,7 +23,9 @@ use futures::{
     stream::{self, BoxStream, FuturesUnordered, SelectAll},
     FutureExt, SinkExt, Stream, StreamExt, TryFutureExt,
 };
+use indexmap::IndexMap;
 use ipld_core::cid::Cid;
+
 use rust_ipfs::{libp2p::gossipsub::Message, p2p::MultiaddrExt, Ipfs, IpfsPath, Keypair, PeerId};
 
 use serde::{Deserialize, Serialize};
@@ -61,7 +63,8 @@ use crate::{
     },
 };
 
-use warp::raygun::{ConversationImage, GroupPermission, GroupPermissions};
+use crate::rt::{Executor, LocalExecutor};
+use warp::raygun::{ConversationImage, GroupPermission, GroupPermissionOpt};
 use warp::{
     constellation::{directory::Directory, ConstellationProgressStream, Progression},
     crypto::{cipher::Cipher, generate, DID},
@@ -100,6 +103,7 @@ impl MessageStore {
         identity: &IdentityStore,
         message_command: mpsc::Sender<MessageCommand>,
     ) -> Self {
+        let executor = LocalExecutor;
         info!("Initializing MessageStore");
 
         let (tx, rx) = futures::channel::mpsc::channel(1024);
@@ -126,6 +130,7 @@ impl MessageStore {
             pending_key_exchange: Default::default(),
             message_command,
             queue: Default::default(),
+            executor,
         };
 
         if let Err(e) = inner.migrate().await {
@@ -146,7 +151,7 @@ impl MessageStore {
             conversation_mailbox_task_rx,
         };
 
-        crate::rt::spawn({
+        executor.dispatch({
             async move {
                 select! {
                     _ = token.cancelled() => {}
@@ -238,11 +243,11 @@ impl MessageStore {
         inner.create_conversation(did).await
     }
 
-    pub async fn create_group_conversation(
+    pub async fn create_group_conversation<P: Into<GroupPermissionOpt> + Send + Sync>(
         &self,
         name: Option<String>,
         members: HashSet<DID>,
-        permissions: GroupPermissions,
+        permissions: P,
     ) -> Result<Conversation, Error> {
         let inner = &mut *self.inner.write().await;
         inner
@@ -313,10 +318,10 @@ impl MessageStore {
         inner.update_conversation_name(conversation_id, name).await
     }
 
-    pub async fn update_conversation_permissions(
+    pub async fn update_conversation_permissions<P: Into<GroupPermissionOpt> + Send + Sync>(
         &self,
         conversation_id: Uuid,
-        permissions: GroupPermissions,
+        permissions: P,
     ) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
         inner
@@ -719,6 +724,7 @@ struct ConversationInner {
     message_command: mpsc::Sender<MessageCommand>,
     // Note: Temporary
     queue: HashMap<DID, Vec<Queue>>,
+    executor: LocalExecutor,
 }
 
 impl ConversationInner {
@@ -780,6 +786,7 @@ impl ConversationInner {
             let message_command =  self.message_command.clone();
             let addresses = addresses.clone();
             let conversation_id = conversation.id;
+            let executor = self.executor;
             async move {
                 let fut = async move {
                     let mut conversation_mailbox = BTreeMap::new();
@@ -866,7 +873,7 @@ impl ConversationInner {
                 };
 
 
-                crate::rt::spawn(async move {
+                executor.dispatch(async move {
                     let result = fut.await;
                     let _ = tx.send(result).await;
                 });
@@ -1037,11 +1044,11 @@ impl ConversationInner {
         Ok(Conversation::from(&conversation))
     }
 
-    pub async fn create_group_conversation(
+    pub async fn create_group_conversation<P: Into<GroupPermissionOpt> + Send + Sync>(
         &mut self,
         name: Option<String>,
         mut recipients: HashSet<DID>,
-        permissions: GroupPermissions,
+        permissions: P,
     ) -> Result<Conversation, Error> {
         let own_did = &self.identity.did_key();
 
@@ -1090,7 +1097,12 @@ impl ConversationInner {
 
         let restricted = self.root.get_blocks().await.unwrap_or_default();
 
-        let conversation = ConversationDocument::new_group(
+        let permissions = match permissions.into() {
+            GroupPermissionOpt::Map(permissions) => permissions,
+            GroupPermissionOpt::Single((id, set)) => IndexMap::from_iter(vec![(id, set)]),
+        };
+
+        let mut conversation = ConversationDocument::new_group(
             self.root.keypair(),
             name,
             recipients,
@@ -1102,7 +1114,7 @@ impl ConversationInner {
 
         let conversation_id = conversation.id();
 
-        self.set_document(conversation).await?;
+        self.set_document(&mut conversation).await?;
 
         let mut keystore = Keystore::new(conversation_id);
         keystore.insert(self.root.keypair(), own_did, warp::crypto::generate::<64>())?;
@@ -1117,8 +1129,6 @@ impl ConversationInner {
             .map(|did| (did.clone(), did))
             .filter_map(|(a, b)| b.to_peer_id().map(|pk| (a, pk)).ok())
             .collect::<Vec<_>>();
-
-        let conversation = self.get(conversation_id).await?;
 
         let event = serde_json::to_vec(&ConversationEvents::NewGroupConversation {
             conversation: conversation.clone(),
@@ -2613,9 +2623,7 @@ impl ConversationInner {
 
         conversation.description = desc.map(ToString::to_string);
 
-        self.set_document(conversation).await?;
-
-        let conversation = self.get(conversation_id).await?;
+        self.set_document(&mut conversation).await?;
 
         let ev = MessageEventKind::ConversationDescriptionChanged {
             conversation_id,
@@ -2668,9 +2676,7 @@ impl ConversationInner {
 
         conversation.restrict.push(did_key.clone());
 
-        self.set_document(conversation).await?;
-
-        let conversation = self.get(conversation_id).await?;
+        self.set_document(&mut conversation).await?;
 
         let event = MessagingEvents::UpdateConversation {
             conversation,
@@ -2717,9 +2723,7 @@ impl ConversationInner {
             .restrict
             .retain(|restricted| restricted != did_key);
 
-        self.set_document(conversation).await?;
-
-        let conversation = self.get(conversation_id).await?;
+        self.set_document(&mut conversation).await?;
 
         let event = MessagingEvents::UpdateConversation {
             conversation,
@@ -2772,9 +2776,7 @@ impl ConversationInner {
 
         conversation.name = (!name.is_empty()).then_some(name.to_string());
 
-        self.set_document(conversation).await?;
-
-        let conversation = self.get(conversation_id).await?;
+        self.set_document(&mut conversation).await?;
 
         let new_name = conversation.name();
 
@@ -3071,9 +3073,7 @@ impl ConversationInner {
 
         conversation.recipients.push(did_key.clone());
 
-        self.set_document(conversation).await?;
-
-        let conversation = self.get(conversation_id).await?;
+        self.set_document(&mut conversation).await?;
 
         let event = MessagingEvents::UpdateConversation {
             conversation: conversation.clone(),
@@ -3129,12 +3129,10 @@ impl ConversationInner {
         }
 
         conversation.recipients.retain(|did| did.ne(did_key));
-        self.set_document(conversation).await?;
-
-        let conversation = self.get(conversation_id).await?;
+        self.set_document(&mut conversation).await?;
 
         let event = MessagingEvents::UpdateConversation {
-            conversation: conversation.clone(),
+            conversation,
             kind: ConversationUpdateKind::RemoveParticipant {
                 did: did_key.clone(),
             },
@@ -3398,10 +3396,10 @@ impl ConversationInner {
         Ok(())
     }
 
-    pub async fn update_conversation_permissions(
+    pub async fn update_conversation_permissions<P: Into<GroupPermissionOpt> + Send + Sync>(
         &mut self,
         conversation_id: Uuid,
-        permissions: GroupPermissions,
+        permissions: P,
     ) -> Result<(), Error> {
         let mut conversation = self.get(conversation_id).await?;
         let own_did = self.identity.did_key();
@@ -3412,6 +3410,18 @@ impl ConversationInner {
         if creator != &own_did {
             return Err(Error::PublicKeyInvalid);
         }
+
+        let permissions = match permissions.into() {
+            GroupPermissionOpt::Map(permissions) => permissions,
+            GroupPermissionOpt::Single((id, set)) => {
+                let permissions = conversation.permissions.clone();
+                {
+                    let permissions = conversation.permissions.entry(id).or_default();
+                    *permissions = set;
+                }
+                permissions
+            }
+        };
 
         let (added, removed) = conversation.permissions.compare_with_new(&permissions);
 
@@ -3597,7 +3607,7 @@ impl ConversationInner {
         let token = CancellationToken::new();
         let drop_guard = token.clone().drop_guard();
 
-        crate::rt::spawn(async move {
+        self.executor.dispatch(async move {
             loop {
                 tokio::select! {
                     _ = token.cancelled() => {

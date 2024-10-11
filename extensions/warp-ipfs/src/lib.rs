@@ -24,6 +24,7 @@ use tracing::{error, info, warn, Instrument, Span};
 use uuid::Uuid;
 
 use crate::config::{Bootstrap, DiscoveryType};
+use crate::rt::{Executor, LocalExecutor};
 use crate::store::discovery::Discovery;
 use crate::store::phonebook::PhoneBook;
 use crate::store::{ecdh_decrypt, PeerIdExt};
@@ -57,10 +58,11 @@ use warp::multipass::{
     MultiPassImportExport,
 };
 use warp::raygun::{
-    AttachmentEventStream, Conversation, ConversationImage, EmbedState, GroupPermissions, Location,
-    Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference, MessageStatus,
-    Messages, PinState, RayGun, RayGunAttachment, RayGunConversationInformation, RayGunEventKind,
-    RayGunEventStream, RayGunEvents, RayGunGroupConversation, RayGunStream, ReactionState,
+    AttachmentEventStream, Conversation, ConversationImage, EmbedState, GroupPermissionOpt,
+    Location, Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference,
+    MessageStatus, Messages, PinState, RayGun, RayGunAttachment, RayGunConversationInformation,
+    RayGunEventKind, RayGunEventStream, RayGunEvents, RayGunGroupConversation, RayGunStream,
+    ReactionState,
 };
 use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::warp::Warp;
@@ -83,6 +85,7 @@ pub struct WarpIpfs {
     multipass_tx: EventSubscription<MultiPassEventKind>,
     raygun_tx: EventSubscription<RayGunEventKind>,
     constellation_tx: EventSubscription<ConstellationEventKind>,
+    executor: LocalExecutor,
 }
 
 pub type WarpIpfsInstance = Warp<WarpIpfs, WarpIpfs, WarpIpfs>;
@@ -180,11 +183,13 @@ impl WarpIpfs {
             multipass_tx,
             raygun_tx,
             constellation_tx,
+            executor: LocalExecutor,
         };
 
         if !identity.tesseract.is_unlock() {
             let inner = identity.clone();
-            crate::rt::spawn(async move {
+            let executor = inner.executor;
+            executor.dispatch(async move {
                 let mut stream = inner.tesseract.subscribe();
                 while let Some(event) = stream.next().await {
                     if matches!(event, TesseractEvent::Unlocked) {
@@ -500,7 +505,7 @@ impl WarpIpfs {
             };
 
             if self.inner.config.ipfs_setting().relay_client.background {
-                crate::rt::spawn(relay_connection_task);
+                self.executor.dispatch(relay_connection_task);
             } else {
                 relay_connection_task.await;
             }
@@ -536,7 +541,7 @@ impl WarpIpfs {
             }
 
             if !empty_bootstrap {
-                crate::rt::spawn({
+                self.executor.dispatch({
                     let ipfs = ipfs.clone();
                     async move {
                         loop {
@@ -1402,11 +1407,11 @@ impl RayGun for WarpIpfs {
         self.messaging_store()?.create_conversation(did_key).await
     }
 
-    async fn create_group_conversation(
+    async fn create_group_conversation<P: Into<GroupPermissionOpt> + Send + Sync>(
         &mut self,
         name: Option<String>,
         recipients: Vec<DID>,
-        permissions: GroupPermissions,
+        permissions: P,
     ) -> Result<Conversation, Error> {
         self.messaging_store()?
             .create_group_conversation(name, HashSet::from_iter(recipients), permissions)
@@ -1552,10 +1557,10 @@ impl RayGun for WarpIpfs {
         Err(Error::Unimplemented)
     }
 
-    async fn update_conversation_permissions(
+    async fn update_conversation_permissions<P: Into<GroupPermissionOpt> + Send + Sync>(
         &mut self,
         conversation_id: Uuid,
-        permissions: GroupPermissions,
+        permissions: P,
     ) -> Result<(), Error> {
         self.messaging_store()?
             .update_conversation_permissions(conversation_id, permissions)

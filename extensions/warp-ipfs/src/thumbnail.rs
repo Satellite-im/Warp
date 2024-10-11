@@ -1,5 +1,4 @@
 use bytes::Bytes;
-use futures::channel::oneshot;
 use image::{
     codecs::gif::{GifDecoder, GifEncoder, Repeat},
     AnimationDecoder, DynamicImage, Frame, ImageFormat, ImageReader,
@@ -28,6 +27,7 @@ use tokio::sync::Mutex;
 use warp::{constellation::file::FileType, error::Error};
 use web_time::Instant;
 
+use crate::rt::{Executor, LocalExecutor};
 use crate::utils::ByteCollection;
 use crate::{store::document::image_dag::ImageDag, utils::ExtensionType};
 
@@ -55,15 +55,14 @@ impl Default for ThumbnailId {
     }
 }
 
-type TaskMap = BTreeMap<
-    ThumbnailId,
-    futures::channel::oneshot::Receiver<Result<(ExtensionType, IpfsPath, Bytes), Error>>,
->;
+type TaskMap =
+    BTreeMap<ThumbnailId, crate::rt::JoinHandle<Result<(ExtensionType, IpfsPath, Bytes), Error>>>;
 
 #[derive(Clone)]
 pub struct ThumbnailGenerator {
     ipfs: Ipfs,
     tasks: Arc<Mutex<TaskMap>>,
+    executor: LocalExecutor,
 }
 
 impl ThumbnailGenerator {
@@ -71,6 +70,7 @@ impl ThumbnailGenerator {
         Self {
             ipfs: ipfs.clone(),
             tasks: Arc::default(),
+            executor: LocalExecutor,
         }
     }
 
@@ -92,65 +92,60 @@ impl ThumbnailGenerator {
 
         let ipfs = self.ipfs.clone();
 
-        let (tx, rx) = oneshot::channel();
-        crate::rt::spawn(async move {
-            let res = async move {
-                let instance = Instant::now();
-                //TODO: Read file header to determine real file type for anything like images, videos and documents.
-                let extension = own_path
-                    .extension()
-                    .and_then(OsStr::to_str)
-                    .map(ExtensionType::from)
-                    .unwrap_or(ExtensionType::Other);
+        let handle = self.executor.spawn(async move {
+            let instance = Instant::now();
+            //TODO: Read file header to determine real file type for anything like images, videos and documents.
+            let extension = own_path
+                .extension()
+                .and_then(OsStr::to_str)
+                .map(ExtensionType::from)
+                .unwrap_or(ExtensionType::Other);
 
-                let result = match extension.into() {
-                    FileType::Mime(media) => match media.ty().as_str() {
-                        "image" => tokio::task::spawn_blocking(move || {
-                            let format: ImageFormat = extension.try_into()?;
-                            let file = io::BufReader::new(std::fs::File::open(own_path)?);
-                            let output_format = match (output_exact, format) {
-                                (false, _) => ImageFormat::Jpeg,
-                                (true, format) => format,
-                            };
-                            let t_buffer = generate_thumbnail(file, output_format, width, height)?;
-                            Ok::<_, Error>((
-                                ExtensionType::try_from(output_format)?,
-                                Bytes::from(t_buffer.into_inner()),
-                            ))
-                        })
-                        .await
-                        .map_err(anyhow::Error::from)?,
-                        _ => Err(Error::Unimplemented),
-                    },
-                    _ => Err(Error::Other),
-                };
-
-                let stop = instance.elapsed();
-
-                tracing::trace!("Took: {}ms to complete task for {}", stop.as_millis(), id);
-
-                let (ty, data) = result?;
-
-                let size = data.len();
-
-                let path = ipfs.add_unixfs(data.clone()).await?;
-
-                let link = *path.root().cid().expect("valid cid");
-
-                let image_dag = ImageDag {
-                    link,
-                    size: size as _,
-                    mime: ty.into(),
-                };
-
-                let cid = ipfs.put_dag(image_dag).await?;
-                Ok((ty, IpfsPath::from(cid), data))
+            let result = match extension.into() {
+                FileType::Mime(media) => match media.ty().as_str() {
+                    "image" => tokio::task::spawn_blocking(move || {
+                        let format: ImageFormat = extension.try_into()?;
+                        let file = io::BufReader::new(std::fs::File::open(own_path)?);
+                        let output_format = match (output_exact, format) {
+                            (false, _) => ImageFormat::Jpeg,
+                            (true, format) => format,
+                        };
+                        let t_buffer = generate_thumbnail(file, output_format, width, height)?;
+                        Ok::<_, Error>((
+                            ExtensionType::try_from(output_format)?,
+                            Bytes::from(t_buffer.into_inner()),
+                        ))
+                    })
+                    .await
+                    .map_err(anyhow::Error::from)?,
+                    _ => Err(Error::Unimplemented),
+                },
+                _ => Err(Error::Other),
             };
 
-            _ = tx.send(res.await)
+            let stop = instance.elapsed();
+
+            tracing::trace!("Took: {}ms to complete task for {}", stop.as_millis(), id);
+
+            let (ty, data) = result?;
+
+            let size = data.len();
+
+            let path = ipfs.add_unixfs(data.clone()).await?;
+
+            let link = *path.root().cid().expect("valid cid");
+
+            let image_dag = ImageDag {
+                link,
+                size: size as _,
+                mime: ty.into(),
+            };
+
+            let cid = ipfs.put_dag(image_dag).await?;
+            Ok((ty, IpfsPath::from(cid), data))
         });
 
-        self.tasks.lock().await.insert(id, rx);
+        self.tasks.lock().await.insert(id, handle);
 
         Ok(id)
     }
@@ -180,64 +175,59 @@ impl ThumbnailGenerator {
 
         let ipfs = self.ipfs.clone();
 
-        let (tx, rx) = oneshot::channel();
-        crate::rt::spawn(async move {
-            let res = async move {
-                let instant = Instant::now();
+        let handle = self.executor.spawn(async move {
+            let instant = Instant::now();
 
-                let extension = name
-                    .extension()
-                    .and_then(OsStr::to_str)
-                    .map(ExtensionType::from)
-                    .unwrap_or(ExtensionType::Other);
+            let extension = name
+                .extension()
+                .and_then(OsStr::to_str)
+                .map(ExtensionType::from)
+                .unwrap_or(ExtensionType::Other);
 
-                let result = match extension.into() {
-                    FileType::Mime(media) => match media.ty().as_str() {
-                        "image" => {
-                            let format: ImageFormat = extension.try_into()?;
+            let result = match extension.into() {
+                FileType::Mime(media) => match media.ty().as_str() {
+                    "image" => {
+                        let format: ImageFormat = extension.try_into()?;
 
-                            let data = bytes.await.map(|b| b.to_vec())?;
-                            let cursor = Cursor::new(data);
-                            let output_format = match (output_exact, format) {
-                                (false, _) => ImageFormat::Jpeg,
-                                (true, format) => format,
-                            };
-                            let t_buffer =
-                                generate_thumbnail(cursor, output_format, width, height)?;
-                            Ok::<_, Error>((
-                                ExtensionType::try_from(output_format)?,
-                                Bytes::from(t_buffer.into_inner()),
-                            ))
-                        }
-                        _ => Err(Error::Unimplemented),
-                    },
-                    _ => Err(Error::Other),
-                };
-
-                let stop = instant.elapsed();
-
-                let (ty, data) = result?;
-
-                tracing::trace!("Took: {}ms to complete for {}", stop.as_millis(), id);
-
-                let path = ipfs.add_unixfs(data.clone()).await?;
-
-                let link = *path.root().cid().expect("valid cid");
-
-                let image_dag = ImageDag {
-                    link,
-                    size: data.len() as _,
-                    mime: ty.into(),
-                };
-
-                let cid = ipfs.put_dag(image_dag).await?;
-
-                Ok((ty, IpfsPath::from(cid), data))
+                        let data = bytes.await.map(|b| b.to_vec())?;
+                        let cursor = Cursor::new(data);
+                        let output_format = match (output_exact, format) {
+                            (false, _) => ImageFormat::Jpeg,
+                            (true, format) => format,
+                        };
+                        let t_buffer = generate_thumbnail(cursor, output_format, width, height)?;
+                        Ok::<_, Error>((
+                            ExtensionType::try_from(output_format)?,
+                            Bytes::from(t_buffer.into_inner()),
+                        ))
+                    }
+                    _ => Err(Error::Unimplemented),
+                },
+                _ => Err(Error::Other),
             };
-            _ = tx.send(res.await);
+
+            let stop = instant.elapsed();
+
+            let (ty, data) = result?;
+
+            tracing::trace!("Took: {}ms to complete for {}", stop.as_millis(), id);
+
+            let path = ipfs.add_unixfs(data.clone()).await?;
+
+            let link = *path.root().cid().expect("valid cid");
+
+            let image_dag = ImageDag {
+                link,
+                size: data.len() as _,
+                mime: ty.into(),
+            };
+
+            let cid = ipfs.put_dag(image_dag).await?;
+
+            Ok((ty, IpfsPath::from(cid), data))
         });
 
-        self.tasks.lock().await.insert(id, rx);
+        self.tasks.lock().await.insert(id, handle);
 
         id
     }
@@ -258,61 +248,56 @@ impl ThumbnailGenerator {
 
         let ipfs = self.ipfs.clone();
 
-        let (tx, rx) = oneshot::channel();
-        crate::rt::spawn(async move {
-            let res = async move {
-                let instance = Instant::now();
+        let handle = self.executor.spawn(async move {
+            let instance = Instant::now();
 
-                let extension = name
-                    .extension()
-                    .and_then(OsStr::to_str)
-                    .map(ExtensionType::from)
-                    .unwrap_or(ExtensionType::Other);
+            let extension = name
+                .extension()
+                .and_then(OsStr::to_str)
+                .map(ExtensionType::from)
+                .unwrap_or(ExtensionType::Other);
 
-                let result = match extension.into() {
-                    FileType::Mime(media) => match media.ty().as_str() {
-                        "image" => {
-                            let format: ImageFormat = extension.try_into()?;
-                            let output_format = match (output_exact, format) {
-                                (false, _) => ImageFormat::Jpeg,
-                                (true, format) => format,
-                            };
-                            let t_buffer =
-                                generate_thumbnail(buffer, output_format, width, height)?;
-                            Ok::<_, Error>((
-                                ExtensionType::try_from(output_format)?,
-                                Bytes::from(t_buffer.into_inner()),
-                            ))
-                        }
-                        _ => Err(Error::Unimplemented),
-                    },
-                    _ => Err(Error::Other),
-                };
-
-                let stop = instance.elapsed();
-
-                let (ty, data) = result?;
-
-                tracing::trace!("Took: {}ms to complete for {}", stop.as_millis(), id);
-
-                let path = ipfs.add_unixfs(data.clone()).await?;
-
-                let link = *path.root().cid().expect("valid cid");
-
-                let image_dag = ImageDag {
-                    link,
-                    size: data.len() as _,
-                    mime: ty.into(),
-                };
-
-                let cid = ipfs.put_dag(image_dag).await?;
-
-                Ok((ty, IpfsPath::from(cid), data))
+            let result = match extension.into() {
+                FileType::Mime(media) => match media.ty().as_str() {
+                    "image" => {
+                        let format: ImageFormat = extension.try_into()?;
+                        let output_format = match (output_exact, format) {
+                            (false, _) => ImageFormat::Jpeg,
+                            (true, format) => format,
+                        };
+                        let t_buffer = generate_thumbnail(buffer, output_format, width, height)?;
+                        Ok::<_, Error>((
+                            ExtensionType::try_from(output_format)?,
+                            Bytes::from(t_buffer.into_inner()),
+                        ))
+                    }
+                    _ => Err(Error::Unimplemented),
+                },
+                _ => Err(Error::Other),
             };
-            _ = tx.send(res.await);
+
+            let stop = instance.elapsed();
+
+            let (ty, data) = result?;
+
+            tracing::trace!("Took: {}ms to complete for {}", stop.as_millis(), id);
+
+            let path = ipfs.add_unixfs(data.clone()).await?;
+
+            let link = *path.root().cid().expect("valid cid");
+
+            let image_dag = ImageDag {
+                link,
+                size: data.len() as _,
+                mime: ty.into(),
+            };
+
+            let cid = ipfs.put_dag(image_dag).await?;
+
+            Ok((ty, IpfsPath::from(cid), data))
         });
 
-        self.tasks.lock().await.insert(id, rx);
+        self.tasks.lock().await.insert(id, handle);
 
         id
     }
