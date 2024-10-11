@@ -2625,9 +2625,7 @@ impl ConversationInner {
 
         conversation.description = desc.map(ToString::to_string);
 
-        self.set_document(conversation).await?;
-
-        let conversation = self.get(conversation_id).await?;
+        self.set_document(&mut conversation).await?;
 
         let ev = MessageEventKind::ConversationDescriptionChanged {
             conversation_id,
@@ -2680,9 +2678,7 @@ impl ConversationInner {
 
         conversation.restrict.push(did_key.clone());
 
-        self.set_document(conversation).await?;
-
-        let conversation = self.get(conversation_id).await?;
+        self.set_document(&mut conversation).await?;
 
         let event = MessagingEvents::UpdateConversation {
             conversation,
@@ -2729,9 +2725,7 @@ impl ConversationInner {
             .restrict
             .retain(|restricted| restricted != did_key);
 
-        self.set_document(conversation).await?;
-
-        let conversation = self.get(conversation_id).await?;
+        self.set_document(&mut conversation).await?;
 
         let event = MessagingEvents::UpdateConversation {
             conversation,
@@ -2784,9 +2778,7 @@ impl ConversationInner {
 
         conversation.name = (!name.is_empty()).then_some(name.to_string());
 
-        self.set_document(conversation).await?;
-
-        let conversation = self.get(conversation_id).await?;
+        self.set_document(&mut conversation).await?;
 
         let new_name = conversation.name();
 
@@ -3083,9 +3075,7 @@ impl ConversationInner {
 
         conversation.recipients.push(did_key.clone());
 
-        self.set_document(conversation).await?;
-
-        let conversation = self.get(conversation_id).await?;
+        self.set_document(&mut conversation).await?;
 
         let event = MessagingEvents::UpdateConversation {
             conversation: conversation.clone(),
@@ -3141,12 +3131,10 @@ impl ConversationInner {
         }
 
         conversation.recipients.retain(|did| did.ne(did_key));
-        self.set_document(conversation).await?;
-
-        let conversation = self.get(conversation_id).await?;
+        self.set_document(&mut conversation).await?;
 
         let event = MessagingEvents::UpdateConversation {
-            conversation: conversation.clone(),
+            conversation,
             kind: ConversationUpdateKind::RemoveParticipant {
                 did: did_key.clone(),
             },
