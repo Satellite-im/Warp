@@ -31,6 +31,8 @@ pub enum Error {
     ItemNotDirectory,
     #[error("Attempted conversion is invalid")]
     InvalidConversion,
+    #[error("Attempted community is invalid")]
+    InvalidCommunity,
     #[error("Path supplied is invalid")]
     InvalidPath,
     #[error("Directory already exist")]

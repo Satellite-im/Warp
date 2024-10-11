@@ -12,6 +12,7 @@ pub mod phonebook;
 pub mod queue;
 
 use chrono::{DateTime, Utc};
+use community::CommunityDocument;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -344,6 +345,13 @@ pub enum ConversationEvents {
     DeleteConversation {
         conversation_id: Uuid,
     },
+}
+
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum CommunityEvents {
+    NewCommunity { community: CommunityDocument },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

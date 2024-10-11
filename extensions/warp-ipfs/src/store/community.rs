@@ -1,5 +1,7 @@
-use super::PeerIdExt;
+use super::{topics::ConversationTopic, PeerIdExt};
+use crate::store::DidExt;
 use chrono::{DateTime, Utc};
+use core::hash::Hash;
 use indexmap::IndexSet;
 use rust_ipfs::Keypair;
 use serde::{Deserialize, Serialize};
@@ -41,7 +43,7 @@ impl From<CommunityInviteDocument> for CommunityInvite {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq)]
 pub struct CommunityDocument {
     pub id: Uuid,
     pub name: String,
@@ -55,11 +57,89 @@ pub struct CommunityDocument {
     pub roles: IndexSet<Role>,
     pub permissions: CommunityPermissions,
     pub invites: IndexSet<Uuid>,
+    #[serde(default)]
+    pub deleted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+}
+
+impl Hash for CommunityDocument {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state)
+    }
+}
+
+impl PartialEq for CommunityDocument {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl CommunityDocument {
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    pub fn name(&self) -> &String {
+        &self.name
+    }
+
+    pub fn topic(&self) -> String {
+        self.id.base()
+    }
+
+    pub fn event_topic(&self) -> String {
+        self.id.event_topic()
+    }
+
+    pub fn exchange_topic(&self, did: &DID) -> String {
+        self.id.exchange_topic(did)
+    }
+
+    pub fn sign(&mut self, keypair: &Keypair) -> Result<(), Error> {
+        let construct = warp::crypto::hash::sha256_iter(
+            [
+                Some(self.id().into_bytes().to_vec()),
+                Some(self.creator.to_string().as_bytes().to_vec()),
+            ]
+            .into_iter(),
+            None,
+        );
+
+        let signature = keypair.sign(&construct).expect("not RSA");
+        self.signature = Some(bs58::encode(signature).into_string());
+
+        Ok(())
+    }
+
+    pub fn verify(&self) -> Result<(), Error> {
+        let creator_pk = self.creator.to_public_key()?;
+
+        let Some(signature) = &self.signature else {
+            return Err(Error::InvalidSignature);
+        };
+
+        let signature = bs58::decode(signature).into_vec()?;
+
+        let construct = warp::crypto::hash::sha256_iter(
+            [
+                Some(self.id().into_bytes().to_vec()),
+                Some(self.creator.to_string().as_bytes().to_vec()),
+            ]
+            .into_iter(),
+            None,
+        );
+
+        if !creator_pk.verify(&construct, &signature) {
+            return Err(Error::InvalidSignature);
+        }
+        Ok(())
+    }
 }
 impl CommunityDocument {
     pub fn new(keypair: &Keypair, name: String) -> Result<Self, Error> {
         let did = keypair.to_did()?;
-        Ok(Self {
+        let mut document = Self {
             id: Uuid::new_v4(),
             name,
             description: None,
@@ -71,7 +151,11 @@ impl CommunityDocument {
             roles: IndexSet::new(),
             permissions: CommunityPermissions::new(),
             invites: IndexSet::new(),
-        })
+            deleted: false,
+            signature: None,
+        };
+        document.sign(keypair)?;
+        Ok(document)
     }
 }
 impl From<CommunityDocument> for Community {

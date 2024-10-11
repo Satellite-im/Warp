@@ -31,6 +31,8 @@ pub enum RayGunEventKind {
     ConversationArchived { conversation_id: Uuid },
     ConversationUnarchived { conversation_id: Uuid },
     ConversationDeleted { conversation_id: Uuid },
+
+    CommunityCreated { community_id: Uuid },
 }
 
 pub type RayGunEventStream = BoxStream<'static, RayGunEventKind>;

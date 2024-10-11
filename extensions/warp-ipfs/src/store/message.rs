@@ -6,6 +6,7 @@ use tokio_stream::StreamMap;
 use tracing::info;
 
 use bytes::Bytes;
+use indexmap::IndexSet;
 use std::borrow::BorrowMut;
 use std::{
     collections::{hash_map::Entry as HashEntry, BTreeMap, HashMap, HashSet},
@@ -15,7 +16,6 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use indexmap::IndexSet;
 use web_time::Instant;
 
 use futures::{
@@ -35,6 +35,8 @@ use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{error, warn};
 use uuid::Uuid;
 
+use super::community::CommunityDocument;
+use super::CommunityEvents;
 use super::{
     document::root::RootDocumentMap, ds_key::DataStoreKey, ConversationImageType, PeerIdExt,
     MAX_CONVERSATION_BANNER_SIZE, MAX_CONVERSATION_DESCRIPTION, MAX_CONVERSATION_ICON_SIZE,
@@ -67,8 +69,8 @@ use crate::{
 use crate::rt::{Executor, LocalExecutor};
 use warp::raygun::{
     community::{
-        Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType, CommunityInvite, CommunityPermissions,
-        RayGunCommunity, Role,
+        Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType,
+        CommunityInvite, CommunityPermissions, RayGunCommunity, Role,
     },
     ConversationImage, GroupPermission, GroupPermissionOpt,
 };
@@ -126,6 +128,7 @@ impl MessageStore {
             ipfs: ipfs.clone(),
             event_handler: Default::default(),
             conversation_task: HashMap::new(),
+            community_task: HashMap::new(),
             command_tx: tx,
             identity: identity.clone(),
             root,
@@ -894,6 +897,7 @@ struct ConversationInner {
     ipfs: Ipfs,
     event_handler: HashMap<Uuid, tokio::sync::broadcast::Sender<MessageEventKind>>,
     conversation_task: HashMap<Uuid, DropGuard>,
+    community_task: HashMap<Uuid, DropGuard>,
     root: RootDocumentMap,
     file: FileStore,
     event: EventSubscription<RayGunEventKind>,
@@ -3868,16 +3872,139 @@ impl ConversationInner {
         }
     }
 }
+impl ConversationInner {
+    async fn create_community_task(&mut self, community_id: Uuid) -> Result<(), Error> {
+        let community = self.get_community_document(community_id).await?;
+
+        let main_topic = community.topic();
+        let event_topic = community.event_topic();
+        let request_topic = community.exchange_topic(&self.identity.did_key());
+
+        let messaging_stream = self
+            .ipfs
+            .pubsub_subscribe(main_topic)
+            .await?
+            .map(move |msg| ConversationStreamData::Message(community_id, msg))
+            .boxed();
+
+        let event_stream = self
+            .ipfs
+            .pubsub_subscribe(event_topic)
+            .await?
+            .map(move |msg| ConversationStreamData::Event(community_id, msg))
+            .boxed();
+
+        let request_stream = self
+            .ipfs
+            .pubsub_subscribe(request_topic)
+            .await?
+            .map(move |msg| ConversationStreamData::RequestResponse(community_id, msg))
+            .boxed();
+
+        let mut stream =
+            futures::stream::select_all([messaging_stream, event_stream, request_stream]);
+
+        let (mut tx, rx) = mpsc::channel(256);
+
+        let token = CancellationToken::new();
+        let drop_guard = token.clone().drop_guard();
+
+        self.executor.dispatch(async move {
+            loop {
+                tokio::select! {
+                    _ = token.cancelled() => {
+                        break;
+                    }
+                    Some(stream_data) = stream.next() => {
+                        if let Err(e) = tx.send(stream_data).await {
+                            if e.is_disconnected() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        _ = self
+            .command_tx
+            .send(MessagingCommand::Receiver { ch: rx })
+            .await;
+        self.community_task.insert(community_id, drop_guard);
+
+        tracing::info!(%community_id, "started conversation");
+        Ok(())
+    }
+
+    async fn get_community_document(&self, id: Uuid) -> Result<CommunityDocument, Error> {
+        self.root.get_community_document(id).await
+    }
+
+    pub async fn set_community_document<B: BorrowMut<CommunityDocument>>(
+        &mut self,
+        mut document: B,
+    ) -> Result<(), Error> {
+        let document = document.borrow_mut();
+        let keypair = self.root.keypair();
+
+        let did = keypair.to_did()?;
+        if document.creator.eq(&did) {
+            document.sign(keypair)?;
+        }
+
+        document.verify()?;
+
+        self.root.set_community_document(document).await?;
+        self.identity.export_root_document().await?;
+        Ok(())
+    }
+}
 
 impl ConversationInner {
-    pub async fn create_community(&mut self, name: &str) -> Result<Community, Error> {
-        Err(Error::Unimplemented)
+    pub async fn create_community(&mut self, mut name: &str) -> Result<Community, Error> {
+        let own_did = &self.identity.did_key();
+
+        name = name.trim();
+        if name.len() < 1 || name.len() > 255 {
+            return Err(Error::InvalidLength {
+                context: "name".into(),
+                current: name.len(),
+                minimum: Some(1),
+                maximum: Some(255),
+            });
+        }
+
+        let community = CommunityDocument::new(self.root.keypair(), name.to_owned())?;
+
+        let community_id = community.id;
+
+        self.set_community_document(community).await?;
+
+        let mut keystore = Keystore::new(community_id);
+        keystore.insert(self.root.keypair(), own_did, warp::crypto::generate::<64>())?;
+
+        self.set_keystore(community_id, keystore).await?;
+
+        self.create_community_task(community_id).await?;
+
+        let community = self.get_community_document(community_id).await?;
+
+        let event = serde_json::to_vec(&CommunityEvents::NewCommunity {
+            community: community.clone(),
+        })?;
+
+        self.event
+            .emit(RayGunEventKind::CommunityCreated { community_id })
+            .await;
+
+        Ok(Community::from(community))
     }
     pub async fn delete_community(&mut self, community_id: Uuid) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
     pub async fn get_community(&mut self, community_id: Uuid) -> Result<Community, Error> {
-        Err(Error::Unimplemented)
+        let document = self.get_community_document(community_id).await?;
+        Ok(document.into())
     }
 
     pub async fn create_invite(
