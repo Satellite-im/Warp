@@ -1,3 +1,4 @@
+use crate::rt::{Executor, LocalExecutor};
 use futures::{
     channel::{
         mpsc::{channel, Receiver, Sender},
@@ -32,6 +33,7 @@ pub struct EventSubscription<T: Clone + Debug + Send + 'static> {
 impl<T: Clone + Debug + Send + 'static> EventSubscription<T> {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
+        let executor = LocalExecutor;
         let (tx, rx) = futures::channel::mpsc::channel(0);
 
         let mut task = EventSubscriptionTask {
@@ -43,7 +45,7 @@ impl<T: Clone + Debug + Send + 'static> EventSubscription<T> {
 
         let token = CancellationToken::new();
         let drop_guard = token.clone().drop_guard();
-        crate::rt::spawn(async move {
+        executor.dispatch(async move {
             select! {
                 _ = token.cancelled() => {}
                 _ = task.run() => {}

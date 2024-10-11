@@ -64,6 +64,7 @@ use crate::{
     },
 };
 
+use crate::rt::{Executor, LocalExecutor};
 use warp::raygun::{
     community::{
         Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType, CommunityInvite, CommunityPermissions,
@@ -109,6 +110,7 @@ impl MessageStore {
         identity: &IdentityStore,
         message_command: mpsc::Sender<MessageCommand>,
     ) -> Self {
+        let executor = LocalExecutor;
         info!("Initializing MessageStore");
 
         let (tx, rx) = futures::channel::mpsc::channel(1024);
@@ -135,6 +137,7 @@ impl MessageStore {
             pending_key_exchange: Default::default(),
             message_command,
             queue: Default::default(),
+            executor,
         };
 
         if let Err(e) = inner.migrate().await {
@@ -155,7 +158,7 @@ impl MessageStore {
             conversation_mailbox_task_rx,
         };
 
-        crate::rt::spawn({
+        executor.dispatch({
             async move {
                 select! {
                     _ = token.cancelled() => {}
@@ -905,6 +908,7 @@ struct ConversationInner {
     message_command: mpsc::Sender<MessageCommand>,
     // Note: Temporary
     queue: HashMap<DID, Vec<Queue>>,
+    executor: LocalExecutor,
 }
 
 impl ConversationInner {
@@ -966,6 +970,7 @@ impl ConversationInner {
             let message_command =  self.message_command.clone();
             let addresses = addresses.clone();
             let conversation_id = conversation.id;
+            let executor = self.executor;
             async move {
                 let fut = async move {
                     let mut conversation_mailbox = BTreeMap::new();
@@ -1052,7 +1057,7 @@ impl ConversationInner {
                 };
 
 
-                crate::rt::spawn(async move {
+                executor.dispatch(async move {
                     let result = fut.await;
                     let _ = tx.send(result).await;
                 });
@@ -3800,7 +3805,7 @@ impl ConversationInner {
         let token = CancellationToken::new();
         let drop_guard = token.clone().drop_guard();
 
-        crate::rt::spawn(async move {
+        self.executor.dispatch(async move {
             loop {
                 tokio::select! {
                     _ = token.cancelled() => {

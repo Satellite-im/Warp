@@ -1,5 +1,9 @@
 use futures::{channel::mpsc, StreamExt, TryFutureExt};
 
+use crate::rt::{Executor, LocalExecutor};
+use crate::store::{
+    ds_key::DataStoreKey, ecdh_encrypt, payload::PayloadBuilder, topics::PeerTopic, PeerIdExt,
+};
 use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, Keypair};
 use std::{collections::HashMap, sync::Arc, time::Duration};
@@ -8,10 +12,6 @@ use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::error;
 use warp::{crypto::DID, error::Error};
 use web_time::Instant;
-
-use crate::store::{
-    ds_key::DataStoreKey, ecdh_encrypt, payload::PayloadBuilder, topics::PeerTopic, PeerIdExt,
-};
 
 use super::{
     connected_to_peer, discovery::Discovery, document::root::RootDocumentMap, ecdh_decrypt,
@@ -25,6 +25,7 @@ pub struct Queue {
     removal: mpsc::UnboundedSender<DID>,
     keypair: Keypair,
     discovery: Discovery,
+    executor: LocalExecutor,
 }
 
 impl Queue {
@@ -37,9 +38,10 @@ impl Queue {
             removal: tx,
             keypair,
             discovery,
+            executor: LocalExecutor,
         };
 
-        crate::rt::spawn({
+        queue.executor.dispatch({
             let queue = queue.clone();
 
             async move {
@@ -228,6 +230,7 @@ pub struct QueueEntry {
     keypair: Keypair,
     item: RequestResponsePayload,
     drop_guard: Arc<RwLock<Option<DropGuard>>>,
+    executor: LocalExecutor,
 }
 
 impl QueueEntry {
@@ -244,6 +247,7 @@ impl QueueEntry {
             keypair: keypair.clone(),
             item,
             drop_guard: Default::default(),
+            executor: LocalExecutor,
         };
 
         let token = CancellationToken::new();
@@ -332,7 +336,7 @@ impl QueueEntry {
             }
         };
 
-        crate::rt::spawn(async move {
+        entry.executor.dispatch(async move {
             futures::pin_mut!(fut);
 
             tokio::select! {
