@@ -1102,7 +1102,7 @@ impl ConversationInner {
             GroupPermissionOpt::Single((id, set)) => IndexMap::from_iter(vec![(id, set)]),
         };
 
-        let conversation = ConversationDocument::new_group(
+        let mut conversation = ConversationDocument::new_group(
             self.root.keypair(),
             name,
             recipients,
@@ -1114,7 +1114,7 @@ impl ConversationInner {
 
         let conversation_id = conversation.id();
 
-        self.set_document(conversation).await?;
+        self.set_document(&mut conversation).await?;
 
         let mut keystore = Keystore::new(conversation_id);
         keystore.insert(self.root.keypair(), own_did, warp::crypto::generate::<64>())?;
@@ -1129,8 +1129,6 @@ impl ConversationInner {
             .map(|did| (did.clone(), did))
             .filter_map(|(a, b)| b.to_peer_id().map(|pk| (a, pk)).ok())
             .collect::<Vec<_>>();
-
-        let conversation = self.get(conversation_id).await?;
 
         let event = serde_json::to_vec(&ConversationEvents::NewGroupConversation {
             conversation: conversation.clone(),
@@ -2625,9 +2623,7 @@ impl ConversationInner {
 
         conversation.description = desc.map(ToString::to_string);
 
-        self.set_document(conversation).await?;
-
-        let conversation = self.get(conversation_id).await?;
+        self.set_document(&mut conversation).await?;
 
         let ev = MessageEventKind::ConversationDescriptionChanged {
             conversation_id,
@@ -2680,9 +2676,7 @@ impl ConversationInner {
 
         conversation.restrict.push(did_key.clone());
 
-        self.set_document(conversation).await?;
-
-        let conversation = self.get(conversation_id).await?;
+        self.set_document(&mut conversation).await?;
 
         let event = MessagingEvents::UpdateConversation {
             conversation,
@@ -2729,9 +2723,7 @@ impl ConversationInner {
             .restrict
             .retain(|restricted| restricted != did_key);
 
-        self.set_document(conversation).await?;
-
-        let conversation = self.get(conversation_id).await?;
+        self.set_document(&mut conversation).await?;
 
         let event = MessagingEvents::UpdateConversation {
             conversation,
@@ -2784,9 +2776,7 @@ impl ConversationInner {
 
         conversation.name = (!name.is_empty()).then_some(name.to_string());
 
-        self.set_document(conversation).await?;
-
-        let conversation = self.get(conversation_id).await?;
+        self.set_document(&mut conversation).await?;
 
         let new_name = conversation.name();
 
@@ -3083,9 +3073,7 @@ impl ConversationInner {
 
         conversation.recipients.push(did_key.clone());
 
-        self.set_document(conversation).await?;
-
-        let conversation = self.get(conversation_id).await?;
+        self.set_document(&mut conversation).await?;
 
         let event = MessagingEvents::UpdateConversation {
             conversation: conversation.clone(),
@@ -3141,12 +3129,10 @@ impl ConversationInner {
         }
 
         conversation.recipients.retain(|did| did.ne(did_key));
-        self.set_document(conversation).await?;
-
-        let conversation = self.get(conversation_id).await?;
+        self.set_document(&mut conversation).await?;
 
         let event = MessagingEvents::UpdateConversation {
-            conversation: conversation.clone(),
+            conversation,
             kind: ConversationUpdateKind::RemoveParticipant {
                 did: did_key.clone(),
             },
