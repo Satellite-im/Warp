@@ -1102,7 +1102,7 @@ impl ConversationInner {
             GroupPermissionOpt::Single((id, set)) => IndexMap::from_iter(vec![(id, set)]),
         };
 
-        let conversation = ConversationDocument::new_group(
+        let mut conversation = ConversationDocument::new_group(
             self.root.keypair(),
             name,
             recipients,
@@ -1114,7 +1114,7 @@ impl ConversationInner {
 
         let conversation_id = conversation.id();
 
-        self.set_document(conversation).await?;
+        self.set_document(&mut conversation).await?;
 
         let mut keystore = Keystore::new(conversation_id);
         keystore.insert(self.root.keypair(), own_did, warp::crypto::generate::<64>())?;
@@ -1129,8 +1129,6 @@ impl ConversationInner {
             .map(|did| (did.clone(), did))
             .filter_map(|(a, b)| b.to_peer_id().map(|pk| (a, pk)).ok())
             .collect::<Vec<_>>();
-
-        let conversation = self.get(conversation_id).await?;
 
         let event = serde_json::to_vec(&ConversationEvents::NewGroupConversation {
             conversation: conversation.clone(),
