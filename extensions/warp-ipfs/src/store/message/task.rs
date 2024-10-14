@@ -2128,7 +2128,7 @@ impl ConversationTask {
                     .as_ref()
                     .and_then(|reference| IpfsPath::from_str(reference).ok())
                     .and_then(|path| path.root().cid().copied())
-                    .ok_or(Error::Other)?;
+                    .ok_or(Error::OtherWithContext("invalid reference".into()))?;
 
                 (cid, document.size, extension)
             }
@@ -3263,10 +3263,12 @@ async fn message_event(
             kind,
         } => {
             conversation.verify()?;
-            // conversation.excluded = this.document.excluded;
+            conversation.excluded = this.document.excluded.clone();
             conversation.messages = this.document.messages;
             conversation.favorite = this.document.favorite;
             conversation.archived = this.document.archived;
+
+            this.document = conversation;
 
             match kind {
                 ConversationUpdateKind::AddParticipant { did } => {
@@ -3312,9 +3314,9 @@ async fn message_event(
 
                     //Maybe remove participant from discovery?
 
-                    let can_emit = !conversation.excluded.contains_key(&did);
+                    let can_emit = !this.document.excluded.contains_key(&did);
 
-                    conversation.excluded.remove(&did);
+                    this.document.excluded.remove(&did);
 
                     this.set_document().await?;
 
@@ -3405,8 +3407,8 @@ async fn message_event(
                         return Err(Error::Unauthorized);
                     }
 
-                    let (added, removed) = conversation.permissions.compare_with_new(&permissions);
-                    conversation.permissions = permissions;
+                    let (added, removed) = this.document.permissions.compare_with_new(&permissions);
+                    this.document.permissions = permissions;
                     this.set_document().await?;
 
                     if let Err(e) = this.event_broadcast.send(
