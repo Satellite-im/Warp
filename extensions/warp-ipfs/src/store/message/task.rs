@@ -75,6 +75,7 @@ type AttachmentOneshot = (MessageDocument, oneshot::Sender<Result<(), Error>>);
 
 use super::DownloadStream;
 
+#[allow(dead_code)]
 pub enum ConversationTaskCommand {
     SetDescription {
         desc: Option<String>,
@@ -222,7 +223,7 @@ pub enum ConversationTaskCommand {
 
     EventHandler {
         response: oneshot::Sender<tokio::sync::broadcast::Sender<MessageEventKind>>,
-    }
+    },
 }
 
 pub struct ConversationTask {
@@ -771,7 +772,7 @@ impl ConversationTask {
             ConversationTaskCommand::RemoveRestricted { member, response } => {
                 let result = self.remove_restricted(&member).await;
                 _ = response.send(result);
-            },
+            }
             ConversationTaskCommand::EventHandler { response } => {
                 let sender = self.event_broadcast.clone();
                 _ = response.send(sender);
