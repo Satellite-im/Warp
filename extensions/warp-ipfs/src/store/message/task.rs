@@ -821,6 +821,26 @@ impl ConversationTask {
         Ok(())
     }
 
+    pub async fn replace_document(
+        &mut self,
+        mut document: ConversationDocument,
+    ) -> Result<(), Error> {
+        let keypair = self.root.keypair();
+        if let Some(creator) = document.creator.as_ref() {
+            let did = keypair.to_did()?;
+            if creator.eq(&did) && matches!(document.conversation_type(), ConversationType::Group) {
+                document.sign(keypair)?;
+            }
+        }
+
+        document.verify()?;
+
+        self.root.set_conversation_document(&document).await?;
+        self.identity.export_root_document().await?;
+        self.document = document;
+        Ok(())
+    }
+
     async fn send_single_conversation_event(
         &mut self,
         did_key: &DID,
@@ -3268,8 +3288,6 @@ async fn message_event(
             conversation.favorite = this.document.favorite;
             conversation.archived = this.document.archived;
 
-            this.document = conversation;
-
             match kind {
                 ConversationUpdateKind::AddParticipant { did } => {
                     if !this.document.creator.as_ref().is_some_and(|c| c == sender)
@@ -3286,10 +3304,10 @@ async fn message_event(
                     }
 
                     if !this.discovery.contains(&did).await {
-                        let _ = this.discovery.insert(&did).await.ok();
+                        let _ = this.discovery.insert(&did).await;
                     }
 
-                    this.set_document().await?;
+                    this.replace_document(conversation).await?;
 
                     if let Err(e) = this.request_key(&did).await {
                         tracing::error!(%conversation_id, error = %e, "error requesting key");
@@ -3318,7 +3336,7 @@ async fn message_event(
 
                     this.document.excluded.remove(&did);
 
-                    this.set_document().await?;
+                    this.replace_document(conversation).await?;
 
                     if can_emit {
                         if let Err(e) =
@@ -3358,7 +3376,8 @@ async fn message_event(
                             return Ok(());
                         }
                     }
-                    this.set_document().await?;
+
+                    this.replace_document(conversation).await?;
 
                     if let Err(e) =
                         this.event_broadcast
@@ -3381,7 +3400,7 @@ async fn message_event(
                         return Err(Error::Unauthorized);
                     }
 
-                    this.set_document().await?;
+                    this.replace_document(conversation).await?;
 
                     if let Err(e) =
                         this.event_broadcast
@@ -3398,7 +3417,7 @@ async fn message_event(
                     if !this.document.creator.as_ref().is_some_and(|c| c == sender) {
                         return Err(Error::Unauthorized);
                     }
-                    this.set_document().await?;
+                    this.replace_document(conversation).await?;
                     //TODO: Maybe add a api event to emit for when blocked users are added/removed from the document
                     //      but for now, we can leave this as a silent update since the block list would be for internal handling for now
                 }
@@ -3409,7 +3428,7 @@ async fn message_event(
 
                     let (added, removed) = this.document.permissions.compare_with_new(&permissions);
                     this.document.permissions = permissions;
-                    this.set_document().await?;
+                    this.replace_document(conversation).await?;
 
                     if let Err(e) = this.event_broadcast.send(
                         MessageEventKind::ConversationPermissionsUpdated {
@@ -3422,7 +3441,7 @@ async fn message_event(
                     }
                 }
                 ConversationUpdateKind::AddedIcon | ConversationUpdateKind::RemovedIcon => {
-                    this.set_document().await?;
+                    this.replace_document(conversation).await?;
 
                     if let Err(e) = this
                         .event_broadcast
@@ -3433,7 +3452,7 @@ async fn message_event(
                 }
 
                 ConversationUpdateKind::AddedBanner | ConversationUpdateKind::RemovedBanner => {
-                    this.set_document().await?;
+                    this.replace_document(conversation).await?;
 
                     if let Err(e) = this
                         .event_broadcast
@@ -3459,7 +3478,7 @@ async fn message_event(
                         }
                     }
 
-                    this.set_document().await?;
+                    this.replace_document(conversation).await?;
                     if let Err(e) = this.event_broadcast.send(
                         MessageEventKind::ConversationDescriptionChanged {
                             conversation_id,
