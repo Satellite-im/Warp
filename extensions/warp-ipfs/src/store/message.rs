@@ -1,34 +1,29 @@
 mod task;
 
-use chrono::Utc;
-use either::Either;
-use futures_timeout::TimeoutExt;
 use futures_timer::Delay;
-use tokio_stream::StreamMap;
+use task::ConversationTaskCommand;
 use tracing::info;
 
 use bytes::Bytes;
 use std::borrow::BorrowMut;
+use std::time::Duration;
 use std::{
-    collections::{hash_map::Entry as HashEntry, BTreeMap, HashMap, HashSet},
-    ffi::OsStr,
-    path::{Path, PathBuf},
-    str::FromStr,
+    collections::{BTreeMap, HashMap, HashSet},
+    path::Path,
     sync::Arc,
-    time::Duration,
 };
 use web_time::Instant;
 
 use futures::{
     channel::{mpsc, oneshot},
     pin_mut,
-    stream::{self, BoxStream, FuturesUnordered, SelectAll},
-    FutureExt, SinkExt, Stream, StreamExt, TryFutureExt,
+    stream::BoxStream,
+    SinkExt, Stream, StreamExt, TryFutureExt,
 };
 use indexmap::IndexMap;
 use ipld_core::cid::Cid;
 
-use rust_ipfs::{libp2p::gossipsub::Message, p2p::MultiaddrExt, Ipfs, IpfsPath, Keypair, PeerId};
+use rust_ipfs::{Ipfs, PeerId};
 
 use serde::{Deserialize, Serialize};
 use tokio::select;
@@ -36,21 +31,13 @@ use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{error, warn};
 use uuid::Uuid;
 
-use super::{
-    document::root::RootDocumentMap, ds_key::DataStoreKey, ConversationImageType, PeerIdExt,
-    MAX_CONVERSATION_BANNER_SIZE, MAX_CONVERSATION_DESCRIPTION, MAX_CONVERSATION_ICON_SIZE,
-    MAX_MESSAGE_SIZE, MAX_REACTIONS, SHUTTLE_TIMEOUT,
-};
-use crate::store::document::files::FileDocument;
-use crate::store::document::image_dag::ImageDag;
-use crate::utils::{ByteCollection, ExtensionType};
+use super::{document::root::RootDocumentMap, ds_key::DataStoreKey, PeerIdExt};
 use crate::{
-    config,
     shuttle::message::client::MessageCommand,
     store::{
-        conversation::{ConversationDocument, MessageDocument},
+        conversation::ConversationDocument,
         discovery::Discovery,
-        ecdh_decrypt, ecdh_encrypt, ecdh_shared_key,
+        ecdh_decrypt, ecdh_encrypt,
         event_subscription::EventSubscription,
         files::FileStore,
         generate_shared_topic,
@@ -59,36 +46,27 @@ use crate::{
         payload::{PayloadBuilder, PayloadMessage},
         sign_serde,
         topics::PeerTopic,
-        verify_serde_sig, ConversationEvents, ConversationRequestKind, ConversationRequestResponse,
-        ConversationResponseKind, ConversationUpdateKind, DidExt, MessagingEvents,
-        MIN_MESSAGE_SIZE,
+        ConversationEvents, ConversationRequestKind, ConversationRequestResponse, DidExt,
     },
 };
 
-use crate::rt::{Executor, LocalExecutor};
-use warp::raygun::{ConversationImage, GroupPermission, GroupPermissionOpt};
+use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
+use warp::raygun::{ConversationImage, GroupPermissionOpt};
 use warp::{
-    constellation::{directory::Directory, ConstellationProgressStream, Progression},
-    crypto::{cipher::Cipher, generate, DID},
+    constellation::ConstellationProgressStream,
+    crypto::DID,
     error::Error,
     multipass::MultiPassEventKind,
     raygun::{
-        AttachmentEventStream, AttachmentKind, Conversation, ConversationType,
-        ImplGroupPermissions, Location, LocationKind, MessageEvent, MessageEventKind,
-        MessageOptions, MessageReference, MessageStatus, MessageType, Messages, MessagesType,
-        PinState, RayGunEventKind, ReactionState,
+        AttachmentEventStream, Conversation, ConversationType, Location, MessageEvent,
+        MessageEventKind, MessageOptions, MessageReference, MessageStatus, Messages, PinState,
+        RayGunEventKind, ReactionState,
     },
 };
 
 const CHAT_DIRECTORY: &str = "chat_media";
 
 pub type DownloadStream = BoxStream<'static, Result<Bytes, std::io::Error>>;
-
-enum MessagingCommand {
-    Receiver {
-        ch: mpsc::Receiver<ConversationStreamData>,
-    },
-}
 
 #[derive(Clone)]
 pub struct MessageStore {
@@ -108,28 +86,20 @@ impl MessageStore {
         let executor = LocalExecutor;
         info!("Initializing MessageStore");
 
-        let (tx, rx) = futures::channel::mpsc::channel(1024);
-
         let token = CancellationToken::new();
         let drop_guard = token.clone().drop_guard();
 
         let root = identity.root_document().clone();
-        let (atx, arx) = mpsc::channel(1);
-        let (conversation_mailbox_task_tx, conversation_mailbox_task_rx) = mpsc::channel(2048);
 
         let mut inner = ConversationInner {
             ipfs: ipfs.clone(),
             event_handler: Default::default(),
             conversation_task: HashMap::new(),
-            command_tx: tx,
             identity: identity.clone(),
             root,
             discovery,
             file: file.clone(),
             event,
-            attachment_tx: atx,
-            conversation_mailbox_task_tx,
-            pending_key_exchange: Default::default(),
             message_command,
             queue: Default::default(),
             executor,
@@ -146,11 +116,7 @@ impl MessageStore {
         let mut task = ConversationTask {
             inner: inner.clone(),
             ipfs: ipfs.clone(),
-            topic_stream: Default::default(),
             identity: identity.clone(),
-            command_rx: rx,
-            attachment_rx: arx,
-            conversation_mailbox_task_rx,
         };
 
         executor.dispatch({
@@ -262,10 +228,21 @@ impl MessageStore {
         conversation_id: Uuid,
         favorite: bool,
     ) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
-        inner
-            .set_favorite_conversation(conversation_id, favorite)
-            .await
+        let inner = &*self.inner.read().await;
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::FavoriteConversation {
+                favorite,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn get_message(
@@ -273,8 +250,21 @@ impl MessageStore {
         conversation_id: Uuid,
         message_id: Uuid,
     ) -> Result<warp::raygun::Message, Error> {
-        let inner = &mut *self.inner.write().await;
-        inner.get_message(conversation_id, message_id).await
+        let inner = &*self.inner.read().await;
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::GetMessage {
+                message_id,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn get_messages(
@@ -283,12 +273,35 @@ impl MessageStore {
         opt: MessageOptions,
     ) -> Result<Messages, Error> {
         let inner = &*self.inner.read().await;
-        inner.get_messages(conversation_id, opt).await
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::GetMessages {
+                options: opt,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn messages_count(&self, conversation_id: Uuid) -> Result<usize, Error> {
         let inner = &*self.inner.read().await;
-        inner.messages_count(conversation_id).await
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::GetMessagesCount { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn get_message_reference(
@@ -297,9 +310,20 @@ impl MessageStore {
         message_id: Uuid,
     ) -> Result<MessageReference, Error> {
         let inner = &*self.inner.read().await;
-        inner
-            .get_message_reference(conversation_id, message_id)
-            .await
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::GetMessageReference {
+                message_id,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn get_message_references(
@@ -308,7 +332,20 @@ impl MessageStore {
         opt: MessageOptions,
     ) -> Result<BoxStream<'static, MessageReference>, Error> {
         let inner = &*self.inner.read().await;
-        inner.get_message_references(conversation_id, opt).await
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::GetMessageReferences {
+                options: opt,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn update_conversation_name(
@@ -316,8 +353,21 @@ impl MessageStore {
         conversation_id: Uuid,
         name: &str,
     ) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
-        inner.update_conversation_name(conversation_id, name).await
+        let inner = &*self.inner.read().await;
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::UpdateConversationName {
+                name: name.to_string(),
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn update_conversation_permissions<P: Into<GroupPermissionOpt> + Send + Sync>(
@@ -325,10 +375,21 @@ impl MessageStore {
         conversation_id: Uuid,
         permissions: P,
     ) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
-        inner
-            .update_conversation_permissions(conversation_id, permissions)
-            .await
+        let inner = &*self.inner.read().await;
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::UpdateConversationPermissions {
+                permissions: permissions.into(),
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn delete_conversation(&self, conversation_id: Uuid) -> Result<(), Error> {
@@ -337,13 +398,40 @@ impl MessageStore {
     }
 
     pub async fn add_recipient(&self, conversation_id: Uuid, did: &DID) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
-        inner.add_recipient(conversation_id, did).await
+        let inner = &*self.inner.read().await;
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::AddMember {
+                member: did.clone(),
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn remove_recipient(&self, conversation_id: Uuid, did: &DID) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
-        inner.remove_recipient(conversation_id, did, true).await
+        let inner = &*self.inner.read().await;
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::RemoveMember {
+                member: did.clone(),
+                broadcast: true,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn message_status(
@@ -352,7 +440,20 @@ impl MessageStore {
         message_id: Uuid,
     ) -> Result<MessageStatus, Error> {
         let inner = &*self.inner.read().await;
-        inner.message_status(conversation_id, message_id).await
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::MessageStatus {
+                message_id,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn send_message(
@@ -360,8 +461,21 @@ impl MessageStore {
         conversation_id: Uuid,
         lines: Vec<String>,
     ) -> Result<Uuid, Error> {
-        let inner = &mut *self.inner.write().await;
-        inner.send_message(conversation_id, lines).await
+        let inner = &*self.inner.read().await;
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::SendMessage {
+                lines,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn edit_message(
@@ -370,8 +484,22 @@ impl MessageStore {
         message_id: Uuid,
         lines: Vec<String>,
     ) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
-        inner.edit_message(conversation_id, message_id, lines).await
+        let inner = &*self.inner.read().await;
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::EditMessage {
+                message_id,
+                lines,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn reply(
@@ -380,10 +508,22 @@ impl MessageStore {
         message_id: Uuid,
         lines: Vec<String>,
     ) -> Result<Uuid, Error> {
-        let inner = &mut *self.inner.write().await;
-        inner
-            .reply_message(conversation_id, message_id, lines)
-            .await
+        let inner = &*self.inner.read().await;
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::ReplyMessage {
+                message_id,
+                lines,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn delete_message(
@@ -391,10 +531,21 @@ impl MessageStore {
         conversation_id: Uuid,
         message_id: Uuid,
     ) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
-        inner
-            .delete_message(conversation_id, message_id, true)
-            .await
+        let inner = &*self.inner.read().await;
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::DeleteMessage {
+                message_id,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn pin_message(
@@ -403,8 +554,22 @@ impl MessageStore {
         message_id: Uuid,
         state: PinState,
     ) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
-        inner.pin_message(conversation_id, message_id, state).await
+        let inner = &*self.inner.read().await;
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::PinMessage {
+                message_id,
+                state,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn react(
@@ -414,8 +579,23 @@ impl MessageStore {
         state: ReactionState,
         emoji: String,
     ) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
-        inner.react(conversation_id, message_id, state, emoji).await
+        let inner = &*self.inner.read().await;
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::ReactMessage {
+                message_id,
+                state,
+                emoji,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn attach(
@@ -425,10 +605,23 @@ impl MessageStore {
         locations: Vec<Location>,
         messages: Vec<String>,
     ) -> Result<(Uuid, AttachmentEventStream), Error> {
-        let inner = &mut *self.inner.write().await;
-        inner
-            .attach(conversation_id, message_id, locations, messages)
-            .await
+        let inner = &*self.inner.read().await;
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::AttachMessage {
+                message_id,
+                locations,
+                lines: messages,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn download<P: AsRef<Path>>(
@@ -440,9 +633,22 @@ impl MessageStore {
     ) -> Result<ConstellationProgressStream, Error> {
         let path = path.as_ref().to_path_buf();
         let inner = &*self.inner.read().await;
-        inner
-            .download(conversation_id, message_id, file, path)
-            .await
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::DownloadAttachment {
+                message_id,
+                file: file.to_owned(),
+                path,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn download_stream(
@@ -452,9 +658,21 @@ impl MessageStore {
         file: &str,
     ) -> Result<DownloadStream, Error> {
         let inner = &*self.inner.read().await;
-        inner
-            .download_stream(conversation_id, message_id, file)
-            .await
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::DownloadAttachmentStream {
+                message_id,
+                file: file.to_owned(),
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn send_event(
@@ -463,7 +681,20 @@ impl MessageStore {
         event: MessageEvent,
     ) -> Result<(), Error> {
         let inner = &*self.inner.read().await;
-        inner.send_event(conversation_id, event).await
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::SendEvent {
+                event,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn cancel_event(
@@ -472,7 +703,20 @@ impl MessageStore {
         event: MessageEvent,
     ) -> Result<(), Error> {
         let inner = &*self.inner.read().await;
-        inner.cancel_event(conversation_id, event).await
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::CancelEvent {
+                event,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn update_conversation_icon(
@@ -480,10 +724,21 @@ impl MessageStore {
         conversation_id: Uuid,
         location: Location,
     ) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
-        inner
-            .update_conversation_image(conversation_id, location, ConversationImageType::Icon)
-            .await
+        let inner = &*self.inner.read().await;
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::UpdateIcon {
+                location,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn update_conversation_banner(
@@ -491,10 +746,21 @@ impl MessageStore {
         conversation_id: Uuid,
         location: Location,
     ) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
-        inner
-            .update_conversation_image(conversation_id, location, ConversationImageType::Banner)
-            .await
+        let inner = &*self.inner.read().await;
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::UpdateBanner {
+                location,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn conversation_icon(
@@ -502,9 +768,17 @@ impl MessageStore {
         conversation_id: Uuid,
     ) -> Result<ConversationImage, Error> {
         let inner = &*self.inner.read().await;
-        inner
-            .conversation_image(conversation_id, ConversationImageType::Icon)
-            .await
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::GetIcon { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn conversation_banner(
@@ -512,54 +786,106 @@ impl MessageStore {
         conversation_id: Uuid,
     ) -> Result<ConversationImage, Error> {
         let inner = &*self.inner.read().await;
-        inner
-            .conversation_image(conversation_id, ConversationImageType::Banner)
-            .await
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::GetBanner { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn remove_conversation_icon(&self, conversation_id: Uuid) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
-        inner
-            .remove_conversation_image(conversation_id, ConversationImageType::Icon)
-            .await
+        let inner = &*self.inner.read().await;
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::RemoveIcon { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn remove_conversation_banner(&self, conversation_id: Uuid) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
-        inner
-            .remove_conversation_image(conversation_id, ConversationImageType::Banner)
-            .await
+        let inner = &*self.inner.read().await;
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::RemoveBanner { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
     pub async fn set_description(
         &self,
         conversation_id: Uuid,
         desc: Option<&str>,
     ) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
-        inner.set_description(conversation_id, desc).await
+        let inner = &*self.inner.read().await;
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::SetDescription {
+                desc: desc.map(|s| s.to_string()),
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
     pub async fn archived_conversation(&self, conversation_id: Uuid) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
-        inner.archived_conversation(conversation_id).await
+        let inner = &*self.inner.read().await;
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::ArchivedConversation { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn unarchived_conversation(&self, conversation_id: Uuid) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
-        inner.unarchived_conversation(conversation_id).await
+        let inner = &*self.inner.read().await;
+        let conversation_meta = inner
+            .conversation_task
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = conversation_meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::UnarchivedConversation { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
     }
 }
-
-type AttachmentChan = (Uuid, MessageDocument, oneshot::Sender<Result<(), Error>>);
 
 struct ConversationTask {
     inner: Arc<tokio::sync::RwLock<ConversationInner>>,
     ipfs: Ipfs,
-    topic_stream: SelectAll<mpsc::Receiver<ConversationStreamData>>,
     identity: IdentityStore,
     // used for attachments to store message on document and publish it to the network
-    attachment_rx: mpsc::Receiver<AttachmentChan>,
-    command_rx: mpsc::Receiver<MessagingCommand>,
-    conversation_mailbox_task_rx: mpsc::Receiver<Result<(Uuid, Vec<MessageDocument>), Error>>,
+    // command_rx: mpsc::Receiver<MessagingCommand>,
 }
 
 impl ConversationTask {
@@ -578,22 +904,11 @@ impl ConversationTask {
 
         pin_mut!(stream);
 
-        let mut queue_timer = Delay::new(Duration::from_secs(1));
-
-        let mut pending_exchange_timer = Delay::new(Duration::from_secs(1));
-
-        let mut check_mailbox = Delay::new(Duration::from_secs(5));
+        let mut queue_timer = Delay::new(Duration::from_secs(5));
 
         loop {
             tokio::select! {
                 biased;
-                Some(MessagingCommand::Receiver { ch }) = self.command_rx.next() => {
-                    self.topic_stream.push(ch);
-                }
-                Some((conversation_id, message, response)) = self.attachment_rx.next() => {
-                    let inner = &mut *self.inner.write().await;
-                    _ = response.send(inner.store_direct_for_attachment(conversation_id, message).await);
-                }
                 Some(ev) = identity_stream.next() => {
                     if let Err(e) = process_identity_events(&mut *self.inner.write().await, ev).await {
                         tracing::error!("Error processing identity events: {e}");
@@ -636,92 +951,32 @@ impl ConversationTask {
                         tracing::error!(%sender, error = %e, "error processing conversation");
                     }
                 }
-                Some(item) = self.topic_stream.next() => {
-                    let inner = &mut *self.inner.write().await;
-                    match item {
-                        ConversationStreamData::RequestResponse(conversation_id, _) |
-                            ConversationStreamData::Event(conversation_id, _) |
-                            ConversationStreamData::Message(conversation_id, _) if !inner.contains(conversation_id).await => {
-                                // Note: If the conversation is deleted prior to processing the events from stream
-                                //       related to the specific we should then ignore those events.
-                                //       Additionally, we could switch back to `StreamMap` and remove the stream
-                                //       based on the conversation id to remove this check
-                                continue
-                        },
-                        ConversationStreamData::RequestResponse(conversation_id, req) => {
-                            let source = req.source;
-                            if let Err(e) = process_request_response_event(inner, conversation_id, req).await {
-                                tracing::error!(%conversation_id, sender = ?source, error = %e, name = "request", "Failed to process payload");
-                            }
-                        },
-                        ConversationStreamData::Event(conversation_id, ev) => {
-                            let source = ev.source;
-                            if let Err(e) = process_conversation_event(inner, conversation_id, ev).await {
-                                tracing::error!(%conversation_id, sender = ?source, error = %e, name = "ev", "Failed to process payload");
-                            }
-                        },
-                        ConversationStreamData::Message(conversation_id, msg) => {
-                            let source = msg.source;
-                            if let Err(e) = inner.process_msg_event(conversation_id, msg).await {
-                                tracing::error!(%conversation_id, sender = ?source, error = %e, name = "msg", "Failed to process payload");
-                            }
-                        },
-                    }
-                }
-                Some(result) = self.conversation_mailbox_task_rx.next() => {
-                    let inner = &mut *self.inner.write().await;
-                    let (id, messages) = match result {
-                        Ok(ok) => ok,
-                        Err(e) => {
-                            tracing::error!(error = %e, "unable to obtain messages from mailbox");
-                            continue;
-                        }
-                    };
-                    if messages.is_empty() {
-                        tracing::info!(conversation_id = %id, "mailbox is empty");
-                        continue;
-                    }
-                    tracing::info!(conversation_id = %id, num_of_msg = messages.len(), "receive messages from mailbox");
-
-                    if let Err(e) = inner.insert_messages_from_mailbox(id, messages).await {
-                        tracing::error!(conversation_id = %id, error = %e, "unable to get messages from conversation mailbox");
-                    }
-                }
                 _ = &mut queue_timer => {
-                    let inner = &mut *self.inner.write().await;
-                    _ = process_queue(inner).await;
-                    queue_timer.reset(Duration::from_secs(1));
-                }
-                _ = &mut pending_exchange_timer => {
-                    let inner = &mut *self.inner.write().await;
-                    _ = process_pending_payload(inner).await;
-                    pending_exchange_timer.reset(Duration::from_secs(1));
+                    _ = _process_queue(&mut *self.inner.write().await).await;
+                    queue_timer.reset(Duration::from_secs(5));
                 }
 
-                _ = &mut check_mailbox => {
-                    let inner = &mut *self.inner.write().await;
-                    _ = inner.load_from_mailbox().await;
-                    check_mailbox.reset(Duration::from_secs(60));
-                }
+
             }
         }
     }
 }
 
+#[derive(Clone)]
+struct ConversationInnerMeta {
+    pub command_tx: mpsc::Sender<ConversationTaskCommand>,
+    pub handle: AbortableJoinHandle<()>,
+}
+
 struct ConversationInner {
     ipfs: Ipfs,
     event_handler: HashMap<Uuid, tokio::sync::broadcast::Sender<MessageEventKind>>,
-    conversation_task: HashMap<Uuid, DropGuard>,
+    conversation_task: HashMap<Uuid, ConversationInnerMeta>,
     root: RootDocumentMap,
     file: FileStore,
     event: EventSubscription<RayGunEventKind>,
     identity: IdentityStore,
     discovery: Discovery,
-    command_tx: mpsc::Sender<MessagingCommand>,
-    // used for attachments to store message on document and publish it to the network
-    attachment_tx: mpsc::Sender<AttachmentChan>,
-    conversation_mailbox_task_tx: mpsc::Sender<Result<(Uuid, Vec<MessageDocument>), Error>>,
-    pending_key_exchange: HashMap<Uuid, Vec<(DID, Vec<u8>, bool)>>,
 
     message_command: mpsc::Sender<MessageCommand>,
     // Note: Temporary
@@ -776,179 +1031,32 @@ impl ConversationInner {
         }
     }
 
-    async fn load_from_mailbox(&mut self) -> Result<(), Error> {
-        let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config().clone()
-        else {
-            return Ok(());
+    async fn create_conversation_task(&mut self, conversation_id: Uuid) -> Result<(), Error> {
+        let (ctx, crx) = mpsc::channel(256);
+
+        let task = task::ConversationTask::new(
+            conversation_id,
+            &self.ipfs,
+            &self.root,
+            &self.identity,
+            &self.file,
+            &self.discovery,
+            crx,
+            self.message_command.clone(),
+            self.event.clone(),
+        )
+        .await?;
+
+        let handle = self.executor.spawn_abortable(task.run());
+
+        tracing::info!(%conversation_id, "started conversation");
+
+        let inner_meta = ConversationInnerMeta {
+            command_tx: ctx,
+            handle,
         };
 
-        self.list_stream().await.for_each_concurrent(None, |conversation| {
-            let mut tx = self.conversation_mailbox_task_tx.clone();
-            let ipfs = self.ipfs.clone();
-            let message_command =  self.message_command.clone();
-            let addresses = addresses.clone();
-            let conversation_id = conversation.id;
-            let executor = self.executor;
-            async move {
-                let fut = async move {
-                    let mut conversation_mailbox = BTreeMap::new();
-                    let mut providers = vec![];
-                    for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                        let (tx, rx) = futures::channel::oneshot::channel();
-                        let _ = message_command
-                            .clone()
-                            .send(MessageCommand::FetchMailbox {
-                                peer_id,
-                                conversation_id,
-                                response: tx,
-                            })
-                            .await;
-
-                        match rx.timeout(SHUTTLE_TIMEOUT).await {
-                            Ok(Ok(Ok(list))) => {
-                                providers.push(peer_id);
-                                conversation_mailbox.extend(list);
-                                break;
-                            }
-                            Ok(Ok(Err(e))) => {
-                                error!("unable to get mailbox to conversation {conversation_id} from {peer_id}: {e}");
-                                break;
-                            }
-                            Ok(Err(_)) => {
-                                error!("Channel been unexpectedly closed for {peer_id}");
-                                continue;
-                            }
-                            Err(_) => {
-                                error!("Request timed out for {peer_id}");
-                                continue;
-                            }
-                        }
-                    }
-
-                    let conversation_mailbox = conversation_mailbox
-                        .into_iter()
-                        .filter_map(|(id, cid)| {
-                            let id = Uuid::from_str(&id).ok()?;
-                            Some((id, cid))
-                        })
-                        .collect::<BTreeMap<Uuid, Cid>>();
-
-                    let documents =
-                        FuturesUnordered::from_iter(conversation_mailbox.into_iter().map(|(id, cid)| {
-                            let ipfs = ipfs.clone();
-                            async move {
-                                ipfs.fetch(&cid).recursive().await?;
-                                Ok((id, cid))
-                            }
-                            .boxed()
-                        }))
-                        .filter_map(|res: Result<_, anyhow::Error>| async move { res.ok() })
-                        .filter_map(|(_, cid)| {
-                            let ipfs = ipfs.clone();
-                            let providers = providers.clone();
-                            let addresses = addresses.clone();
-                            let message_command = message_command.clone();
-                            async move {
-                                let message_document = ipfs
-                                    .get_dag(cid)
-                                    .providers(&providers)
-                                    .deserialized::<MessageDocument>()
-                                    .await
-                                    .ok()?;
-                                for peer_id in addresses.into_iter().filter_map(|addr| addr.peer_id()) {
-                                    let _ = message_command
-                                        .clone()
-                                        .send(MessageCommand::MessageDelivered {
-                                            peer_id,
-                                            conversation_id,
-                                            message_id: message_document.id,
-                                        })
-                                        .await;
-                                }
-                                Some(message_document)
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .await;
-
-                    Ok::<_, Error>((conversation_id, documents))
-                };
-
-
-                executor.dispatch(async move {
-                    let result = fut.await;
-                    let _ = tx.send(result).await;
-                });
-            }
-        }).await;
-
-        Ok(())
-    }
-
-    async fn insert_messages_from_mailbox(
-        &mut self,
-        conversation_id: Uuid,
-        mut messages: Vec<MessageDocument>,
-    ) -> Result<(), Error> {
-        let mut conversation = self.get(conversation_id).await?;
-        let tx = self.subscribe(conversation_id).await?;
-        messages.sort_by(|a, b| b.cmp(a));
-
-        let mut events = vec![];
-
-        for message in messages {
-            if !message.verify() {
-                continue;
-            }
-            let message_id = message.id;
-            match conversation
-                .contains(&self.ipfs, message_id)
-                .await
-                .unwrap_or_default()
-            {
-                true => {
-                    let current_message = conversation
-                        .get_message_document(&self.ipfs, message_id)
-                        .await?;
-
-                    conversation
-                        .update_message_document(&self.ipfs, &message)
-                        .await?;
-
-                    let is_edited = matches!((message.modified, current_message.modified), (Some(modified), Some(current_modified)) if modified > current_modified )
-                        | matches!(
-                            (message.modified, current_message.modified),
-                            (Some(_), None)
-                        );
-
-                    match is_edited {
-                        true => events.push(MessageEventKind::MessageEdited {
-                            conversation_id,
-                            message_id,
-                        }),
-                        false => {
-                            //TODO: Emit event showing message was updated in some way
-                        }
-                    }
-                }
-                false => {
-                    conversation
-                        .insert_message_document(&self.ipfs, &message)
-                        .await?;
-
-                    events.push(MessageEventKind::MessageReceived {
-                        conversation_id,
-                        message_id,
-                    });
-                }
-            }
-        }
-
-        self.set_document(conversation).await?;
-
-        while let Some(event) = events.pop() {
-            _ = tx.send(event);
-        }
+        self.conversation_task.insert(conversation_id, inner_meta);
 
         Ok(())
     }
@@ -1184,16 +1292,6 @@ impl ConversationInner {
         self.root.get_conversation_document(id).await
     }
 
-    async fn set_favorite_conversation(
-        &mut self,
-        conversation_id: Uuid,
-        favorite: bool,
-    ) -> Result<(), Error> {
-        let mut document = self.get(conversation_id).await?;
-        document.favorite = favorite;
-        self.set_document(document).await
-    }
-
     pub async fn get_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
         if !self.contains(id).await {
             return Err(Error::InvalidConversation);
@@ -1351,79 +1449,6 @@ impl ConversationInner {
         }
     }
 
-    async fn process_msg_event(&mut self, id: Uuid, msg: Message) -> Result<(), Error> {
-        let data = PayloadMessage::<Vec<u8>>::from_bytes(&msg.data)?;
-        let sender = data.sender().to_did()?;
-
-        let keypair = self.root.keypair();
-
-        let own_did = keypair.to_did()?;
-
-        let conversation = self.get(id).await?;
-
-        let bytes = match conversation.conversation_type() {
-            ConversationType::Direct => {
-                let list = conversation.recipients();
-
-                let recipients = list
-                    .iter()
-                    .filter(|did| own_did.ne(did))
-                    .collect::<Vec<_>>();
-
-                let Some(member) = recipients.first() else {
-                    tracing::warn!(id = %id, "participant is not in conversation");
-                    return Err(Error::IdentityDoesntExist);
-                };
-
-                ecdh_decrypt(keypair, Some(member), data.message())?
-            }
-            ConversationType::Group => {
-                let store = self.get_keystore(id).await?;
-
-                let key = match store.get_latest(keypair, &sender) {
-                    Ok(key) => key,
-                    Err(Error::PublicKeyDoesntExist) => {
-                        // If we are not able to get the latest key from the store, this is because we are still awaiting on the response from the key exchange
-                        // So what we should so instead is set aside the payload until we receive the key exchange then attempt to process it again
-
-                        // Note: We can set aside the data without the payload being owned directly due to the data already been verified
-                        //       so we can own the data directly without worrying about the lifetime
-                        //       however, we may want to eventually validate the data to ensure it havent been tampered in some way
-                        //       while waiting for the response.
-
-                        self.pending_key_exchange.entry(id).or_default().push((
-                            sender.clone(),
-                            data.message().to_vec(),
-                            false,
-                        ));
-
-                        // Maybe send a request? Although we could, we should check to determine if one was previously sent or queued first,
-                        // but for now we can leave this commented until the queue is removed and refactored.
-                        // _ = self.request_key(id, &data.sender()).await;
-
-                        // Note: We will mark this as `Ok` since this is pending request to be resolved
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        tracing::warn!(id = %id, sender = %data.sender(), error = %e, "Failed to obtain key");
-                        return Err(e);
-                    }
-                };
-
-                Cipher::direct_decrypt(data.message(), &key)?
-            }
-        };
-
-        let event = serde_json::from_slice::<MessagingEvents>(&bytes).map_err(|e| {
-            tracing::warn!(id = %id, sender = %data.sender(), error = %e, "Failed to deserialize message");
-            e
-        })?;
-
-        message_event(self, id, &sender, event).await?;
-
-        Ok(())
-    }
-
     async fn request_key(&mut self, conversation_id: Uuid, did: &DID) -> Result<(), Error> {
         let request = ConversationRequestResponse::Request {
             conversation_id,
@@ -1476,1694 +1501,15 @@ impl ConversationInner {
         Ok(())
     }
 
-    pub async fn messages_count(&self, conversation_id: Uuid) -> Result<usize, Error> {
-        self.get(conversation_id)
-            .await?
-            .messages_length(&self.ipfs)
-            .await
-    }
-
-    async fn get_message(
-        &self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-    ) -> Result<warp::raygun::Message, Error> {
-        let conversation = self.get(conversation_id).await?;
-
-        let keypair = self.root.keypair();
-
-        let keystore = pubkey_or_keystore(self, conversation_id, keypair).await?;
-
-        conversation
-            .get_message(&self.ipfs, keypair, message_id, keystore.as_ref())
-            .await
-    }
-
-    async fn get_message_reference(
-        &self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-    ) -> Result<MessageReference, Error> {
-        let conversation = self.get(conversation_id).await?;
-        conversation
-            .get_message_document(&self.ipfs, message_id)
-            .await
-            .map(|document| document.into())
-    }
-
-    pub async fn get_message_references<'a>(
-        &self,
-        conversation_id: Uuid,
-        opt: MessageOptions,
-    ) -> Result<BoxStream<'a, MessageReference>, Error> {
-        let conversation = self.get(conversation_id).await?;
-        conversation
-            .get_messages_reference_stream(&self.ipfs, opt)
-            .await
-    }
-
-    pub async fn get_messages(
-        &self,
-        conversation_id: Uuid,
-        opt: MessageOptions,
-    ) -> Result<Messages, Error> {
-        let conversation = self.get(conversation_id).await?;
-
-        let keypair = self.root.keypair();
-
-        let keystore = pubkey_or_keystore(self, conversation_id, keypair).await?;
-
-        let m_type = opt.messages_type();
-        match m_type {
-            MessagesType::Stream => {
-                let stream = conversation
-                    .get_messages_stream(&self.ipfs, keypair, opt, keystore)
-                    .await?;
-                Ok(Messages::Stream(stream))
-            }
-            MessagesType::List => {
-                let list = conversation
-                    .get_messages(&self.ipfs, keypair, opt, keystore)
-                    .await?;
-                Ok(Messages::List(list))
-            }
-            MessagesType::Pages { .. } => {
-                conversation
-                    .get_messages_pages(&self.ipfs, keypair, opt, keystore.as_ref())
-                    .await
-            }
-        }
-    }
-
-    //TODO: Send a request to recipient(s) of the chat to ack if message been delivered if message is marked "sent" unless we receive an event acknowledging the message itself
-    //Note:
-    //  - For group chat, this can be ignored unless we decide to have a full acknowledgement from all recipients in which case, we can mark it as "sent"
-    //    until all confirm to have received the message
-    //  - If member sends an event stating that they do not have the message to grab the message from the store
-    //    and send it them, with a map marking the attempt(s)
-    pub async fn message_status(
-        &self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-    ) -> Result<MessageStatus, Error> {
-        let conversation = self.get(conversation_id).await?;
-
-        if matches!(conversation.conversation_type(), ConversationType::Group) {
-            //TODO: Handle message status for group
-            return Err(Error::Unimplemented);
-        }
-
-        let messages = conversation.get_message_list(&self.ipfs).await?;
-
-        if !messages.iter().any(|document| document.id == message_id) {
-            return Err(Error::MessageNotFound);
-        }
-
-        let own_did = self.identity.did_key();
-
-        let list = conversation
-            .recipients()
-            .iter()
-            .filter(|did| own_did.ne(did))
-            .cloned()
-            .collect::<Vec<_>>();
-
-        for peer in list {
-            if let Some(list) = self.queue.get(&peer) {
-                for item in list {
-                    let Queue { id, m_id, .. } = item;
-                    if conversation.id() == *id {
-                        if let Some(m_id) = m_id {
-                            if message_id == *m_id {
-                                return Ok(MessageStatus::NotSent);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        //Not a guarantee that it been sent but for now since the message exist locally and not marked in queue, we will assume it have been sent
-        Ok(MessageStatus::Sent)
-    }
-
-    pub async fn send_message(
-        &mut self,
-        conversation_id: Uuid,
-        messages: Vec<String>,
-    ) -> Result<Uuid, Error> {
-        let mut conversation = self.get(conversation_id).await?;
-        let tx = self.subscribe(conversation_id).await?;
-
-        if messages.is_empty() {
-            return Err(Error::EmptyMessage);
-        }
-
-        let lines_value_length: usize = messages
-            .iter()
-            .filter(|s| !s.is_empty())
-            .map(|s| s.trim())
-            .map(|s| s.chars().count())
-            .sum();
-
-        if lines_value_length == 0 || lines_value_length > MAX_MESSAGE_SIZE {
-            tracing::error!(
-                current_size = lines_value_length,
-                max = MAX_MESSAGE_SIZE,
-                "length of message is invalid"
-            );
-            return Err(Error::InvalidLength {
-                context: "message".into(),
-                current: lines_value_length,
-                minimum: Some(MIN_MESSAGE_SIZE),
-                maximum: Some(MAX_MESSAGE_SIZE),
-            });
-        }
-
-        let keypair = self.root.keypair();
-        let own_did = self.identity.did_key();
-
-        let mut message = warp::raygun::Message::default();
-        message.set_conversation_id(conversation.id());
-        message.set_sender(own_did.clone());
-        message.set_lines(messages.clone());
-
-        let message_id = message.id();
-        let keystore = pubkey_or_keystore(self, conversation.id(), keypair).await?;
-
-        let message = MessageDocument::new(&self.ipfs, keypair, message, keystore.as_ref()).await?;
-
-        let message_cid = conversation
-            .insert_message_document(&self.ipfs, &message)
-            .await?;
-
-        let recipients = conversation.recipients();
-
-        self.set_document(conversation).await?;
-
-        let event = MessageEventKind::MessageSent {
-            conversation_id,
-            message_id,
-        };
-
-        if let Err(e) = tx.send(event) {
-            error!(%conversation_id, error = %e, "Error broadcasting event");
-        }
-
-        let message_id = message.id;
-
-        let event = MessagingEvents::New { message };
-
-        if !recipients.is_empty() {
-            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
-                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                    let _ = self
-                        .message_command
-                        .clone()
-                        .send(MessageCommand::InsertMessage {
-                            peer_id,
-                            conversation_id,
-                            recipients: recipients.clone(),
-                            message_id,
-                            message_cid,
-                        })
-                        .await;
-                }
-            }
-        }
-
-        self.publish(conversation_id, Some(message_id), event, true)
-            .await
-            .map(|_| message_id)
-    }
-
-    pub async fn edit_message(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        messages: Vec<String>,
-    ) -> Result<(), Error> {
-        let mut conversation = self.get(conversation_id).await?;
-        let tx = self.subscribe(conversation_id).await?;
-
-        if messages.is_empty() {
-            return Err(Error::EmptyMessage);
-        }
-
-        let lines_value_length: usize = messages
-            .iter()
-            .filter(|s| !s.is_empty())
-            .map(|s| s.trim())
-            .map(|s| s.chars().count())
-            .sum();
-
-        if lines_value_length == 0 || lines_value_length > MAX_MESSAGE_SIZE {
-            tracing::error!(
-                current_size = lines_value_length,
-                max = MAX_MESSAGE_SIZE,
-                "length of message is invalid"
-            );
-            return Err(Error::InvalidLength {
-                context: "message".into(),
-                current: lines_value_length,
-                minimum: Some(MIN_MESSAGE_SIZE),
-                maximum: Some(MAX_MESSAGE_SIZE),
-            });
-        }
-
-        let keypair = self.root.keypair();
-
-        let keystore = pubkey_or_keystore(self, conversation.id(), keypair).await?;
-
-        let mut message_document = conversation
-            .get_message_document(&self.ipfs, message_id)
-            .await?;
-
-        let mut message = message_document
-            .resolve(&self.ipfs, keypair, true, keystore.as_ref())
-            .await?;
-
-        let sender = message.sender();
-
-        let own_did = &self.identity.did_key();
-
-        if sender.ne(own_did) {
-            return Err(Error::InvalidMessage);
-        }
-
-        message.lines_mut().clone_from(&messages);
-        message.set_modified(Utc::now());
-
-        message_document
-            .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
-            .await?;
-
-        let nonce = message_document.nonce_from_message()?;
-        let signature = message_document.signature.expect("message to be signed");
-
-        let message_cid = conversation
-            .update_message_document(&self.ipfs, &message_document)
-            .await?;
-
-        let recipients = conversation.recipients();
-
-        self.set_document(conversation).await?;
-
-        _ = tx.send(MessageEventKind::MessageEdited {
-            conversation_id,
-            message_id,
-        });
-
-        let event = MessagingEvents::Edit {
-            conversation_id,
-            message_id,
-            modified: message_document.modified.expect("message to be modified"),
-            lines: messages,
-            nonce: nonce.to_vec(),
-            signature: signature.into(),
-        };
-
-        if !recipients.is_empty() {
-            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
-                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                    let _ = self
-                        .message_command
-                        .clone()
-                        .send(MessageCommand::InsertMessage {
-                            peer_id,
-                            conversation_id,
-                            recipients: recipients.clone(),
-                            message_id,
-                            message_cid,
-                        })
-                        .await;
-                }
-            }
-        }
-
-        self.publish(conversation_id, None, event, true).await
-    }
-
-    pub async fn reply_message(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        messages: Vec<String>,
-    ) -> Result<Uuid, Error> {
-        let mut conversation = self.get(conversation_id).await?;
-        let tx = self.subscribe(conversation_id).await?;
-
-        if messages.is_empty() {
-            return Err(Error::EmptyMessage);
-        }
-
-        let lines_value_length: usize = messages
-            .iter()
-            .filter(|s| !s.is_empty())
-            .map(|s| s.trim())
-            .map(|s| s.chars().count())
-            .sum();
-
-        if lines_value_length == 0 || lines_value_length > MAX_MESSAGE_SIZE {
-            tracing::error!(
-                current_size = lines_value_length,
-                max = MAX_MESSAGE_SIZE,
-                "length of message is invalid"
-            );
-            return Err(Error::InvalidLength {
-                context: "message".into(),
-                current: lines_value_length,
-                minimum: Some(MIN_MESSAGE_SIZE),
-                maximum: Some(MAX_MESSAGE_SIZE),
-            });
-        }
-
-        let keypair = self.root.keypair();
-
-        let own_did = self.identity.did_key();
-
-        let mut message = warp::raygun::Message::default();
-        message.set_conversation_id(conversation.id());
-        message.set_sender(own_did.clone());
-        message.set_lines(messages);
-        message.set_replied(Some(message_id));
-
-        let keystore = pubkey_or_keystore(self, conversation.id(), keypair).await?;
-
-        let message = MessageDocument::new(&self.ipfs, keypair, message, keystore.as_ref()).await?;
-
-        let message_id = message.id;
-
-        let message_cid = conversation
-            .insert_message_document(&self.ipfs, &message)
-            .await?;
-
-        let recipients = conversation.recipients();
-
-        self.set_document(conversation).await?;
-
-        let event = MessageEventKind::MessageSent {
-            conversation_id,
-            message_id,
-        };
-
-        if let Err(e) = tx.send(event) {
-            error!(%conversation_id, error = %e, "Error broadcasting event");
-        }
-
-        let event = MessagingEvents::New { message };
-
-        if !recipients.is_empty() {
-            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
-                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                    let _ = self
-                        .message_command
-                        .clone()
-                        .send(MessageCommand::InsertMessage {
-                            peer_id,
-                            conversation_id,
-                            recipients: recipients.clone(),
-                            message_id,
-                            message_cid,
-                        })
-                        .await;
-                }
-            }
-        }
-
-        self.publish(conversation_id, Some(message_id), event, true)
-            .await
-            .map(|_| message_id)
-    }
-
-    pub async fn delete_message(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        broadcast: bool,
-    ) -> Result<(), Error> {
-        let mut conversation = self.get(conversation_id).await?;
-        let tx = self.subscribe(conversation_id).await?;
-
-        let event = MessagingEvents::Delete {
-            conversation_id,
-            message_id,
-        };
-
-        conversation.delete_message(&self.ipfs, message_id).await?;
-
-        self.set_document(conversation).await?;
-
-        if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
-            for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                let _ = self
-                    .message_command
-                    .clone()
-                    .send(MessageCommand::RemoveMessage {
-                        peer_id,
-                        conversation_id,
-                        message_id,
-                    })
-                    .await;
-            }
-        }
-
-        _ = tx.send(MessageEventKind::MessageDeleted {
-            conversation_id,
-            message_id,
-        });
-
-        if broadcast {
-            self.publish(conversation_id, None, event, true).await?;
-        }
-
-        Ok(())
-    }
-
-    pub async fn pin_message(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        state: PinState,
-    ) -> Result<(), Error> {
-        let mut conversation = self.get(conversation_id).await?;
-        let tx = self.subscribe(conversation_id).await?;
-
-        let keypair = self.root.keypair();
-        let own_did = self.identity.did_key();
-
-        let keystore = pubkey_or_keystore(self, conversation.id(), keypair).await?;
-
-        let mut message_document = conversation
-            .get_message_document(&self.ipfs, message_id)
-            .await?;
-
-        let mut message = message_document
-            .resolve(&self.ipfs, keypair, true, keystore.as_ref())
-            .await?;
-
-        let event = match state {
-            PinState::Pin => {
-                if message.pinned() {
-                    return Ok(());
-                }
-                *message.pinned_mut() = true;
-                MessageEventKind::MessagePinned {
-                    conversation_id,
-                    message_id,
-                }
-            }
-            PinState::Unpin => {
-                if !message.pinned() {
-                    return Ok(());
-                }
-                *message.pinned_mut() = false;
-                MessageEventKind::MessageUnpinned {
-                    conversation_id,
-                    message_id,
-                }
-            }
-        };
-
-        message_document
-            .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
-            .await?;
-
-        let message_cid = conversation
-            .update_message_document(&self.ipfs, &message_document)
-            .await?;
-
-        let recipients = conversation.recipients();
-
-        self.set_document(conversation).await?;
-
-        _ = tx.send(event);
-
-        if !recipients.is_empty() {
-            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
-                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                    let _ = self
-                        .message_command
-                        .clone()
-                        .send(MessageCommand::InsertMessage {
-                            peer_id,
-                            conversation_id,
-                            recipients: recipients.clone(),
-                            message_id,
-                            message_cid,
-                        })
-                        .await;
-                }
-            }
-        }
-
-        let event = MessagingEvents::Pin {
-            conversation_id,
-            member: own_did,
-            message_id,
-            state,
-        };
-
-        self.publish(conversation_id, None, event, true).await
-    }
-
-    pub async fn react(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        state: ReactionState,
-        emoji: String,
-    ) -> Result<(), Error> {
-        let mut conversation = self.get(conversation_id).await?;
-        let tx = self.subscribe(conversation_id).await?;
-
-        let keypair = self.root.keypair();
-
-        let own_did = self.identity.did_key();
-
-        let keystore = pubkey_or_keystore(self, conversation.id(), keypair).await?;
-
-        let mut message_document = conversation
-            .get_message_document(&self.ipfs, message_id)
-            .await?;
-
-        let mut message = message_document
-            .resolve(&self.ipfs, keypair, true, keystore.as_ref())
-            .await?;
-
-        let recipients = conversation.recipients();
-
-        let reactions = message.reactions_mut();
-
-        let message_cid;
-
-        match state {
-            ReactionState::Add => {
-                if reactions.len() >= MAX_REACTIONS {
-                    return Err(Error::InvalidLength {
-                        context: "reactions".into(),
-                        current: reactions.len(),
-                        minimum: None,
-                        maximum: Some(MAX_REACTIONS),
-                    });
-                }
-
-                let entry = reactions.entry(emoji.clone()).or_default();
-
-                if entry.contains(&own_did) {
-                    return Err(Error::ReactionExist);
-                }
-
-                entry.push(own_did.clone());
-
-                message_document
-                    .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
-                    .await?;
-
-                message_cid = conversation
-                    .update_message_document(&self.ipfs, &message_document)
-                    .await?;
-                self.set_document(conversation).await?;
-
-                _ = tx.send(MessageEventKind::MessageReactionAdded {
-                    conversation_id,
-                    message_id,
-                    did_key: own_did.clone(),
-                    reaction: emoji.clone(),
-                });
-            }
-            ReactionState::Remove => {
-                match reactions.entry(emoji.clone()) {
-                    indexmap::map::Entry::Occupied(mut e) => {
-                        let list = e.get_mut();
-
-                        if !list.contains(&own_did) {
-                            return Err(Error::ReactionDoesntExist);
-                        }
-
-                        list.retain(|did| did != &own_did);
-                        if list.is_empty() {
-                            e.swap_remove();
-                        }
-                    }
-                    indexmap::map::Entry::Vacant(_) => return Err(Error::ReactionDoesntExist),
-                };
-
-                message_document
-                    .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
-                    .await?;
-
-                message_cid = conversation
-                    .update_message_document(&self.ipfs, &message_document)
-                    .await?;
-
-                self.set_document(conversation).await?;
-
-                _ = tx.send(MessageEventKind::MessageReactionRemoved {
-                    conversation_id,
-                    message_id,
-                    did_key: own_did.clone(),
-                    reaction: emoji.clone(),
-                });
-            }
-        }
-
-        let event = MessagingEvents::React {
-            conversation_id,
-            reactor: own_did,
-            message_id,
-            state,
-            emoji,
-        };
-
-        if !recipients.is_empty() {
-            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
-                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                    let _ = self
-                        .message_command
-                        .clone()
-                        .send(MessageCommand::InsertMessage {
-                            peer_id,
-                            conversation_id,
-                            recipients: recipients.clone(),
-                            message_id,
-                            message_cid,
-                        })
-                        .await;
-                }
-            }
-        }
-
-        self.publish(conversation_id, None, event, true).await
-    }
-
-    pub async fn attach(
-        &mut self,
-        conversation_id: Uuid,
-        reply_id: Option<Uuid>,
-        locations: Vec<Location>,
-        messages: Vec<String>,
-    ) -> Result<(Uuid, AttachmentEventStream), Error> {
-        if locations.len() > 32 {
-            return Err(Error::InvalidLength {
-                context: "files".into(),
-                current: locations.len(),
-                minimum: Some(1),
-                maximum: Some(32),
-            });
-        }
-
-        if !messages.is_empty() {
-            let lines_value_length: usize = messages
-                .iter()
-                .filter(|s| !s.is_empty())
-                .map(|s| s.trim())
-                .map(|s| s.chars().count())
-                .sum();
-
-            if lines_value_length > MAX_MESSAGE_SIZE {
-                tracing::error!(
-                    current_size = lines_value_length,
-                    max = MAX_MESSAGE_SIZE,
-                    "length of message is invalid"
-                );
-                return Err(Error::InvalidLength {
-                    context: "message".into(),
-                    current: lines_value_length,
-                    minimum: None,
-                    maximum: Some(MAX_MESSAGE_SIZE),
-                });
-            }
-        }
-        let conversation = self.get(conversation_id).await?;
-
-        let keypair = self.root.keypair();
-
-        let mut constellation = self.file.clone();
-
-        let files = locations
-            .into_iter()
-            .filter(|location| match location {
-                Location::Disk { path } => path.is_file(),
-                _ => true,
-            })
-            .collect::<Vec<_>>();
-
-        if files.is_empty() {
-            return Err(Error::NoAttachments);
-        }
-
-        let root_directory = constellation.root_directory();
-
-        if !root_directory.has_item(CHAT_DIRECTORY) {
-            let new_dir = Directory::new(CHAT_DIRECTORY);
-            root_directory.add_directory(new_dir)?;
-        }
-
-        let mut media_dir = root_directory
-            .get_last_directory_from_path(&format!("/{CHAT_DIRECTORY}/{conversation_id}"))?;
-
-        // if the directory that returned is the chat directory, this means we should create
-        // the directory specific to the conversation
-        if media_dir.name() == CHAT_DIRECTORY {
-            let new_dir = Directory::new(&conversation_id.to_string());
-            media_dir.add_directory(new_dir)?;
-            media_dir = media_dir.get_last_directory_from_path(&conversation_id.to_string())?;
-        }
-
-        assert_eq!(media_dir.name(), conversation_id.to_string());
-
-        let mut atx = self.attachment_tx.clone();
-        let keystore = pubkey_or_keystore(self, conversation_id, keypair).await?;
-        let ipfs = self.ipfs.clone();
-        let own_did = self.identity.did_key();
-
-        let keypair = keypair.clone();
-
-        let message_id = Uuid::new_v4();
-
-        let stream = async_stream::stream! {
-            let mut in_stack = vec![];
-
-            let mut attachments = vec![];
-
-            let mut streams = StreamMap::new();
-
-            for file in files {
-                let kind = LocationKind::from(&file);
-                match file {
-                    Location::Constellation { path } => {
-                        match constellation
-                            .root_directory()
-                            .get_item_by_path(&path)
-                            .and_then(|item| item.get_file())
-                        {
-                            Ok(f) => {
-                                streams.insert(kind, stream::once(async { (Progression::ProgressComplete { name: f.name(), total: Some(f.size()) }, Some(f)) }).boxed());
-                            },
-                            Err(e) => {
-                                let constellation_path = PathBuf::from(&path);
-                                let name = constellation_path.file_name().and_then(OsStr::to_str).map(str::to_string).unwrap_or(path.to_string());
-                                streams.insert(kind, stream::once(async { (Progression::ProgressFailed { name, last_size: None, error: e }, None) }).boxed());
-                            },
-                        }
-                    }
-                    Location::Stream { name, size, stream } => {
-                        let mut filename = name;
-
-                        let original = filename.clone();
-
-                        let current_directory = media_dir.clone();
-
-                        let mut interval = 0;
-                        let skip;
-                        loop {
-                            if in_stack.contains(&filename) || current_directory.has_item(&filename) {
-                                if interval > 2000 {
-                                    skip = true;
-                                    break;
-                                }
-                                interval += 1;
-                                let file = PathBuf::from(&original);
-                                let file_stem =
-                                    file.file_stem().and_then(OsStr::to_str).map(str::to_string);
-                                let ext = file.extension().and_then(OsStr::to_str).map(str::to_string);
-
-                                filename = match (file_stem, ext) {
-                                    (Some(filename), Some(ext)) => {
-                                        format!("{filename} ({interval}).{ext}")
-                                    }
-                                    _ => format!("{original} ({interval})"),
-                                };
-                                continue;
-                            }
-                            skip = false;
-                            break;
-                        }
-
-                        if skip {
-                            streams.insert(kind, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: Error::InvalidFile }, None) }).boxed());
-                            continue;
-                        }
-
-                        in_stack.push(filename.clone());
-
-                        let filename = format!("/{CHAT_DIRECTORY}/{conversation_id}/{filename}");
-
-                        let mut progress = match constellation.put_stream(&filename, size, stream).await {
-                            Ok(stream) => stream,
-                            Err(e) => {
-                                error!(%conversation_id, "Error uploading {filename}: {e}");
-                                streams.insert(kind, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: e }, None) }).boxed());
-                                continue;
-                            }
-                        };
-
-
-                        let directory = root_directory.clone();
-                        let filename = filename.to_string();
-
-                        let stream = async_stream::stream! {
-                            while let Some(item) = progress.next().await {
-                                match item {
-                                    item @ Progression::CurrentProgress { .. } => {
-                                        yield (item, None);
-                                    },
-                                    item @ Progression::ProgressComplete { .. } => {
-                                        let file_name = directory.get_item_by_path(&filename).and_then(|item| item.get_file()).ok();
-                                        yield (item, file_name);
-                                        break;
-                                    },
-                                    item @ Progression::ProgressFailed { .. } => {
-                                        yield (item, None);
-                                        break;
-                                    }
-                                }
-                            }
-                        };
-
-                        streams.insert(kind, stream.boxed());
-                    }
-                    Location::Disk { path } => {
-                        #[cfg(target_arch = "wasm32")]
-                        {
-                            _ = path;
-                            unreachable!()
-                        }
-                        #[cfg(not(target_arch = "wasm32"))]
-                        {
-                            let mut filename = match path.file_name() {
-                                Some(file) => file.to_string_lossy().to_string(),
-                                None => continue,
-                            };
-
-                            let original = filename.clone();
-
-                            let current_directory = media_dir.clone();
-
-                            let mut interval = 0;
-                            let skip;
-                            loop {
-                                if in_stack.contains(&filename) || current_directory.has_item(&filename) {
-                                    if interval > 2000 {
-                                        skip = true;
-                                        break;
-                                    }
-                                    interval += 1;
-                                    let file = PathBuf::from(&original);
-                                    let file_stem =
-                                        file.file_stem().and_then(OsStr::to_str).map(str::to_string);
-                                    let ext = file.extension().and_then(OsStr::to_str).map(str::to_string);
-
-                                    filename = match (file_stem, ext) {
-                                        (Some(filename), Some(ext)) => {
-                                            format!("{filename} ({interval}).{ext}")
-                                        }
-                                        _ => format!("{original} ({interval})"),
-                                    };
-                                    continue;
-                                }
-                                skip = false;
-                                break;
-                            }
-
-                            if skip {
-                                streams.insert(kind, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: Error::InvalidFile }, None) }).boxed());
-                                continue;
-                            }
-
-                            let file_path = path.display().to_string();
-
-                            in_stack.push(filename.clone());
-
-                            let filename = format!("/{CHAT_DIRECTORY}/{conversation_id}/{filename}");
-
-                            let mut progress = match constellation.put(&filename, &file_path).await {
-                                Ok(stream) => stream,
-                                Err(e) => {
-                                    error!(%conversation_id, "Error uploading {filename}: {e}");
-                                    streams.insert(kind, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: e }, None) }).boxed());
-                                    continue;
-                                }
-                            };
-
-
-                            let directory = root_directory.clone();
-                            let filename = filename.to_string();
-
-                            let stream = async_stream::stream! {
-                                while let Some(item) = progress.next().await {
-                                    match item {
-                                        item @ Progression::CurrentProgress { .. } => {
-                                            yield (item, None);
-                                        },
-                                        item @ Progression::ProgressComplete { .. } => {
-                                            let file_name = directory.get_item_by_path(&filename).and_then(|item| item.get_file()).ok();
-                                            yield (item, file_name);
-                                            break;
-                                        },
-                                        item @ Progression::ProgressFailed { .. } => {
-                                            yield (item, None);
-                                            break;
-                                        }
-                                    }
-                                }
-                            };
-
-                            streams.insert(kind, stream.boxed());
-                        }
-                    }
-                };
-            }
-
-            for await (location, (progress, file)) in streams {
-                yield AttachmentKind::AttachedProgress(location, progress);
-                if let Some(file) = file {
-                    attachments.push(file);
-                }
-            }
-
-            let final_results = {
-                async move {
-
-                    if attachments.is_empty() {
-                        return Err(Error::NoAttachments);
-                    }
-
-                    let mut message = warp::raygun::Message::default();
-                    message.set_id(message_id);
-                    message.set_message_type(MessageType::Attachment);
-                    message.set_conversation_id(conversation.id());
-                    message.set_sender(own_did);
-                    message.set_attachment(attachments);
-                    message.set_lines(messages.clone());
-                    message.set_replied(reply_id);
-
-                    let message =
-                        MessageDocument::new(&ipfs, &keypair, message, keystore.as_ref()).await?;
-
-                    let (tx, rx) = oneshot::channel();
-                    _ = atx.send((conversation_id, message, tx)).await;
-
-                    rx.await.expect("shouldnt drop")
-                }
-            };
-
-            yield AttachmentKind::Pending(final_results.await)
-        };
-
-        Ok((message_id, stream.boxed()))
-    }
-
-    // use specifically for attachment messages
-    async fn store_direct_for_attachment(
-        &mut self,
-        conversation_id: Uuid,
-        message: MessageDocument,
-    ) -> Result<(), Error> {
-        let mut conversation = self.get(conversation_id).await?;
-        let tx = self.subscribe(conversation_id).await?;
-
-        let message_id = message.id;
-
-        let message_cid = conversation
-            .insert_message_document(&self.ipfs, &message)
-            .await?;
-
-        let recipients = conversation.recipients();
-
-        self.set_document(conversation).await?;
-
-        let event = MessageEventKind::MessageSent {
-            conversation_id,
-            message_id,
-        };
-
-        if let Err(e) = tx.send(event) {
-            error!(%conversation_id, error = %e, "Error broadcasting event");
-        }
-
-        let event = MessagingEvents::New { message };
-
-        if !recipients.is_empty() {
-            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
-                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                    let _ = self
-                        .message_command
-                        .clone()
-                        .send(MessageCommand::InsertMessage {
-                            peer_id,
-                            conversation_id,
-                            recipients: recipients.clone(),
-                            message_id,
-                            message_cid,
-                        })
-                        .await;
-                }
-            }
-        }
-
-        self.publish(conversation_id, Some(message_id), event, true)
-            .await
-    }
-
-    pub async fn download(
-        &self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        file: &str,
-        path: PathBuf,
-    ) -> Result<ConstellationProgressStream, Error> {
-        let conversation = self.get(conversation_id).await?;
-
-        let members = conversation
-            .recipients()
-            .iter()
-            .filter_map(|did| did.to_peer_id().ok())
-            .collect::<Vec<_>>();
-
-        let message = conversation
-            .get_message_document(&self.ipfs, message_id)
-            .await?;
-
-        if message.message_type != MessageType::Attachment {
-            return Err(Error::InvalidMessage);
-        }
-
-        let attachment = message
-            .attachments()
-            .iter()
-            .find(|attachment| attachment.name == file)
-            .ok_or(Error::FileNotFound)?;
-
-        let stream = attachment.download(&self.ipfs, path, &members, None);
-
-        Ok(stream)
-    }
-
-    pub async fn download_stream(
-        &self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        file: &str,
-    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error> {
-        let conversation = self.get(conversation_id).await?;
-
-        let members = conversation
-            .recipients()
-            .iter()
-            .filter_map(|did| did.to_peer_id().ok())
-            .collect::<Vec<_>>();
-
-        let message = conversation
-            .get_message_document(&self.ipfs, message_id)
-            .await?;
-
-        if message.message_type != MessageType::Attachment {
-            return Err(Error::InvalidMessage);
-        }
-
-        let attachment = message
-            .attachments()
-            .iter()
-            .find(|attachment| attachment.name == file)
-            .ok_or(Error::FileNotFound)?;
-
-        let stream = attachment.download_stream(&self.ipfs, &members, None);
-
-        Ok(stream)
-    }
-
-    pub async fn set_description(
-        &mut self,
-        conversation_id: Uuid,
-        desc: Option<&str>,
-    ) -> Result<(), Error> {
-        let mut conversation = self.get(conversation_id).await?;
-        let tx = self.subscribe(conversation_id).await?;
-        let own_did = &self.identity.did_key();
-
-        if conversation.conversation_type() == ConversationType::Group {
-            let Some(creator) = conversation.creator.as_ref() else {
-                return Err(Error::InvalidConversation);
-            };
-            if own_did != creator {
-                return Err(Error::InvalidConversation); //TODO:
-            }
-        }
-
-        if let Some(desc) = desc {
-            if desc.is_empty() || desc.len() > MAX_CONVERSATION_DESCRIPTION {
-                return Err(Error::InvalidLength {
-                    context: "description".into(),
-                    minimum: Some(1),
-                    maximum: Some(MAX_CONVERSATION_DESCRIPTION),
-                    current: desc.len(),
-                });
-            }
-        }
-
-        conversation.description = desc.map(ToString::to_string);
-
-        self.set_document(&mut conversation).await?;
-
-        let ev = MessageEventKind::ConversationDescriptionChanged {
-            conversation_id,
-            description: desc.map(ToString::to_string),
-        };
-
-        _ = tx.send(ev);
-
-        let event = MessagingEvents::UpdateConversation {
-            conversation,
-            kind: ConversationUpdateKind::ChangeDescription {
-                description: desc.map(ToString::to_string),
-            },
-        };
-
-        self.publish(conversation_id, None, event, true).await
-    }
-
-    pub async fn add_restricted(
-        &mut self,
-        conversation_id: Uuid,
-        did_key: &DID,
-    ) -> Result<(), Error> {
-        let mut conversation = self.get(conversation_id).await?;
-
-        if matches!(conversation.conversation_type(), ConversationType::Direct) {
-            return Err(Error::InvalidConversation);
-        }
-
-        let Some(creator) = conversation.creator.clone() else {
-            return Err(Error::InvalidConversation);
-        };
-
-        let own_did = &self.identity.did_key();
-
-        if creator.ne(own_did) {
-            return Err(Error::PublicKeyInvalid);
-        }
-
-        if creator.eq(did_key) {
-            return Err(Error::PublicKeyInvalid);
-        }
-
-        if !self.root.is_blocked(did_key).await? {
-            return Err(Error::PublicKeyIsntBlocked);
-        }
-
-        debug_assert!(!conversation.recipients.contains(did_key));
-        debug_assert!(!conversation.restrict.contains(did_key));
-
-        conversation.restrict.push(did_key.clone());
-
-        self.set_document(&mut conversation).await?;
-
-        let event = MessagingEvents::UpdateConversation {
-            conversation,
-            kind: ConversationUpdateKind::AddRestricted {
-                did: did_key.clone(),
-            },
-        };
-
-        self.publish(conversation_id, None, event, true).await
-    }
-
-    pub async fn remove_restricted(
-        &mut self,
-        conversation_id: Uuid,
-        did_key: &DID,
-    ) -> Result<(), Error> {
-        let mut conversation = self.get(conversation_id).await?;
-
-        if matches!(conversation.conversation_type(), ConversationType::Direct) {
-            return Err(Error::InvalidConversation);
-        }
-
-        let Some(creator) = conversation.creator.clone() else {
-            return Err(Error::InvalidConversation);
-        };
-
-        let own_did = &self.identity.did_key();
-
-        if creator.ne(own_did) {
-            return Err(Error::PublicKeyInvalid);
-        }
-
-        if creator.eq(did_key) {
-            return Err(Error::PublicKeyInvalid);
-        }
-
-        if self.root.is_blocked(did_key).await? {
-            return Err(Error::PublicKeyIsBlocked);
-        }
-
-        debug_assert!(conversation.restrict.contains(did_key));
-
-        conversation
-            .restrict
-            .retain(|restricted| restricted != did_key);
-
-        self.set_document(&mut conversation).await?;
-
-        let event = MessagingEvents::UpdateConversation {
-            conversation,
-            kind: ConversationUpdateKind::RemoveRestricted {
-                did: did_key.clone(),
-            },
-        };
-
-        self.publish(conversation_id, None, event, true).await
-    }
-
-    pub async fn update_conversation_name(
-        &mut self,
-        conversation_id: Uuid,
-        name: &str,
-    ) -> Result<(), Error> {
-        let mut conversation = self.get(conversation_id).await?;
-        let tx = self.subscribe(conversation_id).await?;
-
-        let name = name.trim();
-        let name_length = name.len();
-
-        if name_length > 255 {
-            return Err(Error::InvalidLength {
-                context: "name".into(),
-                current: name_length,
-                minimum: None,
-                maximum: Some(255),
-            });
-        }
-
-        if let ConversationType::Direct = &conversation.conversation_type() {
-            return Err(Error::InvalidConversation);
-        }
-        assert_eq!(conversation.conversation_type(), ConversationType::Group);
-
-        let Some(creator) = conversation.creator.clone() else {
-            return Err(Error::InvalidConversation);
-        };
-
-        let own_did = &self.identity.did_key();
-
-        if !&conversation
-            .permissions
-            .has_permission(own_did, GroupPermission::SetGroupName)
-            && creator.ne(own_did)
-        {
-            return Err(Error::PublicKeyInvalid);
-        }
-
-        conversation.name = (!name.is_empty()).then_some(name.to_string());
-
-        self.set_document(&mut conversation).await?;
-
-        let new_name = conversation.name();
-
-        let event = MessagingEvents::UpdateConversation {
-            conversation,
-            kind: ConversationUpdateKind::ChangeName { name: new_name },
-        };
-
-        let _ = tx.send(MessageEventKind::ConversationNameUpdated {
-            conversation_id,
-            name: name.to_string(),
-        });
-
-        self.publish(conversation_id, None, event, true).await
-    }
-
-    pub async fn conversation_image(
-        &self,
-        conversation_id: Uuid,
-        image_type: ConversationImageType,
-    ) -> Result<ConversationImage, Error> {
-        let document = self.get(conversation_id).await?;
-        let (cid, max_size) = match image_type {
-            ConversationImageType::Icon => {
-                let cid = document.icon.ok_or(Error::Other)?;
-                (cid, MAX_CONVERSATION_ICON_SIZE)
-            }
-            ConversationImageType::Banner => {
-                let cid = document.banner.ok_or(Error::Other)?;
-                (cid, MAX_CONVERSATION_BANNER_SIZE)
-            }
-        };
-
-        let dag: ImageDag = self.ipfs.get_dag(cid).deserialized().await?;
-
-        if dag.size > max_size as _ {
-            return Err(Error::InvalidLength {
-                context: "image".into(),
-                current: dag.size as _,
-                minimum: None,
-                maximum: Some(max_size),
-            });
-        }
-
-        let image = self
-            .ipfs
-            .cat_unixfs(dag.link)
-            .max_length(dag.size as _)
-            .await
-            .map_err(anyhow::Error::from)?;
-
-        let mut img = ConversationImage::default();
-        img.set_image_type(dag.mime);
-        img.set_data(image.into());
-        Ok(img)
-    }
-
-    pub async fn update_conversation_image(
-        &mut self,
-        conversation_id: Uuid,
-        location: Location,
-        image_type: ConversationImageType,
-    ) -> Result<(), Error> {
-        let mut conversation = self.get(conversation_id).await?;
-        let tx = self.subscribe(conversation_id).await?;
-
-        let max_size = match image_type {
-            ConversationImageType::Banner => MAX_CONVERSATION_BANNER_SIZE,
-            ConversationImageType::Icon => MAX_CONVERSATION_ICON_SIZE,
-        };
-
-        let own_did = self.identity.did_key();
-
-        if conversation.conversation_type() == ConversationType::Group
-            && !matches!(conversation.creator.as_ref(), Some(creator) if own_did.eq(creator))
-        {
-            return Err(Error::InvalidConversation);
-        }
-
-        let (cid, size, ext) = match location {
-            Location::Constellation { path } => {
-                let file = self
-                    .file
-                    .root_directory()
-                    .get_item_by_path(&path)
-                    .and_then(|item| item.get_file())?;
-
-                let extension = file.file_type();
-
-                if file.size() > max_size {
-                    return Err(Error::InvalidLength {
-                        context: "image".into(),
-                        current: file.size(),
-                        minimum: Some(1),
-                        maximum: Some(max_size),
-                    });
-                }
-
-                let document = FileDocument::new(&self.ipfs, &file).await?;
-                let cid = document
-                    .reference
-                    .as_ref()
-                    .and_then(|reference| IpfsPath::from_str(reference).ok())
-                    .and_then(|path| path.root().cid().copied())
-                    .ok_or(Error::Other)?;
-
-                (cid, document.size, extension)
-            }
-            Location::Disk { path } => {
-                #[cfg(target_arch = "wasm32")]
-                {
-                    _ = path;
-                    unreachable!()
-                }
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    use crate::utils::ReaderStream;
-                    use tokio_util::compat::TokioAsyncReadCompatExt;
-
-                    let extension = path
-                        .extension()
-                        .and_then(OsStr::to_str)
-                        .map(ExtensionType::from)
-                        .unwrap_or(ExtensionType::Other)
-                        .into();
-
-                    let file = tokio::fs::File::open(path).await?;
-                    let size = file.metadata().await?.len() as _;
-                    let stream =
-                        ReaderStream::from_reader_with_cap(file.compat(), 512, Some(max_size))
-                            .boxed();
-                    let path = self.ipfs.add_unixfs(stream).pin(false).await?;
-                    let cid = path.root().cid().copied().expect("valid cid in path");
-                    (cid, size, extension)
-                }
-            }
-            Location::Stream {
-                // NOTE: `name` and `size` would not be used here as we are only storing the data. If we are to store in constellation too, we would make use of these fields
-                name: _,
-                size: _,
-                stream,
-            } => {
-                let bytes = ByteCollection::new_with_max_capacity(
-                    stream.map(|result| result.map(Bytes::from)),
-                    max_size,
-                )
-                .await?;
-
-                let bytes_len = bytes.len();
-
-                let path = self.ipfs.add_unixfs(bytes.clone()).pin(false).await?;
-                let cid = path.root().cid().copied().expect("valid cid in path");
-
-                let cursor = std::io::Cursor::new(bytes);
-
-                let image = image::ImageReader::new(cursor).with_guessed_format()?;
-
-                let format = image
-                    .format()
-                    .and_then(|format| ExtensionType::try_from(format).ok())
-                    .unwrap_or(ExtensionType::Other)
-                    .into();
-
-                (cid, bytes_len, format)
-            }
-        };
-
-        let dag = ImageDag {
-            link: cid,
-            size: size as _,
-            mime: ext,
-        };
-
-        let cid = self.ipfs.put_dag(dag).await?;
-
-        let kind = match image_type {
-            ConversationImageType::Icon => {
-                conversation.icon.replace(cid);
-                ConversationUpdateKind::AddedIcon
-            }
-            ConversationImageType::Banner => {
-                conversation.banner.replace(cid);
-                ConversationUpdateKind::AddedBanner
-            }
-        };
-
-        self.set_document(&mut conversation).await?;
-
-        let event = MessagingEvents::UpdateConversation { conversation, kind };
-
-        let message_event = match image_type {
-            ConversationImageType::Icon => {
-                MessageEventKind::ConversationUpdatedIcon { conversation_id }
-            }
-            ConversationImageType::Banner => {
-                MessageEventKind::ConversationUpdatedBanner { conversation_id }
-            }
-        };
-
-        let _ = tx.send(message_event);
-
-        self.publish(conversation_id, None, event, true).await
-    }
-
-    pub async fn remove_conversation_image(
-        &mut self,
-        conversation_id: Uuid,
-        image_type: ConversationImageType,
-    ) -> Result<(), Error> {
-        let mut conversation = self.get(conversation_id).await?;
-        let tx = self.subscribe(conversation_id).await?;
-
-        let own_did = self.identity.did_key();
-
-        if conversation.conversation_type() == ConversationType::Group
-            && !matches!(conversation.creator.as_ref(), Some(creator) if own_did.eq(creator))
-        {
-            return Err(Error::InvalidConversation);
-        }
-
-        let cid = match image_type {
-            ConversationImageType::Icon => conversation.icon.take(),
-            ConversationImageType::Banner => conversation.banner.take(),
-        };
-
-        if cid.is_none() {
-            return Err(Error::ObjectNotFound); //TODO: conversation image doesnt exist
-        }
-
-        self.set_document(&mut conversation).await?;
-
-        let kind = match image_type {
-            ConversationImageType::Icon => ConversationUpdateKind::RemovedIcon,
-            ConversationImageType::Banner => ConversationUpdateKind::RemovedBanner,
-        };
-
-        let event = MessagingEvents::UpdateConversation { conversation, kind };
-
-        let message_event = match image_type {
-            ConversationImageType::Icon => {
-                MessageEventKind::ConversationUpdatedIcon { conversation_id }
-            }
-            ConversationImageType::Banner => {
-                MessageEventKind::ConversationUpdatedBanner { conversation_id }
-            }
-        };
-
-        let _ = tx.send(message_event);
-
-        self.publish(conversation_id, None, event, true).await
-    }
-
-    pub async fn add_recipient(
-        &mut self,
-        conversation_id: Uuid,
-        did_key: &DID,
-    ) -> Result<(), Error> {
-        let mut conversation = self.get(conversation_id).await?;
-
-        if let ConversationType::Direct = &conversation.conversation_type() {
-            return Err(Error::InvalidConversation);
-        }
-        assert_eq!(conversation.conversation_type(), ConversationType::Group);
-
-        let Some(creator) = conversation.creator.clone() else {
-            return Err(Error::InvalidConversation);
-        };
-
-        let own_did = &self.identity.did_key();
-
-        if !conversation
-            .permissions
-            .has_permission(own_did, GroupPermission::AddParticipants)
-            && creator.ne(own_did)
-        {
-            return Err(Error::PublicKeyInvalid);
-        }
-
-        if creator.eq(did_key) {
-            return Err(Error::PublicKeyInvalid);
-        }
-
-        if self.root.is_blocked(did_key).await? {
-            return Err(Error::PublicKeyIsBlocked);
-        }
-
-        if conversation.restrict.contains(did_key) {
-            return Err(Error::PublicKeyIsBlocked);
-        }
-
-        if conversation.recipients.contains(did_key) {
-            return Err(Error::IdentityExist);
-        }
-
-        conversation.recipients.push(did_key.clone());
-
-        self.set_document(&mut conversation).await?;
-
-        let event = MessagingEvents::UpdateConversation {
-            conversation: conversation.clone(),
-            kind: ConversationUpdateKind::AddParticipant {
-                did: did_key.clone(),
-            },
-        };
-
-        let tx = self.subscribe(conversation_id).await?;
-        let _ = tx.send(MessageEventKind::RecipientAdded {
-            conversation_id,
-            recipient: did_key.clone(),
-        });
-
-        self.publish(conversation_id, None, event, true).await?;
-
-        let new_event = ConversationEvents::NewGroupConversation { conversation };
-
-        self.send_single_conversation_event(conversation_id, did_key, new_event)
-            .await?;
-        if let Err(_e) = self.request_key(conversation_id, did_key).await {}
-        Ok(())
-    }
-
-    pub async fn remove_recipient(
-        &mut self,
-        conversation_id: Uuid,
-        did_key: &DID,
-        broadcast: bool,
-    ) -> Result<(), Error> {
-        let mut conversation = self.get(conversation_id).await?;
-
-        if matches!(conversation.conversation_type(), ConversationType::Direct) {
-            return Err(Error::InvalidConversation);
-        }
-
-        let Some(creator) = conversation.creator.as_ref() else {
-            return Err(Error::InvalidConversation);
-        };
-
-        let own_did = &self.identity.did_key();
-
-        if creator.ne(own_did) {
-            return Err(Error::PublicKeyInvalid);
-        }
-
-        if creator.eq(did_key) {
-            return Err(Error::PublicKeyInvalid);
-        }
-
-        if !conversation.recipients.contains(did_key) {
-            return Err(Error::IdentityDoesntExist);
-        }
-
-        conversation.recipients.retain(|did| did.ne(did_key));
-        self.set_document(&mut conversation).await?;
-
-        let event = MessagingEvents::UpdateConversation {
-            conversation,
-            kind: ConversationUpdateKind::RemoveParticipant {
-                did: did_key.clone(),
-            },
-        };
-
-        let tx = self.subscribe(conversation_id).await?;
-        let _ = tx.send(MessageEventKind::RecipientRemoved {
-            conversation_id,
-            recipient: did_key.clone(),
-        });
-
-        self.publish(conversation_id, None, event, true).await?;
-
-        if broadcast {
-            let new_event = ConversationEvents::DeleteConversation { conversation_id };
-
-            self.send_single_conversation_event(conversation_id, did_key, new_event)
-                .await?;
-        }
-
-        Ok(())
-    }
-
     pub async fn delete_conversation(
         &mut self,
         conversation_id: Uuid,
         broadcast: bool,
     ) -> Result<(), Error> {
-        self.destroy_conversation(conversation_id).await;
+        if let Some(mut meta) = self.conversation_task.remove(&conversation_id) {
+            meta.command_tx.close_channel();
+            meta.handle.abort();
+        }
 
         let document_type = self.delete(conversation_id).await?;
 
@@ -3306,221 +1652,6 @@ impl ConversationInner {
             .await
     }
 
-    pub async fn send_event(
-        &self,
-        conversation_id: Uuid,
-        event: MessageEvent,
-    ) -> Result<(), Error> {
-        let member = self.identity.did_key();
-
-        let event = MessagingEvents::Event {
-            conversation_id,
-            member,
-            event,
-            cancelled: false,
-        };
-        self.send_message_event(conversation_id, event).await
-    }
-
-    pub async fn cancel_event(
-        &self,
-        conversation_id: Uuid,
-        event: MessageEvent,
-    ) -> Result<(), Error> {
-        let member = self.identity.did_key();
-
-        let event = MessagingEvents::Event {
-            conversation_id,
-            member,
-            event,
-            cancelled: true,
-        };
-        self.send_message_event(conversation_id, event).await
-    }
-
-    pub async fn archived_conversation(&mut self, conversation_id: Uuid) -> Result<(), Error> {
-        let mut conversation = self.get(conversation_id).await?;
-        let prev = conversation.archived;
-        conversation.archived = true;
-        self.set_document(conversation).await?;
-        if !prev {
-            self.event
-                .emit(RayGunEventKind::ConversationArchived { conversation_id })
-                .await;
-        }
-        Ok(())
-    }
-
-    pub async fn unarchived_conversation(&mut self, conversation_id: Uuid) -> Result<(), Error> {
-        let mut conversation = self.get(conversation_id).await?;
-        let prev = conversation.archived;
-        conversation.archived = false;
-        self.set_document(conversation).await?;
-        if prev {
-            self.event
-                .emit(RayGunEventKind::ConversationUnarchived { conversation_id })
-                .await;
-        }
-        Ok(())
-    }
-
-    pub async fn send_message_event(
-        &self,
-        conversation_id: Uuid,
-        event: MessagingEvents,
-    ) -> Result<(), Error> {
-        let conversation = self.get(conversation_id).await?;
-
-        let event = serde_json::to_vec(&event)?;
-
-        let key = self.conversation_key(conversation_id, None).await?;
-
-        let bytes = Cipher::direct_encrypt(&event, &key)?;
-
-        let payload = PayloadBuilder::new(self.root.keypair(), bytes)
-            .from_ipfs(&self.ipfs)
-            .await?;
-
-        let peers = self
-            .ipfs
-            .pubsub_peers(Some(conversation.event_topic()))
-            .await?;
-
-        if !peers.is_empty() {
-            if let Err(e) = self
-                .ipfs
-                .pubsub_publish(conversation.event_topic(), payload.to_bytes()?)
-                .await
-            {
-                error!(%conversation_id, "Unable to send event: {e}");
-            }
-        }
-        Ok(())
-    }
-
-    pub async fn update_conversation_permissions<P: Into<GroupPermissionOpt> + Send + Sync>(
-        &mut self,
-        conversation_id: Uuid,
-        permissions: P,
-    ) -> Result<(), Error> {
-        let mut conversation = self.get(conversation_id).await?;
-        let own_did = self.identity.did_key();
-        let Some(creator) = &conversation.creator else {
-            return Err(Error::InvalidConversation);
-        };
-
-        if creator != &own_did {
-            return Err(Error::PublicKeyInvalid);
-        }
-
-        let permissions = match permissions.into() {
-            GroupPermissionOpt::Map(permissions) => permissions,
-            GroupPermissionOpt::Single((id, set)) => {
-                let permissions = conversation.permissions.clone();
-                {
-                    let permissions = conversation.permissions.entry(id).or_default();
-                    *permissions = set;
-                }
-                permissions
-            }
-        };
-
-        let (added, removed) = conversation.permissions.compare_with_new(&permissions);
-
-        conversation.permissions = permissions;
-        self.set_document(conversation).await?;
-
-        let conversation = self.get(conversation_id).await?;
-        let event = MessagingEvents::UpdateConversation {
-            conversation: conversation.clone(),
-            kind: ConversationUpdateKind::ChangePermissions {
-                permissions: conversation.permissions.clone(),
-            },
-        };
-
-        let tx = self.subscribe(conversation_id).await?;
-        let _ = tx.send(MessageEventKind::ConversationPermissionsUpdated {
-            conversation_id,
-            added,
-            removed,
-        });
-
-        self.publish(conversation_id, None, event, true).await
-    }
-
-    pub async fn publish(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Option<Uuid>,
-        event: MessagingEvents,
-        queue: bool,
-    ) -> Result<(), Error> {
-        let conversation = self.get(conversation_id).await?;
-
-        let event = serde_json::to_vec(&event)?;
-        let keypair = self.root.keypair();
-        let own_did = self.identity.did_key();
-
-        let key = self.conversation_key(conversation_id, None).await?;
-
-        let bytes = Cipher::direct_encrypt(&event, &key)?;
-
-        let payload = PayloadBuilder::new(keypair, bytes)
-            .from_ipfs(&self.ipfs)
-            .await?;
-
-        let peers = self.ipfs.pubsub_peers(Some(conversation.topic())).await?;
-
-        let mut can_publish = false;
-
-        for recipient in conversation
-            .recipients()
-            .iter()
-            .filter(|did| own_did.ne(did))
-        {
-            let peer_id = recipient.to_peer_id()?;
-
-            // We want to confirm that there is atleast one peer subscribed before attempting to send a message
-            match peers.contains(&peer_id) {
-                true => {
-                    can_publish = true;
-                }
-                false => {
-                    if queue {
-                        self.queue_event(
-                            recipient.clone(),
-                            Queue::direct(
-                                conversation.id(),
-                                message_id,
-                                peer_id,
-                                conversation.topic(),
-                                payload.message().to_vec(),
-                            ),
-                        )
-                        .await;
-                    }
-                }
-            };
-        }
-
-        if can_publish {
-            let bytes = payload.to_bytes()?;
-            tracing::trace!(%conversation_id, "Payload size: {} bytes", bytes.len());
-            let timer = Instant::now();
-            let mut time = true;
-            if let Err(_e) = self.ipfs.pubsub_publish(conversation.topic(), bytes).await {
-                error!(%conversation_id, "Error publishing: {_e}");
-                time = false;
-            }
-            if time {
-                let end = timer.elapsed();
-                tracing::trace!(%conversation_id, "Took {}ms to send event", end.as_millis());
-            }
-        }
-
-        Ok(())
-    }
-
     async fn send_single_conversation_event(
         &mut self,
         conversation_id: Uuid,
@@ -3572,111 +1703,6 @@ impl ConversationInner {
 
         Ok(())
     }
-
-    async fn create_conversation_task(&mut self, conversation_id: Uuid) -> Result<(), Error> {
-        let conversation = self.get(conversation_id).await?;
-
-        let main_topic = conversation.topic();
-        let event_topic = conversation.event_topic();
-        let request_topic = conversation.exchange_topic(&self.identity.did_key());
-
-        let messaging_stream = self
-            .ipfs
-            .pubsub_subscribe(main_topic)
-            .await?
-            .map(move |msg| ConversationStreamData::Message(conversation_id, msg))
-            .boxed();
-
-        let event_stream = self
-            .ipfs
-            .pubsub_subscribe(event_topic)
-            .await?
-            .map(move |msg| ConversationStreamData::Event(conversation_id, msg))
-            .boxed();
-
-        let request_stream = self
-            .ipfs
-            .pubsub_subscribe(request_topic)
-            .await?
-            .map(move |msg| ConversationStreamData::RequestResponse(conversation_id, msg))
-            .boxed();
-
-        let mut stream =
-            futures::stream::select_all([messaging_stream, event_stream, request_stream]);
-
-        let (mut tx, rx) = mpsc::channel(256);
-
-        let token = CancellationToken::new();
-        let drop_guard = token.clone().drop_guard();
-
-        self.executor.dispatch(async move {
-            loop {
-                tokio::select! {
-                    _ = token.cancelled() => {
-                        break;
-                    }
-                    Some(stream_data) = stream.next() => {
-                        if let Err(e) = tx.send(stream_data).await {
-                            if e.is_disconnected() {
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        });
-
-        _ = self
-            .command_tx
-            .send(MessagingCommand::Receiver { ch: rx })
-            .await;
-        self.conversation_task.insert(conversation_id, drop_guard);
-
-        tracing::info!(%conversation_id, "started conversation");
-        Ok(())
-    }
-
-    async fn destroy_conversation(&mut self, conversation_id: Uuid) {
-        if let Some(handle) = self.conversation_task.remove(&conversation_id) {
-            drop(handle);
-            self.pending_key_exchange.remove(&conversation_id);
-        }
-    }
-
-    async fn conversation_key(
-        &self,
-        conversation_id: Uuid,
-        member: Option<&DID>,
-    ) -> Result<Vec<u8>, Error> {
-        let conversation = self.get(conversation_id).await?;
-        let keypair = self.root.keypair();
-        let own_did = self.identity.did_key();
-
-        match conversation.conversation_type() {
-            ConversationType::Direct => {
-                let list = conversation.recipients();
-
-                let recipients = list
-                    .iter()
-                    .filter(|did| own_did.ne(did))
-                    .collect::<Vec<_>>();
-
-                let member = recipients.first().ok_or(Error::InvalidConversation)?;
-                ecdh_shared_key(keypair, Some(member))
-            }
-            ConversationType::Group => {
-                let recipient = member.unwrap_or(&own_did);
-                let keystore = self.get_keystore(conversation.id()).await?;
-                keystore.get_latest(keypair, recipient)
-            }
-        }
-    }
-}
-
-enum ConversationStreamData {
-    RequestResponse(Uuid, Message),
-    Event(Uuid, Message),
-    Message(Uuid, Message),
 }
 
 async fn process_conversation(
@@ -3783,69 +1809,21 @@ async fn process_conversation(
             recipient,
             signature,
         } => {
-            let conversation = this.get(conversation_id).await?;
-
-            if !matches!(conversation.conversation_type(), ConversationType::Group) {
-                return Err(anyhow::anyhow!("Can only leave from a group conversation").into());
-            }
-
-            let Some(creator) = conversation.creator.as_ref() else {
-                return Err(anyhow::anyhow!("Group conversation requires a creator").into());
-            };
-
-            let own_did = this.identity.did_key();
-
-            // Precaution
-            if recipient.eq(creator) {
-                return Err(anyhow::anyhow!("Cannot remove the creator of the group").into());
-            }
-
-            if !conversation.recipients.contains(&recipient) {
-                return Err(
-                    anyhow::anyhow!("{recipient} does not belong to {conversation_id}").into(),
-                );
-            }
-
-            tracing::info!("{recipient} is leaving group conversation {conversation_id}");
-
-            if creator.eq(&own_did) {
-                this.remove_recipient(conversation_id, &recipient, false)
-                    .await?;
-            } else {
-                {
-                    //Small validation context
-                    let context = format!("exclude {}", recipient);
-                    let signature = bs58::decode(&signature).into_vec()?;
-                    verify_serde_sig(recipient.clone(), &context, &signature)?;
-                }
-
-                let mut conversation = this.get(conversation_id).await?;
-
-                //Validate again since we have a permit
-                if !conversation.recipients.contains(&recipient) {
-                    return Err(anyhow::anyhow!(
-                        "{recipient} does not belong to {conversation_id}"
-                    )
-                    .into());
-                }
-
-                let mut can_emit = false;
-
-                if let HashEntry::Vacant(entry) = conversation.excluded.entry(recipient.clone()) {
-                    entry.insert(signature);
-                    can_emit = true;
-                }
-                this.set_document(conversation).await?;
-                if can_emit {
-                    let tx = this.subscribe(conversation_id).await?;
-                    if let Err(e) = tx.send(MessageEventKind::RecipientRemoved {
-                        conversation_id,
-                        recipient,
-                    }) {
-                        tracing::error!("Error broadcasting event: {e}");
-                    }
-                }
-            }
+            let conversation_meta = this
+                .conversation_task
+                .get(&conversation_id)
+                .ok_or(Error::InvalidConversation)?;
+            let (tx, rx) = oneshot::channel();
+            _ = conversation_meta
+                .command_tx
+                .clone()
+                .send(ConversationTaskCommand::AddExclusion {
+                    member: recipient,
+                    signature,
+                    response: tx,
+                })
+                .await;
+            rx.await.map_err(anyhow::Error::from)??;
         }
         ConversationEvents::DeleteConversation { conversation_id } => {
             tracing::trace!("Delete conversation event received for {conversation_id}");
@@ -3874,518 +1852,6 @@ async fn process_conversation(
 
             this.delete_conversation(conversation_id, false).await?;
         }
-    }
-    Ok(())
-}
-
-// TODO: de-duplicate logic where possible
-async fn message_event(
-    this: &mut ConversationInner,
-    conversation_id: Uuid,
-    sender: &DID,
-    events: MessagingEvents,
-) -> Result<(), Error> {
-    let mut document = this.get(conversation_id).await?;
-    let tx = this.subscribe(conversation_id).await?;
-
-    let keypair = this.root.keypair();
-    let own_did = this.identity.did_key();
-
-    let keystore = pubkey_or_keystore(this, conversation_id, keypair).await?;
-
-    match events {
-        MessagingEvents::New { message } => {
-            if !message.verify() {
-                return Err(Error::InvalidMessage);
-            }
-
-            if document.id != message.conversation_id {
-                return Err(Error::InvalidConversation);
-            }
-
-            let message_id = message.id;
-
-            if !document.recipients().contains(&message.sender.to_did()) {
-                return Err(Error::IdentityDoesntExist);
-            }
-
-            if document.contains(&this.ipfs, message_id).await? {
-                return Err(Error::MessageFound);
-            }
-
-            let resolved_message = message
-                .resolve(&this.ipfs, keypair, false, keystore.as_ref())
-                .await?;
-
-            let lines_value_length: usize = resolved_message
-                .lines()
-                .iter()
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty())
-                .map(|s| s.chars().count())
-                .sum();
-
-            if lines_value_length == 0 && lines_value_length > MAX_MESSAGE_SIZE {
-                tracing::error!(
-                    message_length = lines_value_length,
-                    "Length of message is invalid."
-                );
-                return Err(Error::InvalidLength {
-                    context: "message".into(),
-                    current: lines_value_length,
-                    minimum: Some(MIN_MESSAGE_SIZE),
-                    maximum: Some(MAX_MESSAGE_SIZE),
-                });
-            }
-
-            let conversation_id = message.conversation_id;
-
-            document
-                .insert_message_document(&this.ipfs, &message)
-                .await?;
-
-            this.set_document(document).await?;
-
-            if let Err(e) = tx.send(MessageEventKind::MessageReceived {
-                conversation_id,
-                message_id,
-            }) {
-                tracing::warn!(%conversation_id, "Error broadcasting event: {e}");
-            }
-        }
-        MessagingEvents::Edit {
-            conversation_id,
-            message_id,
-            modified,
-            lines,
-            nonce,
-            signature,
-        } => {
-            let mut message_document = document
-                .get_message_document(&this.ipfs, message_id)
-                .await?;
-
-            let mut message = message_document
-                .resolve(&this.ipfs, keypair, true, keystore.as_ref())
-                .await?;
-
-            let lines_value_length: usize = lines
-                .iter()
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty())
-                .map(|s| s.chars().count())
-                .sum();
-
-            if lines_value_length == 0 && lines_value_length > MAX_MESSAGE_SIZE {
-                tracing::error!(
-                    current_size = lines_value_length,
-                    max = MAX_MESSAGE_SIZE,
-                    "length of message is invalid"
-                );
-                return Err(Error::InvalidLength {
-                    context: "message".into(),
-                    current: lines_value_length,
-                    minimum: Some(MIN_MESSAGE_SIZE),
-                    maximum: Some(MAX_MESSAGE_SIZE),
-                });
-            }
-
-            let sender = message.sender();
-
-            *message.lines_mut() = lines;
-            message.set_modified(modified);
-
-            message_document
-                .update(
-                    &this.ipfs,
-                    keypair,
-                    message,
-                    (!signature.is_empty() && sender.ne(&own_did)).then_some(signature),
-                    keystore.as_ref(),
-                    Some(nonce.as_slice()),
-                )
-                .await?;
-
-            document
-                .update_message_document(&this.ipfs, &message_document)
-                .await?;
-
-            this.set_document(document).await?;
-
-            if let Err(e) = tx.send(MessageEventKind::MessageEdited {
-                conversation_id,
-                message_id,
-            }) {
-                error!(%conversation_id, error = %e, "Error broadcasting event");
-            }
-        }
-        MessagingEvents::Delete {
-            conversation_id,
-            message_id,
-        } => {
-            // if opt.keep_if_owned.load(Ordering::SeqCst) {
-            //     let message_document = document
-            //         .get_message_document(&self.ipfs, message_id)
-            //         .await?;
-
-            //     let message = message_document
-            //         .resolve(&self.ipfs, &self.keypair, true, keystore.as_ref())
-            //         .await?;
-
-            //     if message.sender() == *self.keypair {
-            //         return Ok(());
-            //     }
-            // }
-
-            document.delete_message(&this.ipfs, message_id).await?;
-
-            this.set_document(document).await?;
-
-            if let Err(e) = tx.send(MessageEventKind::MessageDeleted {
-                conversation_id,
-                message_id,
-            }) {
-                tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
-            }
-        }
-        MessagingEvents::Pin {
-            conversation_id,
-            message_id,
-            state,
-            ..
-        } => {
-            let mut message_document = document
-                .get_message_document(&this.ipfs, message_id)
-                .await?;
-
-            let mut message = message_document
-                .resolve(&this.ipfs, keypair, true, keystore.as_ref())
-                .await?;
-
-            let event = match state {
-                PinState::Pin => {
-                    if message.pinned() {
-                        return Ok(());
-                    }
-                    *message.pinned_mut() = true;
-                    MessageEventKind::MessagePinned {
-                        conversation_id,
-                        message_id,
-                    }
-                }
-                PinState::Unpin => {
-                    if !message.pinned() {
-                        return Ok(());
-                    }
-                    *message.pinned_mut() = false;
-                    MessageEventKind::MessageUnpinned {
-                        conversation_id,
-                        message_id,
-                    }
-                }
-            };
-
-            message_document
-                .update(&this.ipfs, keypair, message, None, keystore.as_ref(), None)
-                .await?;
-
-            document
-                .update_message_document(&this.ipfs, &message_document)
-                .await?;
-
-            this.set_document(document).await?;
-
-            if let Err(e) = tx.send(event) {
-                tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
-            }
-        }
-        MessagingEvents::React {
-            conversation_id,
-            reactor,
-            message_id,
-            state,
-            emoji,
-        } => {
-            let mut message_document = document
-                .get_message_document(&this.ipfs, message_id)
-                .await?;
-
-            let mut message = message_document
-                .resolve(&this.ipfs, keypair, true, keystore.as_ref())
-                .await?;
-
-            let reactions = message.reactions_mut();
-
-            match state {
-                ReactionState::Add => {
-                    if reactions.len() >= MAX_REACTIONS {
-                        return Err(Error::InvalidLength {
-                            context: "reactions".into(),
-                            current: reactions.len(),
-                            minimum: None,
-                            maximum: Some(MAX_REACTIONS),
-                        });
-                    }
-
-                    let entry = reactions.entry(emoji.clone()).or_default();
-
-                    if entry.contains(&reactor) {
-                        return Err(Error::ReactionExist);
-                    }
-
-                    entry.push(reactor.clone());
-
-                    message_document
-                        .update(&this.ipfs, keypair, message, None, keystore.as_ref(), None)
-                        .await?;
-
-                    document
-                        .update_message_document(&this.ipfs, &message_document)
-                        .await?;
-
-                    this.set_document(document).await?;
-
-                    if let Err(e) = tx.send(MessageEventKind::MessageReactionAdded {
-                        conversation_id,
-                        message_id,
-                        did_key: reactor,
-                        reaction: emoji,
-                    }) {
-                        tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
-                    }
-                }
-                ReactionState::Remove => {
-                    match reactions.entry(emoji.clone()) {
-                        indexmap::map::Entry::Occupied(mut e) => {
-                            let list = e.get_mut();
-
-                            if !list.contains(&reactor) {
-                                return Err(Error::ReactionDoesntExist);
-                            }
-
-                            list.retain(|did| did != &reactor);
-                            if list.is_empty() {
-                                e.swap_remove();
-                            }
-                        }
-                        indexmap::map::Entry::Vacant(_) => return Err(Error::ReactionDoesntExist),
-                    };
-
-                    message_document
-                        .update(&this.ipfs, keypair, message, None, keystore.as_ref(), None)
-                        .await?;
-
-                    document
-                        .update_message_document(&this.ipfs, &message_document)
-                        .await?;
-
-                    this.set_document(document).await?;
-
-                    if let Err(e) = tx.send(MessageEventKind::MessageReactionRemoved {
-                        conversation_id,
-                        message_id,
-                        did_key: reactor,
-                        reaction: emoji,
-                    }) {
-                        tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
-                    }
-                }
-            }
-        }
-        MessagingEvents::UpdateConversation {
-            mut conversation,
-            kind,
-        } => {
-            conversation.verify()?;
-            conversation.excluded = document.excluded;
-            conversation.messages = document.messages;
-            conversation.favorite = document.favorite;
-            conversation.archived = document.archived;
-
-            match kind {
-                ConversationUpdateKind::AddParticipant { did } => {
-                    if !document.creator.is_some_and(|c| &c == sender)
-                        && !document
-                            .permissions
-                            .has_permission(sender, GroupPermission::AddParticipants)
-                    {
-                        return Err(Error::Unauthorized);
-                    }
-
-                    if document.recipients.contains(&did) {
-                        return Ok(());
-                    }
-
-                    if !this.discovery.contains(&did).await {
-                        let _ = this.discovery.insert(&did).await.ok();
-                    }
-
-                    this.set_document(conversation).await?;
-
-                    if let Err(e) = this.request_key(conversation_id, &did).await {
-                        tracing::error!(%conversation_id, error = %e, "error requesting key");
-                    }
-
-                    if let Err(e) = tx.send(MessageEventKind::RecipientAdded {
-                        conversation_id,
-                        recipient: did,
-                    }) {
-                        tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
-                    }
-                }
-                ConversationUpdateKind::RemoveParticipant { did } => {
-                    if !document.creator.is_some_and(|c| &c == sender) {
-                        return Err(Error::Unauthorized);
-                    }
-                    if !document.recipients.contains(&did) {
-                        return Err(Error::IdentityDoesntExist);
-                    }
-
-                    document.permissions.shift_remove(&did);
-
-                    //Maybe remove participant from discovery?
-
-                    let can_emit = !conversation.excluded.contains_key(&did);
-
-                    conversation.excluded.remove(&did);
-
-                    this.set_document(conversation).await?;
-
-                    if can_emit {
-                        if let Err(e) = tx.send(MessageEventKind::RecipientRemoved {
-                            conversation_id,
-                            recipient: did,
-                        }) {
-                            tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
-                        }
-                    }
-                }
-                ConversationUpdateKind::ChangeName { name: Some(name) } => {
-                    if !document.creator.is_some_and(|c| &c == sender)
-                        && !document
-                            .permissions
-                            .has_permission(sender, GroupPermission::SetGroupName)
-                    {
-                        return Err(Error::Unauthorized);
-                    }
-
-                    let name = name.trim();
-                    let name_length = name.len();
-
-                    if name_length > 255 {
-                        return Err(Error::InvalidLength {
-                            context: "name".into(),
-                            current: name_length,
-                            minimum: None,
-                            maximum: Some(255),
-                        });
-                    }
-                    if let Some(current_name) = document.name.as_ref() {
-                        if current_name.eq(&name) {
-                            return Ok(());
-                        }
-                    }
-                    this.set_document(conversation).await?;
-
-                    if let Err(e) = tx.send(MessageEventKind::ConversationNameUpdated {
-                        conversation_id,
-                        name: name.to_string(),
-                    }) {
-                        tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
-                    }
-                }
-
-                ConversationUpdateKind::ChangeName { name: None } => {
-                    if !document.creator.is_some_and(|c| &c == sender)
-                        && !document
-                            .permissions
-                            .has_permission(sender, GroupPermission::SetGroupName)
-                    {
-                        return Err(Error::Unauthorized);
-                    }
-
-                    this.set_document(conversation).await?;
-
-                    if let Err(e) = tx.send(MessageEventKind::ConversationNameUpdated {
-                        conversation_id,
-                        name: String::new(),
-                    }) {
-                        tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
-                    }
-                }
-                ConversationUpdateKind::AddRestricted { .. }
-                | ConversationUpdateKind::RemoveRestricted { .. } => {
-                    if !document.creator.is_some_and(|c| &c == sender) {
-                        return Err(Error::Unauthorized);
-                    }
-                    this.set_document(conversation).await?;
-                    //TODO: Maybe add a api event to emit for when blocked users are added/removed from the document
-                    //      but for now, we can leave this as a silent update since the block list would be for internal handling for now
-                }
-                ConversationUpdateKind::ChangePermissions { permissions } => {
-                    if !document.creator.is_some_and(|c| &c == sender) {
-                        return Err(Error::Unauthorized);
-                    }
-
-                    let (added, removed) = conversation.permissions.compare_with_new(&permissions);
-                    conversation.permissions = permissions;
-                    this.set_document(conversation).await?;
-
-                    if let Err(e) = tx.send(MessageEventKind::ConversationPermissionsUpdated {
-                        conversation_id,
-                        added,
-                        removed,
-                    }) {
-                        tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
-                    }
-                }
-                ConversationUpdateKind::AddedIcon | ConversationUpdateKind::RemovedIcon => {
-                    this.set_document(conversation).await?;
-
-                    if let Err(e) =
-                        tx.send(MessageEventKind::ConversationUpdatedIcon { conversation_id })
-                    {
-                        tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
-                    }
-                }
-
-                ConversationUpdateKind::AddedBanner | ConversationUpdateKind::RemovedBanner => {
-                    this.set_document(conversation).await?;
-
-                    if let Err(e) =
-                        tx.send(MessageEventKind::ConversationUpdatedBanner { conversation_id })
-                    {
-                        tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
-                    }
-                }
-                ConversationUpdateKind::ChangeDescription { description } => {
-                    if let Some(desc) = description.as_ref() {
-                        if desc.is_empty() || desc.len() > MAX_CONVERSATION_DESCRIPTION {
-                            return Err(Error::InvalidLength {
-                                context: "description".into(),
-                                minimum: Some(1),
-                                maximum: Some(MAX_CONVERSATION_DESCRIPTION),
-                                current: desc.len(),
-                            });
-                        }
-
-                        if matches!(document.description.as_ref(), Some(current_desc) if current_desc == desc)
-                        {
-                            return Ok(());
-                        }
-                    }
-
-                    this.set_document(conversation).await?;
-                    if let Err(e) = tx.send(MessageEventKind::ConversationDescriptionChanged {
-                        conversation_id,
-                        description,
-                    }) {
-                        tracing::warn!(%conversation_id, error = %e, "Error broadcasting event");
-                    }
-                }
-            }
-        }
-        _ => {}
     }
     Ok(())
 }
@@ -4428,13 +1894,42 @@ async fn process_identity_events(
                             continue;
                         }
 
-                        if let Err(e) = this.remove_recipient(id, &did, true).await {
+                        let conversation_meta = this
+                            .conversation_task
+                            .get(&id)
+                            .ok_or(Error::InvalidConversation)?;
+
+                        let (tx, rx) = oneshot::channel();
+                        let _ = conversation_meta
+                            .command_tx
+                            .clone()
+                            .send(ConversationTaskCommand::RemoveMember {
+                                member: did.clone(),
+                                broadcast: true,
+                                response: tx,
+                            })
+                            .await;
+
+                        let Ok(result) = rx.await else {
+                            continue;
+                        };
+
+                        if let Err(e) = result {
                             warn!(conversation_id = %id, error = %e, "Failed to remove {did} from conversation");
                             continue;
                         }
 
                         if this.root.is_blocked(&did).await.unwrap_or_default() {
-                            _ = this.add_restricted(id, &did).await;
+                            let (tx, rx) = oneshot::channel();
+                            let _ = conversation_meta
+                                .command_tx
+                                .clone()
+                                .send(ConversationTaskCommand::AddRestricted {
+                                    member: did.clone(),
+                                    response: tx,
+                                })
+                                .await;
+                            _ = rx.await;
                         }
                     }
                 }
@@ -4455,7 +1950,22 @@ async fn process_identity_events(
                 .filter(|c| c.restrict.contains(&did))
             {
                 let id = conversation.id();
-                _ = this.remove_restricted(id, &did).await;
+
+                let conversation_meta = this
+                    .conversation_task
+                    .get(&id)
+                    .ok_or(Error::InvalidConversation)?;
+
+                let (tx, rx) = oneshot::channel();
+                _ = conversation_meta
+                    .command_tx
+                    .clone()
+                    .send(ConversationTaskCommand::AddRestricted {
+                        member: did.clone(),
+                        response: tx,
+                    })
+                    .await;
+                _ = rx.await;
             }
         }
         MultiPassEventKind::FriendRemoved { did } => {
@@ -4479,8 +1989,28 @@ async fn process_identity_events(
                             continue;
                         }
 
-                        if let Err(e) = this.remove_recipient(id, &did, true).await {
-                            tracing::warn!(conversation_id = %id, error = %e, "Failed to remove {did} from conversation");
+                        let conversation_meta = this
+                            .conversation_task
+                            .get(&id)
+                            .ok_or(Error::InvalidConversation)?;
+
+                        let (tx, rx) = oneshot::channel();
+                        _ = conversation_meta
+                            .command_tx
+                            .clone()
+                            .send(ConversationTaskCommand::RemoveMember {
+                                member: did.clone(),
+                                broadcast: true,
+                                response: tx,
+                            })
+                            .await;
+
+                        let Ok(result) = rx.await else {
+                            continue;
+                        };
+
+                        if let Err(e) = result {
+                            warn!(conversation_id = %id, error = %e, "Failed to remove {did} from conversation");
                             continue;
                         }
                     }
@@ -4492,239 +2022,6 @@ async fn process_identity_events(
         }
         _ => {}
     }
-    Ok(())
-}
-
-async fn process_request_response_event(
-    this: &mut ConversationInner,
-    conversation_id: Uuid,
-    req: Message,
-) -> Result<(), Error> {
-    let keypair = &this.root.keypair().clone();
-    let own_did = this.identity.did_key();
-
-    let conversation = this.get(conversation_id).await?;
-
-    let payload = PayloadMessage::<Vec<u8>>::from_bytes(&req.data)?;
-
-    let sender = payload.sender().to_did()?;
-
-    let data = ecdh_decrypt(keypair, Some(&sender), payload.message())?;
-
-    let event = serde_json::from_slice::<ConversationRequestResponse>(&data)?;
-
-    tracing::debug!(%conversation_id, ?event, "Event received");
-    match event {
-        ConversationRequestResponse::Request {
-            conversation_id,
-            kind,
-        } => match kind {
-            ConversationRequestKind::Key => {
-                if !matches!(conversation.conversation_type(), ConversationType::Group) {
-                    //Only group conversations support keys
-                    return Err(Error::InvalidConversation);
-                }
-
-                if !conversation.recipients().contains(&sender) {
-                    warn!(%conversation_id, %sender, "apart of conversation");
-                    return Err(Error::IdentityDoesntExist);
-                }
-
-                let mut keystore = this.get_keystore(conversation_id).await?;
-
-                let raw_key = match keystore.get_latest(keypair, &own_did) {
-                    Ok(key) => key,
-                    Err(Error::PublicKeyDoesntExist) => {
-                        let key = generate::<64>().into();
-                        keystore.insert(keypair, &own_did, &key)?;
-
-                        this.set_keystore(conversation_id, keystore).await?;
-                        key
-                    }
-                    Err(e) => {
-                        error!(%conversation_id, error = %e, "Error getting key from store");
-                        return Err(e);
-                    }
-                };
-
-                let key = ecdh_encrypt(keypair, Some(&sender), raw_key)?;
-
-                let response = ConversationRequestResponse::Response {
-                    conversation_id,
-                    kind: ConversationResponseKind::Key { key },
-                };
-
-                let topic = conversation.exchange_topic(&sender);
-
-                let bytes = ecdh_encrypt(keypair, Some(&sender), serde_json::to_vec(&response)?)?;
-
-                let payload = PayloadBuilder::new(keypair, bytes)
-                    .from_ipfs(&this.ipfs)
-                    .await?;
-
-                let peers = this.ipfs.pubsub_peers(Some(topic.clone())).await?;
-
-                let peer_id = sender.to_peer_id()?;
-
-                let bytes = payload.to_bytes()?;
-
-                tracing::trace!(%conversation_id, "Payload size: {} bytes", bytes.len());
-
-                tracing::info!(%conversation_id, "Responding to {sender}");
-
-                if !peers.contains(&peer_id)
-                    || (peers.contains(&peer_id)
-                        && this
-                            .ipfs
-                            .pubsub_publish(topic.clone(), bytes)
-                            .await
-                            .is_err())
-                {
-                    warn!(%conversation_id, "Unable to publish to topic. Queuing event");
-                    this.queue_event(
-                        sender.clone(),
-                        Queue::direct(
-                            conversation_id,
-                            None,
-                            peer_id,
-                            topic.clone(),
-                            payload.message().to_vec(),
-                        ),
-                    )
-                    .await;
-                }
-            }
-            _ => {
-                tracing::info!(%conversation_id, "Unimplemented/Unsupported Event");
-            }
-        },
-        ConversationRequestResponse::Response {
-            conversation_id,
-            kind,
-        } => match kind {
-            ConversationResponseKind::Key { key } => {
-                if !matches!(conversation.conversation_type(), ConversationType::Group) {
-                    //Only group conversations support keys
-                    tracing::error!(%conversation_id, "Invalid conversation type");
-                    return Err(Error::InvalidConversation);
-                }
-
-                if !conversation.recipients().contains(&sender) {
-                    return Err(Error::IdentityDoesntExist);
-                }
-                let mut keystore = this.get_keystore(conversation_id).await?;
-
-                let raw_key = ecdh_decrypt(keypair, Some(&sender), key)?;
-
-                keystore.insert(keypair, &sender, raw_key)?;
-
-                this.set_keystore(conversation_id, keystore).await?;
-
-                if let Some(list) = this.pending_key_exchange.get_mut(&conversation_id) {
-                    for (_, _, received) in list.iter_mut().filter(|(s, _, r)| sender.eq(s) && !r) {
-                        *received = true;
-                    }
-                }
-            }
-            _ => {
-                tracing::info!(%conversation_id, "Unimplemented/Unsupported Event");
-            }
-        },
-    }
-    Ok(())
-}
-
-async fn process_pending_payload(this: &mut ConversationInner) {
-    if this.pending_key_exchange.is_empty() {
-        return;
-    }
-
-    let mut processed_events: HashMap<Uuid, Vec<_>> = HashMap::new();
-
-    this.pending_key_exchange.retain(|id, list| {
-        list.retain(|(did, data, received)| {
-            if *received {
-                processed_events
-                    .entry(*id)
-                    .or_default()
-                    .push((did.clone(), data.clone()));
-                return false;
-            }
-            true
-        });
-        !list.is_empty()
-    });
-
-    for (conversation_id, list) in processed_events {
-        // Note: Conversation keystore should exist so we could expect here, however since the map for pending exchanges would have
-        //       been flushed out, we can just continue on in the iteration since it would be ignored
-        let Ok(store) = this.get_keystore(conversation_id).await else {
-            continue;
-        };
-
-        let keypair = &this.root.keypair().clone();
-
-        for (sender, data) in list {
-            let fut = async {
-                let key = store.get_latest(keypair, &sender)?;
-                let data = Cipher::direct_decrypt(&data, &key)?;
-                let event = serde_json::from_slice(&data)?;
-                message_event(this, conversation_id, &sender, event).await
-            };
-
-            if let Err(e) = fut.await {
-                tracing::error!(name = "process_pending_payload", %conversation_id, %sender, error = %e, "failed to process message")
-            }
-        }
-    }
-}
-
-async fn process_conversation_event(
-    this: &mut ConversationInner,
-    conversation_id: Uuid,
-    message: Message,
-) -> Result<(), Error> {
-    let tx = this.subscribe(conversation_id).await?;
-
-    let payload = PayloadMessage::<Vec<u8>>::from_bytes(&message.data)?;
-    let sender = payload.sender().to_did()?;
-
-    let key = this
-        .conversation_key(conversation_id, Some(&sender))
-        .await?;
-
-    let data = Cipher::direct_decrypt(payload.message(), &key)?;
-
-    let event = match serde_json::from_slice::<MessagingEvents>(&data)? {
-        event @ MessagingEvents::Event { .. } => event,
-        _ => return Err(Error::Other),
-    };
-
-    if let MessagingEvents::Event {
-        conversation_id,
-        member,
-        event,
-        cancelled,
-    } = event
-    {
-        let ev = match cancelled {
-            true => MessageEventKind::EventCancelled {
-                conversation_id,
-                did_key: member,
-                event,
-            },
-            false => MessageEventKind::EventReceived {
-                conversation_id,
-                did_key: member,
-                event,
-            },
-        };
-
-        if let Err(e) = tx.send(ev) {
-            tracing::error!(%conversation_id, error = %e, "error broadcasting event");
-        }
-    }
-
     Ok(())
 }
 
@@ -4758,7 +2055,7 @@ impl Queue {
 }
 
 //TODO: Replace
-async fn process_queue(this: &mut ConversationInner) {
+async fn _process_queue(this: &mut ConversationInner) {
     let mut changed = false;
     let keypair = &this.root.keypair().clone();
     for (did, items) in this.queue.iter_mut() {
@@ -4827,34 +2124,4 @@ async fn process_queue(this: &mut ConversationInner) {
     if changed {
         this.save_queue().await;
     }
-}
-
-async fn pubkey_or_keystore(
-    conversation: &ConversationInner,
-    conversation_id: Uuid,
-    keypair: &Keypair,
-) -> Result<Either<DID, Keystore>, Error> {
-    let document = conversation.get(conversation_id).await?;
-    let keystore = match document.conversation_type() {
-        ConversationType::Direct => {
-            let list = document.recipients();
-
-            let own_did = keypair.to_did()?;
-
-            let recipients = list
-                .into_iter()
-                .filter(|did| own_did.ne(did))
-                .collect::<Vec<_>>();
-
-            let member = recipients
-                .first()
-                .cloned()
-                .ok_or(Error::InvalidConversation)?;
-
-            Either::Left(member)
-        }
-        ConversationType::Group => Either::Right(conversation.get_keystore(conversation_id).await?),
-    };
-
-    Ok(keystore)
 }
