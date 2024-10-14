@@ -93,7 +93,6 @@ impl MessageStore {
 
         let mut inner = ConversationInner {
             ipfs: ipfs.clone(),
-            event_handler: Default::default(),
             conversation_task: HashMap::new(),
             identity: identity.clone(),
             root,
@@ -970,7 +969,6 @@ struct ConversationInnerMeta {
 
 struct ConversationInner {
     ipfs: Ipfs,
-    event_handler: HashMap<Uuid, tokio::sync::broadcast::Sender<MessageEventKind>>,
     conversation_task: HashMap<Uuid, ConversationInnerMeta>,
     root: RootDocumentMap,
     file: FileStore,
@@ -1385,17 +1383,18 @@ impl ConversationInner {
         &mut self,
         id: Uuid,
     ) -> Result<tokio::sync::broadcast::Sender<MessageEventKind>, Error> {
-        if !self.contains(id).await {
-            return Err(Error::InvalidConversation);
-        }
+        let meta = self
+            .conversation_task
+            .get_mut(&id)
+            .ok_or(Error::InvalidConversation)?;
 
-        if let Some(tx) = self.event_handler.get(&id) {
-            return Ok(tx.clone());
-        }
-
-        let (tx, _) = tokio::sync::broadcast::channel(1024);
-
-        self.event_handler.insert(id, tx.clone());
+        let (tx, rx) = oneshot::channel();
+        let _ = meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::EventHandler { response: tx })
+            .await;
+        let tx = rx.await.map_err(anyhow::Error::from)?;
 
         Ok(tx)
     }
