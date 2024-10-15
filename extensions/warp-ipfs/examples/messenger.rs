@@ -8,10 +8,10 @@ use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use futures::stream::BoxStream;
+use pollable_map::stream::StreamMap;
 use r3bl_terminal_async::{ReadlineEvent, SharedWriter, TerminalAsync};
 use rust_ipfs::Multiaddr;
 use strum::IntoEnumIterator;
-use tokio_stream::StreamMap;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
