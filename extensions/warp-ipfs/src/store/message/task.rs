@@ -1261,12 +1261,12 @@ impl ConversationTask {
 
         let message = MessageDocument::new(&self.ipfs, keypair, message, keystore.as_ref()).await?;
 
-        let _message_cid = self
+        let message_cid = self
             .document
             .insert_message_document(&self.ipfs, &message)
             .await?;
 
-        let _recipients = self.document.recipients();
+        let recipients = self.document.recipients();
 
         self.set_document().await?;
 
@@ -1283,23 +1283,23 @@ impl ConversationTask {
 
         let event = MessagingEvents::New { message };
 
-        // if !recipients.is_empty() {
-        //     if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
-        //         for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-        //             let _ = self
-        //                 .message_command
-        //                 .clone()
-        //                 .send(MessageCommand::InsertMessage {
-        //                     peer_id,
-        //                     conversation_id,
-        //                     recipients: recipients.clone(),
-        //                     message_id,
-        //                     message_cid,
-        //                 })
-        //                 .await;
-        //         }
-        //     }
-        // }
+        if !recipients.is_empty() {
+            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                    let _ = self
+                        .message_command
+                        .clone()
+                        .send(MessageCommand::InsertMessage {
+                            peer_id,
+                            conversation_id: self.conversation_id,
+                            recipients: recipients.clone(),
+                            message_id,
+                            message_cid,
+                        })
+                        .await;
+                }
+            }
+        }
 
         self.publish(Some(message_id), event, true)
             .await
@@ -1369,12 +1369,12 @@ impl ConversationTask {
         let nonce = message_document.nonce_from_message()?;
         let signature = message_document.signature.expect("message to be signed");
 
-        let _message_cid = self
+        let message_cid = self
             .document
             .update_message_document(&self.ipfs, &message_document)
             .await?;
 
-        let _recipients = self.document.recipients();
+        let recipients = self.document.recipients();
 
         self.set_document().await?;
 
@@ -1392,23 +1392,23 @@ impl ConversationTask {
             signature: signature.into(),
         };
 
-        // if !recipients.is_empty() {
-        //     if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
-        //         for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-        //             let _ = self
-        //                 .message_command
-        //                 .clone()
-        //                 .send(MessageCommand::InsertMessage {
-        //                     peer_id,
-        //                     conversation_id,
-        //                     recipients: recipients.clone(),
-        //                     message_id,
-        //                     message_cid,
-        //                 })
-        //                 .await;
-        //         }
-        //     }
-        // }
+        if !recipients.is_empty() {
+            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                    let _ = self
+                        .message_command
+                        .clone()
+                        .send(MessageCommand::InsertMessage {
+                            peer_id,
+                            conversation_id: self.conversation_id,
+                            recipients: recipients.clone(),
+                            message_id,
+                            message_cid,
+                        })
+                        .await;
+                }
+            }
+        }
 
         self.publish(None, event, true).await
     }
@@ -1461,12 +1461,12 @@ impl ConversationTask {
 
         let message_id = message.id;
 
-        let _message_cid = self
+        let message_cid = self
             .document
             .insert_message_document(&self.ipfs, &message)
             .await?;
 
-        let _recipients = self.document.recipients();
+        let recipients = self.document.recipients();
 
         self.set_document().await?;
 
@@ -1481,23 +1481,23 @@ impl ConversationTask {
 
         let event = MessagingEvents::New { message };
 
-        // if !recipients.is_empty() {
-        //     if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
-        //         for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-        //             let _ = self
-        //                 .message_command
-        //                 .clone()
-        //                 .send(MessageCommand::InsertMessage {
-        //                     peer_id,
-        //                     conversation_id,
-        //                     recipients: recipients.clone(),
-        //                     message_id,
-        //                     message_cid,
-        //                 })
-        //                 .await;
-        //         }
-        //     }
-        // }
+        if !recipients.is_empty() {
+            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                    let _ = self
+                        .message_command
+                        .clone()
+                        .send(MessageCommand::InsertMessage {
+                            peer_id,
+                            conversation_id: self.conversation_id,
+                            recipients: recipients.clone(),
+                            message_id,
+                            message_cid,
+                        })
+                        .await;
+                }
+            }
+        }
 
         self.publish(Some(message_id), event, true)
             .await
@@ -1516,19 +1516,19 @@ impl ConversationTask {
 
         self.set_document().await?;
 
-        // if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
-        //     for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-        //         let _ = self
-        //             .message_command
-        //             .clone()
-        //             .send(MessageCommand::RemoveMessage {
-        //                 peer_id,
-        //                 conversation_id,
-        //                 message_id,
-        //             })
-        //             .await;
-        //     }
-        // }
+        if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+            for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                let _ = self
+                    .message_command
+                    .clone()
+                    .send(MessageCommand::RemoveMessage {
+                        peer_id,
+                        conversation_id: self.conversation_id,
+                        message_id,
+                    })
+                    .await;
+            }
+        }
 
         _ = tx.send(MessageEventKind::MessageDeleted {
             conversation_id: self.conversation_id,
@@ -1586,34 +1586,34 @@ impl ConversationTask {
             .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
             .await?;
 
-        let _message_cid = self
+        let message_cid = self
             .document
             .update_message_document(&self.ipfs, &message_document)
             .await?;
 
-        let _recipients = self.document.recipients();
+        let recipients = self.document.recipients();
 
         self.set_document().await?;
 
         _ = tx.send(event);
 
-        // if !recipients.is_empty() {
-        //     if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
-        //         for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-        //             let _ = self
-        //                 .message_command
-        //                 .clone()
-        //                 .send(MessageCommand::InsertMessage {
-        //                     peer_id,
-        //                     conversation_id,
-        //                     recipients: recipients.clone(),
-        //                     message_id,
-        //                     message_cid,
-        //                 })
-        //                 .await;
-        //         }
-        //     }
-        // }
+        if !recipients.is_empty() {
+            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                    let _ = self
+                        .message_command
+                        .clone()
+                        .send(MessageCommand::InsertMessage {
+                            peer_id,
+                            conversation_id: self.conversation_id,
+                            recipients: recipients.clone(),
+                            message_id,
+                            message_cid,
+                        })
+                        .await;
+                }
+            }
+        }
 
         let event = MessagingEvents::Pin {
             conversation_id: self.conversation_id,
@@ -1648,11 +1648,11 @@ impl ConversationTask {
             .resolve(&self.ipfs, keypair, true, keystore.as_ref())
             .await?;
 
-        let _recipients = self.document.recipients();
+        let recipients = self.document.recipients();
 
         let reactions = message.reactions_mut();
 
-        let _message_cid;
+        let message_cid;
 
         match state {
             ReactionState::Add => {
@@ -1677,7 +1677,7 @@ impl ConversationTask {
                     .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
                     .await?;
 
-                _message_cid = self
+                message_cid = self
                     .document
                     .update_message_document(&self.ipfs, &message_document)
                     .await?;
@@ -1711,7 +1711,7 @@ impl ConversationTask {
                     .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
                     .await?;
 
-                _message_cid = self
+                message_cid = self
                     .document
                     .update_message_document(&self.ipfs, &message_document)
                     .await?;
@@ -1735,23 +1735,23 @@ impl ConversationTask {
             emoji,
         };
 
-        // if !recipients.is_empty() {
-        //     if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
-        //         for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-        //             let _ = self
-        //                 .message_command
-        //                 .clone()
-        //                 .send(MessageCommand::InsertMessage {
-        //                     peer_id,
-        //                     conversation_id,
-        //                     recipients: recipients.clone(),
-        //                     message_id,
-        //                     message_cid,
-        //                 })
-        //                 .await;
-        //         }
-        //     }
-        // }
+        if !recipients.is_empty() {
+            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                    let _ = self
+                        .message_command
+                        .clone()
+                        .send(MessageCommand::InsertMessage {
+                            peer_id,
+                            conversation_id: self.conversation_id,
+                            recipients: recipients.clone(),
+                            message_id,
+                            message_cid,
+                        })
+                        .await;
+                }
+            }
+        }
 
         self.publish(None, event, true).await
     }
@@ -2659,12 +2659,12 @@ impl ConversationTask {
         let conversation_id = self.conversation_id;
         let message_id = message.id;
 
-        let _message_cid = self
+        let message_cid = self
             .document
             .insert_message_document(&self.ipfs, &message)
             .await?;
 
-        let _recipients = self.document.recipients();
+        let recipients = self.document.recipients();
 
         self.set_document().await?;
 
@@ -2679,23 +2679,23 @@ impl ConversationTask {
 
         let event = MessagingEvents::New { message };
 
-        // if !recipients.is_empty() {
-        //     if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
-        //         for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-        //             let _ = self
-        //                 .message_command
-        //                 .clone()
-        //                 .send(MessageCommand::InsertMessage {
-        //                     peer_id,
-        //                     conversation_id,
-        //                     recipients: recipients.clone(),
-        //                     message_id,
-        //                     message_cid,
-        //                 })
-        //                 .await;
-        //         }
-        //     }
-        // }
+        if !recipients.is_empty() {
+            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                    let _ = self
+                        .message_command
+                        .clone()
+                        .send(MessageCommand::InsertMessage {
+                            peer_id,
+                            conversation_id,
+                            recipients: recipients.clone(),
+                            message_id,
+                            message_cid,
+                        })
+                        .await;
+                }
+            }
+        }
 
         self.publish(Some(message_id), event, true).await
     }
