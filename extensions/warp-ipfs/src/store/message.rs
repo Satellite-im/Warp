@@ -1132,13 +1132,7 @@ impl ConversationInner {
             warn!(conversation_id = %convo_id, "Unable to publish to topic. Queuing event");
             self.queue_event(
                 did.clone(),
-                Queue::direct(
-                    convo_id,
-                    None,
-                    peer_id,
-                    did.messaging(),
-                    payload.message().to_vec(),
-                ),
+                Queue::direct(peer_id, did.messaging(), payload.message().to_vec()),
             )
             .await;
         }
@@ -1261,13 +1255,7 @@ impl ConversationInner {
                 warn!("Unable to publish to topic. Queuing event");
                 self.queue_event(
                     did.clone(),
-                    Queue::direct(
-                        conversation_id,
-                        None,
-                        peer_id,
-                        did.messaging(),
-                        payload.message().to_vec(),
-                    ),
+                    Queue::direct(peer_id, did.messaging(), payload.message().to_vec()),
                 )
                 .await;
             }
@@ -1484,13 +1472,7 @@ impl ConversationInner {
             warn!(%conversation_id, "Unable to publish to topic");
             self.queue_event(
                 did.clone(),
-                Queue::direct(
-                    conversation_id,
-                    None,
-                    peer_id,
-                    topic.clone(),
-                    payload.message().to_vec(),
-                ),
+                Queue::direct(peer_id, topic.clone(), payload.message().to_vec()),
             )
             .await;
         }
@@ -1583,8 +1565,6 @@ impl ConversationInner {
                         self.queue_event(
                             recipient.clone(),
                             Queue::direct(
-                                document_type.id(),
-                                None,
                                 peer_id,
                                 recipient.messaging(),
                                 payload.message().to_vec(),
@@ -1631,7 +1611,7 @@ impl ConversationInner {
 
         let event = ConversationEvents::LeaveConversation {
             conversation_id,
-            recipient: own_did.clone(),
+            recipient: own_did,
             signature,
         };
 
@@ -1683,13 +1663,7 @@ impl ConversationInner {
             warn!(%conversation_id, "Unable to publish to topic. Queuing event");
             self.queue_event(
                 did_key.clone(),
-                Queue::direct(
-                    conversation_id,
-                    None,
-                    peer_id,
-                    did_key.messaging(),
-                    payload.message().to_vec(),
-                ),
+                Queue::direct(peer_id, did_key.messaging(), payload.message().to_vec()),
             )
             .await;
             time = false;
@@ -2026,8 +2000,6 @@ async fn process_identity_events(
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 struct Queue {
-    id: Uuid,
-    m_id: Option<Uuid>,
     peer: PeerId,
     topic: String,
     data: Vec<u8>,
@@ -2035,16 +2007,8 @@ struct Queue {
 }
 
 impl Queue {
-    pub fn direct(
-        id: Uuid,
-        m_id: Option<Uuid>,
-        peer: PeerId,
-        topic: String,
-        data: Vec<u8>,
-    ) -> Self {
+    pub fn direct(peer: PeerId, topic: String, data: Vec<u8>) -> Self {
         Queue {
-            id,
-            m_id,
             peer,
             topic,
             data,
