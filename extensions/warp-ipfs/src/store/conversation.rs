@@ -619,12 +619,8 @@ impl ConversationDocument {
         ipfs: &Ipfs,
         message_id: Uuid,
     ) -> Result<MessageDocument, Error> {
-        self.get_message_list(ipfs).await.and_then(|list| {
-            list.iter()
-                .find(|document| document.id == message_id)
-                .cloned()
-                .ok_or(Error::MessageNotFound)
-        })
+        let refs = self.message_reference_list(ipfs).await?;
+        refs.get(ipfs, message_id).await
     }
 
     pub async fn get_message(
