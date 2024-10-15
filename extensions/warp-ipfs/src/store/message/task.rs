@@ -304,12 +304,12 @@ impl ConversationTask {
         };
 
         task.keystore = match task.document.conversation_type() {
-            ConversationType::Direct => Keystore::new(conversation_id),
+            ConversationType::Direct => Keystore::new(),
             ConversationType::Group => {
                 match root.get_conversation_keystore(conversation_id).await {
                     Ok(store) => store,
                     Err(_) => {
-                        let mut store = Keystore::new(conversation_id);
+                        let mut store = Keystore::new();
                         store.insert(
                             root.keypair(),
                             &identity.did_key(),

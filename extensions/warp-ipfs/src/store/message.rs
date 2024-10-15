@@ -1218,7 +1218,7 @@ impl ConversationInner {
 
         self.set_document(&mut conversation).await?;
 
-        let mut keystore = Keystore::new(conversation_id);
+        let mut keystore = Keystore::new();
         keystore.insert(self.root.keypair(), own_did, warp::crypto::generate::<64>())?;
 
         self.set_keystore(conversation_id, keystore).await?;
@@ -1747,7 +1747,7 @@ async fn process_conversation(
 
             let conversation_type = conversation.conversation_type();
 
-            let mut keystore = Keystore::new(conversation_id);
+            let mut keystore = Keystore::new();
             keystore.insert(keypair, &did, warp::crypto::generate::<64>())?;
 
             conversation.verify()?;

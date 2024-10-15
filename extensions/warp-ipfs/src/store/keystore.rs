@@ -25,11 +25,8 @@ impl PartialEq for Keystore {
 
 #[allow(dead_code)]
 impl Keystore {
-    pub fn new(conversation_id: Uuid) -> Self {
-        Self {
-            conversation_id,
-            ..Default::default()
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn insert<K: AsRef<[u8]>>(
