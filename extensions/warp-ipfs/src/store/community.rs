@@ -2,7 +2,7 @@ use super::{topics::ConversationTopic, PeerIdExt};
 use crate::store::DidExt;
 use chrono::{DateTime, Utc};
 use core::hash::Hash;
-use indexmap::IndexSet;
+use indexmap::{IndexMap, IndexSet};
 use rust_ipfs::Keypair;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -53,10 +53,10 @@ pub struct CommunityDocument {
     pub created: DateTime<Utc>,
     pub modified: DateTime<Utc>,
     pub members: IndexSet<DID>,
-    pub channels: IndexSet<Uuid>,
+    pub channels: IndexMap<Uuid, CommunityChannelDocument>,
     pub roles: IndexSet<Role>,
     pub permissions: CommunityPermissions,
-    pub invites: IndexSet<Uuid>,
+    pub invites: IndexMap<Uuid, CommunityInviteDocument>,
     #[serde(default)]
     pub deleted: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -147,10 +147,10 @@ impl CommunityDocument {
             created: Utc::now(),
             modified: Utc::now(),
             members: IndexSet::new(),
-            channels: IndexSet::new(),
+            channels: IndexMap::new(),
             roles: IndexSet::new(),
             permissions: CommunityPermissions::new(),
-            invites: IndexSet::new(),
+            invites: IndexMap::new(),
             deleted: false,
             signature: None,
         };
@@ -168,10 +168,10 @@ impl From<CommunityDocument> for Community {
         community.set_created(value.created);
         community.set_modified(value.modified);
         community.set_members(value.members);
-        community.set_channels(value.channels);
+        community.set_channels(value.channels.iter().map(|(k, _)| *k).collect());
         community.set_roles(value.roles);
         community.set_permissions(value.permissions);
-        community.set_invites(value.invites);
+        community.set_invites(value.invites.iter().map(|(k, _)| *k).collect());
         community
     }
 }

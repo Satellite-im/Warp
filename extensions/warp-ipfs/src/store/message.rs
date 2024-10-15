@@ -35,7 +35,7 @@ use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{error, warn};
 use uuid::Uuid;
 
-use super::community::CommunityDocument;
+use super::community::{CommunityChannelDocument, CommunityDocument, CommunityInviteDocument};
 use super::CommunityEvents;
 use super::{
     document::root::RootDocumentMap, ds_key::DataStoreKey, ConversationImageType, PeerIdExt,
@@ -4012,21 +4012,34 @@ impl ConversationInner {
         community_id: Uuid,
         invite: CommunityInvite,
     ) -> Result<Uuid, Error> {
-        Err(Error::Unimplemented)
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let mut invite_doc =
+            CommunityInviteDocument::new(invite.target_user().clone(), invite.expiry());
+        let id = invite_doc.id;
+        community_doc.invites.insert(invite_doc.id, invite_doc);
+        self.set_community_document(community_doc).await?;
+        Ok(id)
     }
     pub async fn delete_invite(
         &mut self,
         community_id: Uuid,
         invite_id: Uuid,
     ) -> Result<(), Error> {
-        Err(Error::Unimplemented)
+        let mut community_doc = self.get_community_document(community_id).await?;
+        community_doc.invites.swap_remove(&invite_id);
+        self.set_community_document(community_doc).await?;
+        Ok(())
     }
     pub async fn get_invite(
         &mut self,
         community_id: Uuid,
         invite_id: Uuid,
     ) -> Result<CommunityInvite, Error> {
-        Err(Error::Unimplemented)
+        let community_doc = self.get_community_document(community_id).await?;
+        match community_doc.invites.get(&invite_id) {
+            Some(invite_doc) => Ok(CommunityInvite::from(invite_doc.clone())),
+            None => Err(Error::CommunityInviteDoesntExist),
+        }
     }
     pub async fn accept_invite(
         &mut self,
@@ -4042,21 +4055,36 @@ impl ConversationInner {
         channel_name: &str,
         channel_type: CommunityChannelType,
     ) -> Result<CommunityChannel, Error> {
-        Err(Error::Unimplemented)
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let channel_doc =
+            CommunityChannelDocument::new(channel_name.to_owned(), None, channel_type);
+        community_doc
+            .channels
+            .insert(channel_doc.id, channel_doc.clone());
+        self.set_community_document(community_doc).await?;
+        Ok(CommunityChannel::from(channel_doc))
     }
     pub async fn delete_channel(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
     ) -> Result<(), Error> {
-        Err(Error::Unimplemented)
+        let mut community_doc = self.get_community_document(community_id).await?;
+        community_doc.channels.swap_remove(&channel_id);
+        self.set_community_document(community_doc).await?;
+        Ok(())
     }
     pub async fn get_channel(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
     ) -> Result<CommunityChannel, Error> {
-        Err(Error::Unimplemented)
+        let community_doc = self.get_community_document(community_id).await?;
+        let channel_doc = community_doc
+            .channels
+            .get(&channel_id)
+            .ok_or(Error::CommunityChannelDoesntExist)?;
+        Ok(CommunityChannel::from(channel_doc.clone()))
     }
 
     pub async fn edit_community_name(
@@ -4064,35 +4092,50 @@ impl ConversationInner {
         community_id: Uuid,
         name: &str,
     ) -> Result<(), Error> {
-        Err(Error::Unimplemented)
+        let mut community_doc = self.get_community_document(community_id).await?;
+        community_doc.name = name.to_owned();
+        self.set_community_document(community_doc).await?;
+        Ok(())
     }
     pub async fn edit_community_description(
         &mut self,
         community_id: Uuid,
         description: Option<String>,
     ) -> Result<(), Error> {
-        Err(Error::Unimplemented)
+        let mut community_doc = self.get_community_document(community_id).await?;
+        community_doc.description = description;
+        self.set_community_document(community_doc).await?;
+        Ok(())
     }
     pub async fn edit_community_roles(
         &mut self,
         community_id: Uuid,
         roles: IndexSet<Role>,
     ) -> Result<(), Error> {
-        Err(Error::Unimplemented)
+        let mut community_doc = self.get_community_document(community_id).await?;
+        community_doc.roles = roles;
+        self.set_community_document(community_doc).await?;
+        Ok(())
     }
     pub async fn edit_community_permissions(
         &mut self,
         community_id: Uuid,
         permissions: CommunityPermissions,
     ) -> Result<(), Error> {
-        Err(Error::Unimplemented)
+        let mut community_doc = self.get_community_document(community_id).await?;
+        community_doc.permissions = permissions;
+        self.set_community_document(community_doc).await?;
+        Ok(())
     }
     pub async fn remove_community_member(
         &mut self,
         community_id: Uuid,
         member: DID,
     ) -> Result<(), Error> {
-        Err(Error::Unimplemented)
+        let mut community_doc = self.get_community_document(community_id).await?;
+        community_doc.members.swap_remove(&member);
+        self.set_community_document(community_doc).await?;
+        Ok(())
     }
 
     pub async fn edit_channel_name(
@@ -4101,7 +4144,14 @@ impl ConversationInner {
         channel_id: Uuid,
         name: &str,
     ) -> Result<(), Error> {
-        Err(Error::Unimplemented)
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let mut channel_doc = community_doc
+            .channels
+            .get_mut(&channel_id)
+            .ok_or(Error::CommunityChannelDoesntExist)?;
+        channel_doc.name = name.to_owned();
+        self.set_community_document(community_doc).await?;
+        Ok(())
     }
     pub async fn edit_channel_description(
         &mut self,
@@ -4109,7 +4159,14 @@ impl ConversationInner {
         channel_id: Uuid,
         description: Option<String>,
     ) -> Result<(), Error> {
-        Err(Error::Unimplemented)
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let mut channel_doc = community_doc
+            .channels
+            .get_mut(&channel_id)
+            .ok_or(Error::CommunityChannelDoesntExist)?;
+        channel_doc.description = description;
+        self.set_community_document(community_doc).await?;
+        Ok(())
     }
     pub async fn edit_channel_permissions(
         &mut self,
@@ -4117,7 +4174,14 @@ impl ConversationInner {
         channel_id: Uuid,
         permissions: CommunityChannelPermissions,
     ) -> Result<(), Error> {
-        Err(Error::Unimplemented)
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let mut channel_doc = community_doc
+            .channels
+            .get_mut(&channel_id)
+            .ok_or(Error::CommunityChannelDoesntExist)?;
+        channel_doc.permissions = permissions;
+        self.set_community_document(community_doc).await?;
+        Ok(())
     }
     pub async fn send_channel_message(
         &mut self,

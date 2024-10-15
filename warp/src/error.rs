@@ -165,6 +165,10 @@ pub enum Error {
     InvalidGroupMember,
     #[error("Invite is invalid")]
     InvalidInvite,
+    #[error("Community invite doesn't exist")]
+    CommunityInviteDoesntExist,
+    #[error("Community channel doesn't exist")]
+    CommunityChannelDoesntExist,
     #[error("Unable to change group status")]
     CannotChangeGroupStatus,
     #[error("Group name exceed maximum limit")]
