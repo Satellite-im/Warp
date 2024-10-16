@@ -31,6 +31,8 @@ pub enum Error {
     ItemNotDirectory,
     #[error("Attempted conversion is invalid")]
     InvalidConversion,
+    #[error("Attempted community is invalid")]
+    InvalidCommunity,
     #[error("Path supplied is invalid")]
     InvalidPath,
     #[error("Directory already exist")]
@@ -163,6 +165,14 @@ pub enum Error {
     InvalidGroupMember,
     #[error("Invite is invalid")]
     InvalidInvite,
+    #[error("Invite is targeting a different user")]
+    CommunityInviteIncorrectUser,
+    #[error("Invite is expired")]
+    CommunityInviteExpired,
+    #[error("Community invite doesn't exist")]
+    CommunityInviteDoesntExist,
+    #[error("Community channel doesn't exist")]
+    CommunityChannelDoesntExist,
     #[error("Unable to change group status")]
     CannotChangeGroupStatus,
     #[error("Group name exceed maximum limit")]

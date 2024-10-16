@@ -13,6 +13,7 @@ use crate::multipass::{
     Friends, GetIdentity, IdentityInformation, LocalIdentity, MultiPass, MultiPassEvent,
     MultiPassImportExport,
 };
+use crate::raygun::community::RayGunCommunity;
 use crate::raygun::{
     Conversation, ConversationImage, EmbedState, GroupPermissionOpt, Location, Message,
     MessageOptions, MessageReference, MessageStatus, Messages, PinState, RayGun, RayGunAttachment,
@@ -306,6 +307,9 @@ impl Constellation for Dummy {
 
 #[async_trait::async_trait]
 impl RayGunStream for Dummy {}
+
+#[async_trait::async_trait]
+impl RayGunCommunity for Dummy {}
 
 #[async_trait::async_trait]
 impl RayGunGroupConversation for Dummy {}
