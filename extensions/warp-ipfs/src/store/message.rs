@@ -883,8 +883,6 @@ struct ConversationTask {
     inner: Arc<tokio::sync::RwLock<ConversationInner>>,
     ipfs: Ipfs,
     identity: IdentityStore,
-    // used for attachments to store message on document and publish it to the network
-    // command_rx: mpsc::Receiver<MessagingCommand>,
 }
 
 impl ConversationTask {
