@@ -870,7 +870,6 @@ impl ConversationTask {
             self.queue_event(
                 did_key.clone(),
                 QueueItem::direct(
-                    self.conversation_id,
                     None,
                     peer_id,
                     did_key.messaging(),
@@ -1158,13 +1157,7 @@ impl ConversationTask {
             warn!(id = %self.conversation_id, "Unable to publish to topic");
             self.queue_event(
                 did.clone(),
-                QueueItem::direct(
-                    self.conversation_id,
-                    None,
-                    peer_id,
-                    topic.clone(),
-                    payload.message().to_vec(),
-                ),
+                QueueItem::direct(None, peer_id, topic.clone(), payload.message().to_vec()),
             )
             .await;
         }
@@ -2805,7 +2798,6 @@ impl ConversationTask {
                         self.queue_event(
                             recipient.clone(),
                             QueueItem::direct(
-                                self.conversation_id,
                                 message_id,
                                 peer_id,
                                 self.document.topic(),
@@ -3578,13 +3570,7 @@ async fn process_request_response_event(
                     // TODO
                     this.queue_event(
                         sender.clone(),
-                        QueueItem::direct(
-                            conversation_id,
-                            None,
-                            peer_id,
-                            topic.clone(),
-                            payload.message().to_vec(),
-                        ),
+                        QueueItem::direct(None, peer_id, topic.clone(), payload.message().to_vec()),
                     )
                     .await;
                 }
@@ -3720,7 +3706,6 @@ async fn process_conversation_event(
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 struct QueueItem {
-    id: Uuid,
     m_id: Option<Uuid>,
     peer: PeerId,
     topic: String,
@@ -3729,15 +3714,8 @@ struct QueueItem {
 }
 
 impl QueueItem {
-    pub fn direct(
-        id: Uuid,
-        m_id: Option<Uuid>,
-        peer: PeerId,
-        topic: String,
-        data: Vec<u8>,
-    ) -> Self {
+    pub fn direct(m_id: Option<Uuid>, peer: PeerId, topic: String, data: Vec<u8>) -> Self {
         QueueItem {
-            id,
             m_id,
             peer,
             topic,
