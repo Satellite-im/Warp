@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::crypto::DID;
-use crate::raygun::Error;
+use crate::raygun::{Error, Location};
+
+use super::ConversationImage;
 
 pub type Role = String;
 pub type CommunityPermissions = IndexMap<CommunityPermission, IndexSet<Role>>;
@@ -227,28 +229,65 @@ pub trait RayGunCommunity: Sync + Send {
         Err(Error::Unimplemented)
     }
 
-    async fn create_invite(
+    async fn get_community_icon(&self, _community_id: Uuid) -> Result<ConversationImage, Error> {
+        Err(Error::Unimplemented)
+    }
+    async fn get_community_banner(&self, _community_id: Uuid) -> Result<ConversationImage, Error> {
+        Err(Error::Unimplemented)
+    }
+    async fn edit_community_icon(
+        &mut self,
+        _community_id: Uuid,
+        _location: Location,
+    ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+    async fn edit_community_banner(
+        &mut self,
+        _community_id: Uuid,
+        _location: Location,
+    ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+
+    async fn create_community_invite(
         &mut self,
         _community_id: Uuid,
         _invite: CommunityInvite,
     ) -> Result<Uuid, Error> {
         Err(Error::Unimplemented)
     }
-    async fn delete_invite(&mut self, _community_id: Uuid, _invite_id: Uuid) -> Result<(), Error> {
+    async fn delete_community_invite(
+        &mut self,
+        _community_id: Uuid,
+        _invite_id: Uuid,
+    ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
-    async fn get_invite(
+    async fn get_community_invite(
         &mut self,
         _community_id: Uuid,
         _invite_id: Uuid,
     ) -> Result<CommunityInvite, Error> {
         Err(Error::Unimplemented)
     }
-    async fn accept_invite(&mut self, _community_id: Uuid, _invite_id: Uuid) -> Result<(), Error> {
+    async fn accept_community_invite(
+        &mut self,
+        _community_id: Uuid,
+        _invite_id: Uuid,
+    ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+    async fn edit_community_invite(
+        &mut self,
+        _community_id: Uuid,
+        _invite_id: Uuid,
+        _invite: CommunityInvite,
+    ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
-    async fn create_channel(
+    async fn create_community_channel(
         &mut self,
         _community_id: Uuid,
         _channel_name: &str,
@@ -256,14 +295,14 @@ pub trait RayGunCommunity: Sync + Send {
     ) -> Result<CommunityChannel, Error> {
         Err(Error::Unimplemented)
     }
-    async fn delete_channel(
+    async fn delete_community_channel(
         &mut self,
         _community_id: Uuid,
         _channel_id: Uuid,
     ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
-    async fn get_channel(
+    async fn get_community_channel(
         &mut self,
         _community_id: Uuid,
         _channel_id: Uuid,
@@ -303,7 +342,7 @@ pub trait RayGunCommunity: Sync + Send {
         Err(Error::Unimplemented)
     }
 
-    async fn edit_channel_name(
+    async fn edit_community_channel_name(
         &mut self,
         _community_id: Uuid,
         _channel_id: Uuid,
@@ -311,7 +350,7 @@ pub trait RayGunCommunity: Sync + Send {
     ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
-    async fn edit_channel_description(
+    async fn edit_community_channel_description(
         &mut self,
         _community_id: Uuid,
         _channel_id: Uuid,
@@ -319,7 +358,7 @@ pub trait RayGunCommunity: Sync + Send {
     ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
-    async fn edit_channel_permissions(
+    async fn edit_community_channel_permissions(
         &mut self,
         _community_id: Uuid,
         _channel_id: Uuid,
@@ -327,7 +366,7 @@ pub trait RayGunCommunity: Sync + Send {
     ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
-    async fn send_channel_message(
+    async fn send_community_channel_message(
         &mut self,
         _community_id: Uuid,
         _channel_id: Uuid,
@@ -335,7 +374,7 @@ pub trait RayGunCommunity: Sync + Send {
     ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
-    async fn delete_channel_message(
+    async fn delete_community_channel_message(
         &mut self,
         _community_id: Uuid,
         _channel_id: Uuid,

@@ -1688,57 +1688,108 @@ impl RayGunCommunity for WarpIpfs {
         self.messaging_store()?.get_community(community_id).await
     }
 
-    async fn create_invite(
+    async fn get_community_icon(&self, community_id: Uuid) -> Result<ConversationImage, Error> {
+        self.messaging_store()?
+            .get_community_icon(community_id)
+            .await
+    }
+    async fn get_community_banner(&self, community_id: Uuid) -> Result<ConversationImage, Error> {
+        self.messaging_store()?
+            .get_community_banner(community_id)
+            .await
+    }
+    async fn edit_community_icon(
+        &mut self,
+        community_id: Uuid,
+        location: Location,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .edit_community_icon(community_id, location)
+            .await
+    }
+    async fn edit_community_banner(
+        &mut self,
+        community_id: Uuid,
+        location: Location,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .edit_community_banner(community_id, location)
+            .await
+    }
+
+    async fn create_community_invite(
         &mut self,
         community_id: Uuid,
         invite: CommunityInvite,
     ) -> Result<Uuid, Error> {
         self.messaging_store()?
-            .create_invite(community_id, invite)
+            .create_community_invite(community_id, invite)
             .await
     }
-    async fn delete_invite(&mut self, community_id: Uuid, invite_id: Uuid) -> Result<(), Error> {
+    async fn delete_community_invite(
+        &mut self,
+        community_id: Uuid,
+        invite_id: Uuid,
+    ) -> Result<(), Error> {
         self.messaging_store()?
-            .delete_invite(community_id, invite_id)
+            .delete_community_invite(community_id, invite_id)
             .await
     }
-    async fn get_invite(
+    async fn get_community_invite(
         &mut self,
         community_id: Uuid,
         invite_id: Uuid,
     ) -> Result<CommunityInvite, Error> {
         self.messaging_store()?
-            .get_invite(community_id, invite_id)
+            .get_community_invite(community_id, invite_id)
             .await
     }
-    async fn accept_invite(&mut self, community_id: Uuid, invite_id: Uuid) -> Result<(), Error> {
+    async fn accept_community_invite(
+        &mut self,
+        community_id: Uuid,
+        invite_id: Uuid,
+    ) -> Result<(), Error> {
         self.messaging_store()?
-            .accept_invite(community_id, invite_id)
+            .accept_community_invite(community_id, invite_id)
+            .await
+    }
+    async fn edit_community_invite(
+        &mut self,
+        community_id: Uuid,
+        invite_id: Uuid,
+        invite: CommunityInvite,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .edit_community_invite(community_id, invite_id, invite)
             .await
     }
 
-    async fn create_channel(
+    async fn create_community_channel(
         &mut self,
         community_id: Uuid,
         channel_name: &str,
         channel_type: CommunityChannelType,
     ) -> Result<CommunityChannel, Error> {
         self.messaging_store()?
-            .create_channel(community_id, channel_name, channel_type)
+            .create_community_channel(community_id, channel_name, channel_type)
             .await
     }
-    async fn delete_channel(&mut self, community_id: Uuid, channel_id: Uuid) -> Result<(), Error> {
+    async fn delete_community_channel(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+    ) -> Result<(), Error> {
         self.messaging_store()?
-            .delete_channel(community_id, channel_id)
+            .delete_community_channel(community_id, channel_id)
             .await
     }
-    async fn get_channel(
+    async fn get_community_channel(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
     ) -> Result<CommunityChannel, Error> {
         self.messaging_store()?
-            .get_channel(community_id, channel_id)
+            .get_community_channel(community_id, channel_id)
             .await
     }
 
@@ -1784,54 +1835,54 @@ impl RayGunCommunity for WarpIpfs {
             .await
     }
 
-    async fn edit_channel_name(
+    async fn edit_community_channel_name(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
         name: &str,
     ) -> Result<(), Error> {
         self.messaging_store()?
-            .edit_channel_name(community_id, channel_id, name)
+            .edit_community_channel_name(community_id, channel_id, name)
             .await
     }
-    async fn edit_channel_description(
+    async fn edit_community_channel_description(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
         description: Option<String>,
     ) -> Result<(), Error> {
         self.messaging_store()?
-            .edit_channel_description(community_id, channel_id, description)
+            .edit_community_channel_description(community_id, channel_id, description)
             .await
     }
-    async fn edit_channel_permissions(
+    async fn edit_community_channel_permissions(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
         permissions: CommunityChannelPermissions,
     ) -> Result<(), Error> {
         self.messaging_store()?
-            .edit_channel_permissions(community_id, channel_id, permissions)
+            .edit_community_channel_permissions(community_id, channel_id, permissions)
             .await
     }
-    async fn send_channel_message(
+    async fn send_community_channel_message(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
         message: &str,
     ) -> Result<(), Error> {
         self.messaging_store()?
-            .send_channel_message(community_id, channel_id, message)
+            .send_community_channel_message(community_id, channel_id, message)
             .await
     }
-    async fn delete_channel_message(
+    async fn delete_community_channel_message(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
         message_id: Uuid,
     ) -> Result<(), Error> {
         self.messaging_store()?
-            .delete_channel_message(community_id, channel_id, message_id)
+            .delete_community_channel_message(community_id, channel_id, message_id)
             .await
     }
 }

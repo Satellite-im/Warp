@@ -571,40 +571,79 @@ impl MessageStore {
         inner.get_community(community_id).await
     }
 
-    pub async fn create_invite(
+    pub async fn get_community_icon(&self, community_id: Uuid) -> Result<ConversationImage, Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.get_community_icon(community_id).await
+    }
+    pub async fn get_community_banner(
+        &self,
+        community_id: Uuid,
+    ) -> Result<ConversationImage, Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.get_community_banner(community_id).await
+    }
+    pub async fn edit_community_icon(
+        &mut self,
+        community_id: Uuid,
+        location: Location,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.edit_community_icon(community_id, location).await
+    }
+    pub async fn edit_community_banner(
+        &mut self,
+        community_id: Uuid,
+        location: Location,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.edit_community_banner(community_id, location).await
+    }
+
+    pub async fn create_community_invite(
         &mut self,
         community_id: Uuid,
         invite: CommunityInvite,
     ) -> Result<Uuid, Error> {
         let inner = &mut *self.inner.write().await;
-        inner.create_invite(community_id, invite).await
+        inner.create_community_invite(community_id, invite).await
     }
-    pub async fn delete_invite(
+    pub async fn delete_community_invite(
         &mut self,
         community_id: Uuid,
         invite_id: Uuid,
     ) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
-        inner.delete_invite(community_id, invite_id).await
+        inner.delete_community_invite(community_id, invite_id).await
     }
-    pub async fn get_invite(
+    pub async fn get_community_invite(
         &mut self,
         community_id: Uuid,
         invite_id: Uuid,
     ) -> Result<CommunityInvite, Error> {
         let inner = &mut *self.inner.write().await;
-        inner.get_invite(community_id, invite_id).await
+        inner.get_community_invite(community_id, invite_id).await
     }
-    pub async fn accept_invite(
+    pub async fn accept_community_invite(
         &mut self,
         community_id: Uuid,
         invite_id: Uuid,
     ) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
-        inner.accept_invite(community_id, invite_id).await
+        inner.accept_community_invite(community_id, invite_id).await
+    }
+    pub async fn edit_community_invite(
+        &mut self,
+        community_id: Uuid,
+        invite_id: Uuid,
+        invite: CommunityInvite,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .edit_community_invite(community_id, invite_id, invite)
+            .await
     }
 
-    pub async fn create_channel(
+    pub async fn create_community_channel(
         &mut self,
         community_id: Uuid,
         channel_name: &str,
@@ -612,24 +651,26 @@ impl MessageStore {
     ) -> Result<CommunityChannel, Error> {
         let inner = &mut *self.inner.write().await;
         inner
-            .create_channel(community_id, channel_name, channel_type)
+            .create_community_channel(community_id, channel_name, channel_type)
             .await
     }
-    pub async fn delete_channel(
+    pub async fn delete_community_channel(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
     ) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
-        inner.delete_channel(community_id, channel_id).await
+        inner
+            .delete_community_channel(community_id, channel_id)
+            .await
     }
-    pub async fn get_channel(
+    pub async fn get_community_channel(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
     ) -> Result<CommunityChannel, Error> {
         let inner = &mut *self.inner.write().await;
-        inner.get_channel(community_id, channel_id).await
+        inner.get_community_channel(community_id, channel_id).await
     }
 
     pub async fn edit_community_name(
@@ -677,7 +718,7 @@ impl MessageStore {
         inner.remove_community_member(community_id, member).await
     }
 
-    pub async fn edit_channel_name(
+    pub async fn edit_community_channel_name(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
@@ -685,10 +726,10 @@ impl MessageStore {
     ) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
         inner
-            .edit_channel_name(community_id, channel_id, name)
+            .edit_community_channel_name(community_id, channel_id, name)
             .await
     }
-    pub async fn edit_channel_description(
+    pub async fn edit_community_channel_description(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
@@ -696,10 +737,10 @@ impl MessageStore {
     ) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
         inner
-            .edit_channel_description(community_id, channel_id, description)
+            .edit_community_channel_description(community_id, channel_id, description)
             .await
     }
-    pub async fn edit_channel_permissions(
+    pub async fn edit_community_channel_permissions(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
@@ -707,10 +748,10 @@ impl MessageStore {
     ) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
         inner
-            .edit_channel_permissions(community_id, channel_id, permissions)
+            .edit_community_channel_permissions(community_id, channel_id, permissions)
             .await
     }
-    pub async fn send_channel_message(
+    pub async fn send_community_channel_message(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
@@ -718,10 +759,10 @@ impl MessageStore {
     ) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
         inner
-            .send_channel_message(community_id, channel_id, message)
+            .send_community_channel_message(community_id, channel_id, message)
             .await
     }
-    pub async fn delete_channel_message(
+    pub async fn delete_community_channel_message(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
@@ -729,7 +770,7 @@ impl MessageStore {
     ) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
         inner
-            .delete_channel_message(community_id, channel_id, message_id)
+            .delete_community_channel_message(community_id, channel_id, message_id)
             .await
     }
 }
@@ -3993,7 +4034,31 @@ impl ConversationInner {
         Ok(document.into())
     }
 
-    pub async fn create_invite(
+    pub async fn get_community_icon(&self, community_id: Uuid) -> Result<ConversationImage, Error> {
+        Err(Error::Unimplemented)
+    }
+    pub async fn get_community_banner(
+        &self,
+        community_id: Uuid,
+    ) -> Result<ConversationImage, Error> {
+        Err(Error::Unimplemented)
+    }
+    pub async fn edit_community_icon(
+        &mut self,
+        community_id: Uuid,
+        location: Location,
+    ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+    pub async fn edit_community_banner(
+        &mut self,
+        community_id: Uuid,
+        location: Location,
+    ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+
+    pub async fn create_community_invite(
         &mut self,
         community_id: Uuid,
         invite: CommunityInvite,
@@ -4006,7 +4071,7 @@ impl ConversationInner {
         self.set_community_document(community_doc).await?;
         Ok(id)
     }
-    pub async fn delete_invite(
+    pub async fn delete_community_invite(
         &mut self,
         community_id: Uuid,
         invite_id: Uuid,
@@ -4016,7 +4081,7 @@ impl ConversationInner {
         self.set_community_document(community_doc).await?;
         Ok(())
     }
-    pub async fn get_invite(
+    pub async fn get_community_invite(
         &mut self,
         community_id: Uuid,
         invite_id: Uuid,
@@ -4027,15 +4092,51 @@ impl ConversationInner {
             None => Err(Error::CommunityInviteDoesntExist),
         }
     }
-    pub async fn accept_invite(
+    pub async fn accept_community_invite(
         &mut self,
         community_id: Uuid,
         invite_id: Uuid,
     ) -> Result<(), Error> {
-        Err(Error::Unimplemented)
+        let own_did = &self.identity.did_key();
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let invite_doc = community_doc
+            .invites
+            .get(&invite_id)
+            .ok_or(Error::CommunityInviteDoesntExist)?;
+
+        if let Some(target_user) = &invite_doc.target_user {
+            if own_did != target_user {
+                return Err(Error::CommunityInviteIncorrectUser);
+            }
+        }
+        if let Some(expiry) = &invite_doc.expiry {
+            if expiry < &Utc::now() {
+                return Err(Error::CommunityInviteExpired);
+            }
+        }
+
+        community_doc.members.insert(own_did.clone());
+        self.set_community_document(community_doc).await?;
+        Ok(())
+    }
+    pub async fn edit_community_invite(
+        &mut self,
+        community_id: Uuid,
+        invite_id: Uuid,
+        invite: CommunityInvite,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let invite_doc = community_doc
+            .invites
+            .get_mut(&invite_id)
+            .ok_or(Error::CommunityInviteDoesntExist)?;
+        invite_doc.target_user = invite.target_user().clone();
+        invite_doc.expiry = invite.expiry();
+        self.set_community_document(community_doc).await?;
+        Ok(())
     }
 
-    pub async fn create_channel(
+    pub async fn create_community_channel(
         &mut self,
         community_id: Uuid,
         channel_name: &str,
@@ -4050,7 +4151,7 @@ impl ConversationInner {
         self.set_community_document(community_doc).await?;
         Ok(CommunityChannel::from(channel_doc))
     }
-    pub async fn delete_channel(
+    pub async fn delete_community_channel(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
@@ -4060,7 +4161,7 @@ impl ConversationInner {
         self.set_community_document(community_doc).await?;
         Ok(())
     }
-    pub async fn get_channel(
+    pub async fn get_community_channel(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
@@ -4124,7 +4225,7 @@ impl ConversationInner {
         Ok(())
     }
 
-    pub async fn edit_channel_name(
+    pub async fn edit_community_channel_name(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
@@ -4139,7 +4240,7 @@ impl ConversationInner {
         self.set_community_document(community_doc).await?;
         Ok(())
     }
-    pub async fn edit_channel_description(
+    pub async fn edit_community_channel_description(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
@@ -4154,7 +4255,7 @@ impl ConversationInner {
         self.set_community_document(community_doc).await?;
         Ok(())
     }
-    pub async fn edit_channel_permissions(
+    pub async fn edit_community_channel_permissions(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
@@ -4169,7 +4270,7 @@ impl ConversationInner {
         self.set_community_document(community_doc).await?;
         Ok(())
     }
-    pub async fn send_channel_message(
+    pub async fn send_community_channel_message(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
@@ -4177,7 +4278,7 @@ impl ConversationInner {
     ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
-    pub async fn delete_channel_message(
+    pub async fn delete_community_channel_message(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
