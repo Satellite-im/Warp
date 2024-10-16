@@ -15,10 +15,11 @@ use crate::multipass::{
     Friends, GetIdentity, IdentityImportOption, IdentityInformation, ImportLocation, LocalIdentity,
     MultiPass, MultiPassEvent, MultiPassEventStream, MultiPassImportExport,
 };
+use crate::raygun::community::CommunityRoles;
 use crate::raygun::{
     community::{
         Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType,
-        CommunityInvite, CommunityPermissions, RayGunCommunity, Role,
+        CommunityInvite, CommunityPermissions, RayGunCommunity, RoleId,
     },
     AttachmentEventStream, Conversation, ConversationImage, EmbedState, GroupPermissionOpt,
     Location, Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference,
@@ -694,7 +695,7 @@ where
     async fn edit_community_roles(
         &mut self,
         community_id: Uuid,
-        roles: IndexSet<Role>,
+        roles: CommunityRoles,
     ) -> Result<(), Error> {
         self.raygun.edit_community_roles(community_id, roles).await
     }

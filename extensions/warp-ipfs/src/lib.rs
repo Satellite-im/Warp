@@ -13,6 +13,7 @@ use ipfs::{DhtMode, Ipfs, Keypair, Protocol, UninitializedIpfs};
 use parking_lot::RwLock;
 use rust_ipfs as ipfs;
 use rust_ipfs::p2p::UpgradeVersion;
+use warp::raygun::community::CommunityRoles;
 use std::any::Any;
 use std::collections::HashSet;
 use std::ffi::OsStr;
@@ -61,7 +62,7 @@ use warp::multipass::{
 use warp::raygun::{
     community::{
         Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType,
-        CommunityInvite, CommunityPermissions, RayGunCommunity, Role,
+        CommunityInvite, CommunityPermissions, RayGunCommunity, RoleId,
     },
     AttachmentEventStream, Conversation, ConversationImage, EmbedState, GroupPermissionOpt,
     Location, Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference,
@@ -1810,7 +1811,7 @@ impl RayGunCommunity for WarpIpfs {
     async fn edit_community_roles(
         &mut self,
         community_id: Uuid,
-        roles: IndexSet<Role>,
+        roles: CommunityRoles,
     ) -> Result<(), Error> {
         self.messaging_store()?
             .edit_community_roles(community_id, roles)

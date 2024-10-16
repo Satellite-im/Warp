@@ -8,9 +8,10 @@ use crate::raygun::{Error, Location};
 
 use super::ConversationImage;
 
-pub type Role = String;
-pub type CommunityPermissions = IndexMap<CommunityPermission, IndexSet<Role>>;
-pub type CommunityChannelPermissions = IndexMap<CommunityChannelPermission, IndexSet<Role>>;
+pub type RoleId = Uuid;
+pub type CommunityRoles = IndexMap<RoleId, String>;
+pub type CommunityPermissions = IndexMap<CommunityPermission, IndexSet<RoleId>>;
+pub type CommunityChannelPermissions = IndexMap<CommunityChannelPermission, IndexSet<RoleId>>;
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct CommunityInvite {
@@ -58,7 +59,7 @@ pub struct Community {
     modified: DateTime<Utc>,
     members: IndexSet<DID>,
     channels: IndexSet<Uuid>,
-    roles: IndexSet<Role>,
+    roles: CommunityRoles,
     permissions: CommunityPermissions,
     invites: IndexSet<Uuid>,
 }
@@ -87,7 +88,7 @@ impl Community {
     pub fn channels(&self) -> &IndexSet<Uuid> {
         &self.channels
     }
-    pub fn roles(&self) -> &IndexSet<Role> {
+    pub fn roles(&self) -> &CommunityRoles {
         &self.roles
     }
     pub fn permissions(&self) -> &CommunityPermissions {
@@ -122,7 +123,7 @@ impl Community {
     pub fn set_channels(&mut self, channels: IndexSet<Uuid>) {
         self.channels = channels;
     }
-    pub fn set_roles(&mut self, roles: IndexSet<Role>) {
+    pub fn set_roles(&mut self, roles: CommunityRoles) {
         self.roles = roles;
     }
     pub fn set_permissions(&mut self, permissions: CommunityPermissions) {
@@ -323,7 +324,7 @@ pub trait RayGunCommunity: Sync + Send {
     async fn edit_community_roles(
         &mut self,
         _community_id: Uuid,
-        _roles: IndexSet<Role>,
+        _roles: CommunityRoles,
     ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }

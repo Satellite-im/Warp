@@ -7,6 +7,7 @@ use tracing::info;
 
 use bytes::Bytes;
 use indexmap::IndexSet;
+use warp::raygun::community::CommunityRoles;
 use std::borrow::BorrowMut;
 use std::{
     collections::{hash_map::Entry as HashEntry, BTreeMap, HashMap, HashSet},
@@ -70,7 +71,7 @@ use crate::rt::{Executor, LocalExecutor};
 use warp::raygun::{
     community::{
         Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType,
-        CommunityInvite, CommunityPermissions, RayGunCommunity, Role,
+        CommunityInvite, CommunityPermissions, RayGunCommunity, RoleId,
     },
     ConversationImage, GroupPermission, GroupPermissionOpt,
 };
@@ -694,7 +695,7 @@ impl MessageStore {
     pub async fn edit_community_roles(
         &mut self,
         community_id: Uuid,
-        roles: IndexSet<Role>,
+        roles: CommunityRoles,
     ) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
         inner.edit_community_roles(community_id, roles).await
@@ -4197,7 +4198,7 @@ impl ConversationInner {
     pub async fn edit_community_roles(
         &mut self,
         community_id: Uuid,
-        roles: IndexSet<Role>,
+        roles: CommunityRoles,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
         community_doc.roles = roles;

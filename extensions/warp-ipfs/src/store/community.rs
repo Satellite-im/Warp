@@ -10,8 +10,7 @@ use warp::{
     crypto::DID,
     error::Error,
     raygun::community::{
-        Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType,
-        CommunityInvite, CommunityPermissions, Role,
+        Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType, CommunityInvite, CommunityPermissions, CommunityRoles, RoleId
     },
 };
 
@@ -54,7 +53,7 @@ pub struct CommunityDocument {
     pub modified: DateTime<Utc>,
     pub members: IndexSet<DID>,
     pub channels: IndexMap<Uuid, CommunityChannelDocument>,
-    pub roles: IndexSet<Role>,
+    pub roles: CommunityRoles,
     pub permissions: CommunityPermissions,
     pub invites: IndexMap<Uuid, CommunityInviteDocument>,
     #[serde(default)]
@@ -148,7 +147,7 @@ impl CommunityDocument {
             modified: Utc::now(),
             members: IndexSet::new(),
             channels: IndexMap::new(),
-            roles: IndexSet::new(),
+            roles: CommunityRoles::new(),
             permissions: CommunityPermissions::new(),
             invites: IndexMap::new(),
             deleted: false,
