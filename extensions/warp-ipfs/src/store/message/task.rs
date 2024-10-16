@@ -42,7 +42,7 @@ use web_time::Instant;
 
 use crate::config;
 use crate::shuttle::message::client::MessageCommand;
-use crate::store::conversation::MessageDocument;
+use crate::store::conversation::message::MessageDocument;
 use crate::store::discovery::Discovery;
 use crate::store::document::files::FileDocument;
 use crate::store::document::image_dag::ImageDag;

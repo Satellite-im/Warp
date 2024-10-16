@@ -30,6 +30,8 @@ use warp::{
     raygun::{GroupPermissions, MessageEvent, PinState, ReactionState},
 };
 
+use conversation::{message::MessageDocument, ConversationDocument};
+
 pub const MAX_THUMBNAIL_SIZE: usize = 5_242_880;
 pub const MAX_IMAGE_SIZE: usize = 2_097_152;
 pub const MIN_USERNAME_LENGTH: usize = 4;
@@ -213,8 +215,6 @@ pub(crate) async fn migrate_to_ds<P: AsRef<std::path::Path>>(
 }
 
 const SHUTTLE_TIMEOUT: Duration = Duration::from_secs(60);
-
-use self::conversation::{ConversationDocument, MessageDocument};
 
 pub trait PeerIdExt {
     fn to_public_key(&self) -> Result<PublicKey, anyhow::Error>;

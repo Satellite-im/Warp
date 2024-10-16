@@ -26,7 +26,6 @@ use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, PeerId};
 
 use serde::{Deserialize, Serialize};
-use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{error, warn};
 use uuid::Uuid;
@@ -120,7 +119,7 @@ impl MessageStore {
 
         executor.dispatch({
             async move {
-                select! {
+                tokio::select! {
                     _ = token.cancelled() => {}
                     _ = task.run() => {}
                 }
