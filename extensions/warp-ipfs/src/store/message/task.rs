@@ -112,11 +112,11 @@ pub enum ConversationTaskCommand {
         permissions: GroupPermissionOpt,
         response: oneshot::Sender<Result<(), Error>>,
     },
-    AddMember {
+    AddParticipant {
         member: DID,
         response: oneshot::Sender<Result<(), Error>>,
     },
-    RemoveMember {
+    RemoveParticipant {
         member: DID,
         broadcast: bool,
         response: oneshot::Sender<Result<(), Error>>,
@@ -617,16 +617,16 @@ impl ConversationTask {
                 let result = self.update_conversation_permissions(permissions).await;
                 _ = response.send(result);
             }
-            ConversationTaskCommand::AddMember { member, response } => {
-                let result = self.add_recipient(&member).await;
+            ConversationTaskCommand::AddParticipant { member, response } => {
+                let result = self.add_participant(&member).await;
                 _ = response.send(result);
             }
-            ConversationTaskCommand::RemoveMember {
+            ConversationTaskCommand::RemoveParticipant {
                 member,
                 broadcast,
                 response,
             } => {
-                let result = self.remove_recipient(&member, broadcast).await;
+                let result = self.remove_participant(&member, broadcast).await;
                 _ = response.send(result);
             }
             ConversationTaskCommand::MessageStatus {
@@ -1802,7 +1802,7 @@ impl ConversationTask {
         Ok(())
     }
 
-    pub async fn add_recipient(&mut self, did_key: &DID) -> Result<(), Error> {
+    pub async fn add_participant(&mut self, did_key: &DID) -> Result<(), Error> {
         if let ConversationType::Direct = self.document.conversation_type() {
             return Err(Error::InvalidConversation);
         }
@@ -1868,7 +1868,11 @@ impl ConversationTask {
         Ok(())
     }
 
-    pub async fn remove_recipient(&mut self, did_key: &DID, broadcast: bool) -> Result<(), Error> {
+    pub async fn remove_participant(
+        &mut self,
+        did_key: &DID,
+        broadcast: bool,
+    ) -> Result<(), Error> {
         if matches!(self.document.conversation_type(), ConversationType::Direct) {
             return Err(Error::InvalidConversation);
         }
@@ -2901,7 +2905,7 @@ impl ConversationTask {
         tracing::info!("{member} is leaving group conversation {conversation_id}");
 
         if creator.eq(&own_did) {
-            self.remove_recipient(&member, false).await?;
+            self.remove_participant(&member, false).await?;
         } else {
             {
                 //Small validation context

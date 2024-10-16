@@ -1685,7 +1685,7 @@ impl RayGunGroupConversation for WarpIpfs {
 
     async fn add_recipient(&mut self, conversation_id: Uuid, did_key: &DID) -> Result<(), Error> {
         self.messaging_store()?
-            .add_recipient(conversation_id, did_key)
+            .add_participant(conversation_id, did_key)
             .await
     }
 
@@ -1695,7 +1695,7 @@ impl RayGunGroupConversation for WarpIpfs {
         did_key: &DID,
     ) -> Result<(), Error> {
         self.messaging_store()?
-            .remove_recipient(conversation_id, did_key)
+            .remove_participant(conversation_id, did_key)
             .await
     }
 }

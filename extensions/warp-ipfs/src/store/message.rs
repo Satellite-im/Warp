@@ -396,7 +396,7 @@ impl MessageStore {
         inner.delete_conversation(conversation_id, true).await
     }
 
-    pub async fn add_recipient(&self, conversation_id: Uuid, did: &DID) -> Result<(), Error> {
+    pub async fn add_participant(&self, conversation_id: Uuid, did: &DID) -> Result<(), Error> {
         let inner = &*self.inner.read().await;
         let conversation_meta = inner
             .conversation_task
@@ -406,7 +406,7 @@ impl MessageStore {
         let _ = conversation_meta
             .command_tx
             .clone()
-            .send(ConversationTaskCommand::AddMember {
+            .send(ConversationTaskCommand::AddParticipant {
                 member: did.clone(),
                 response: tx,
             })
@@ -414,7 +414,7 @@ impl MessageStore {
         rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn remove_recipient(&self, conversation_id: Uuid, did: &DID) -> Result<(), Error> {
+    pub async fn remove_participant(&self, conversation_id: Uuid, did: &DID) -> Result<(), Error> {
         let inner = &*self.inner.read().await;
         let conversation_meta = inner
             .conversation_task
@@ -424,7 +424,7 @@ impl MessageStore {
         let _ = conversation_meta
             .command_tx
             .clone()
-            .send(ConversationTaskCommand::RemoveMember {
+            .send(ConversationTaskCommand::RemoveParticipant {
                 member: did.clone(),
                 broadcast: true,
                 response: tx,
@@ -1876,7 +1876,7 @@ async fn process_identity_events(
                         let _ = conversation_meta
                             .command_tx
                             .clone()
-                            .send(ConversationTaskCommand::RemoveMember {
+                            .send(ConversationTaskCommand::RemoveParticipant {
                                 member: did.clone(),
                                 broadcast: true,
                                 response: tx,
@@ -1971,7 +1971,7 @@ async fn process_identity_events(
                         _ = conversation_meta
                             .command_tx
                             .clone()
-                            .send(ConversationTaskCommand::RemoveMember {
+                            .send(ConversationTaskCommand::RemoveParticipant {
                                 member: did.clone(),
                                 broadcast: true,
                                 response: tx,
