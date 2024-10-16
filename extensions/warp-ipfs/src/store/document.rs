@@ -446,7 +446,7 @@ impl FileAttachmentDocument {
                 .set_local(local)
                 .timeout(Duration::from_secs(10))
                 .await
-                .unwrap_or_default();
+                .map_err(anyhow::Error::from)?;
 
             file.set_thumbnail(data);
         }
