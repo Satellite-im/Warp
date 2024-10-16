@@ -1313,7 +1313,7 @@ impl ConversationInner {
         conversation.messages.take();
         conversation.deleted = true;
 
-        self.set_document(conversation.clone()).await?;
+        self.set_document(&mut conversation).await?;
 
         if let Ok(mut ks_map) = self.root.get_conversation_keystore_map().await {
             if ks_map.remove(&id.to_string()).is_some() {
