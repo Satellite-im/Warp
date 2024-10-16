@@ -111,7 +111,7 @@ impl MessageStore {
 
         let inner = Arc::new(tokio::sync::RwLock::new(inner));
 
-        let mut task = ConversationTask {
+        let task = ConversationTask {
             inner: inner.clone(),
             ipfs: ipfs.clone(),
             identity: identity.clone(),
@@ -885,7 +885,7 @@ struct ConversationTask {
 }
 
 impl ConversationTask {
-    async fn run(&mut self) {
+    async fn run(self) {
         let mut identity_stream = self
             .identity
             .subscribe()
