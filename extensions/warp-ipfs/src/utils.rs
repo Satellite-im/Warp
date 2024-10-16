@@ -295,6 +295,50 @@ where
     }
 }
 
+// #[derive(Default)]
+// pub struct ReplaceableFuture<F> {
+//     fut: Option<F>,
+//     waker: Option<Waker>,
+// }
+
+// impl<F: Future + Unpin> ReplaceableFuture<F> {
+//     pub fn new(fut: F) -> Self {
+//         Self {
+//             fut: Some(fut),
+//             waker: None,
+//         }
+//     }
+
+//     pub fn replace(&mut self, fut: F) -> Option<F> {
+//         let old_fut = self.fut.replace(fut);
+//         if let Some(waker) = self.waker.take() {
+//             waker.wake();
+//         }
+//         old_fut
+//     }
+// }
+
+// impl<F: Future + Unpin> Stream for ReplaceableFuture<F> {
+//     type Item = F::Output;
+//     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+//         let Some(fut) = self.fut.as_mut() else {
+//             self.waker.replace(cx.waker().clone());
+//             return Poll::Pending;
+//         };
+
+//         match Pin::new(fut).poll(cx) {
+//             Poll::Ready(value) => {
+//                 self.fut.take();
+//                 Poll::Ready(Some(value))
+//             }
+//             Poll::Pending => {
+//                 self.waker.replace(cx.waker().clone());
+//                 Poll::Pending
+//             }
+//         }
+//     }
+// }
+
 #[cfg(test)]
 mod test {
     use crate::utils::{ByteCollection, ReaderStream};
