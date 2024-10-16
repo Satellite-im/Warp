@@ -26,7 +26,6 @@ use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, PeerId};
 
 use serde::{Deserialize, Serialize};
-use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{error, warn};
 use uuid::Uuid;
@@ -112,7 +111,7 @@ impl MessageStore {
 
         let inner = Arc::new(tokio::sync::RwLock::new(inner));
 
-        let mut task = ConversationTask {
+        let task = ConversationTask {
             inner: inner.clone(),
             ipfs: ipfs.clone(),
             identity: identity.clone(),
@@ -120,7 +119,7 @@ impl MessageStore {
 
         executor.dispatch({
             async move {
-                select! {
+                tokio::select! {
                     _ = token.cancelled() => {}
                     _ = task.run() => {}
                 }
@@ -886,7 +885,7 @@ struct ConversationTask {
 }
 
 impl ConversationTask {
-    async fn run(&mut self) {
+    async fn run(self) {
         let mut identity_stream = self
             .identity
             .subscribe()
