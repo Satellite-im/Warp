@@ -779,12 +779,6 @@ impl ConversationTask {
 }
 
 impl ConversationTask {
-    // pub async fn get_keystore(&self) -> Result<Keystore, Error> {
-    //     self.root
-    //         .get_conversation_keystore(self.conversation_id)
-    //         .await
-    // }
-
     pub async fn set_keystore(&mut self) -> Result<(), Error> {
         let mut map = self.root.get_conversation_keystore_map().await?;
 
@@ -793,10 +787,6 @@ impl ConversationTask {
 
         map.insert(id, cid);
 
-        self.set_keystore_map(map).await
-    }
-
-    pub async fn set_keystore_map(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
         self.root.set_conversation_keystore_map(map).await
     }
 
