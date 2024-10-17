@@ -37,12 +37,12 @@ use tracing::{error, warn};
 use uuid::Uuid;
 
 use super::community::{CommunityChannelDocument, CommunityDocument, CommunityInviteDocument};
-use super::{CommunityEvents, MAX_COMMUNITY_CHANNELS};
 use super::{
     document::root::RootDocumentMap, ds_key::DataStoreKey, ConversationImageType, PeerIdExt,
     MAX_CONVERSATION_BANNER_SIZE, MAX_CONVERSATION_DESCRIPTION, MAX_CONVERSATION_ICON_SIZE,
     MAX_MESSAGE_SIZE, MAX_REACTIONS, SHUTTLE_TIMEOUT,
 };
+use super::{CommunityEvents, MAX_COMMUNITY_CHANNELS};
 use crate::store::document::files::FileDocument;
 use crate::store::document::image_dag::ImageDag;
 use crate::utils::{ByteCollection, ExtensionType};
@@ -4070,7 +4070,9 @@ impl ConversationInner {
     ) -> Result<CommunityInvite, Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
         let mut invite_doc = CommunityInviteDocument::new(target_user, expiry);
-        community_doc.invites.insert(invite_doc.id, invite_doc.clone());
+        community_doc
+            .invites
+            .insert(invite_doc.id, invite_doc.clone());
         self.set_community_document(community_doc).await?;
         Ok(CommunityInvite::from(invite_doc))
     }
@@ -4147,7 +4149,7 @@ impl ConversationInner {
     ) -> Result<CommunityChannel, Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
         if community_doc.channels.len() >= MAX_COMMUNITY_CHANNELS {
-            return Err(Error::CommunityChannelLimitReached)
+            return Err(Error::CommunityChannelLimitReached);
         }
         let channel_doc =
             CommunityChannelDocument::new(channel_name.to_owned(), None, channel_type);
