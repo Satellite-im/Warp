@@ -37,7 +37,6 @@ use warp::{
         identity::{Identity, IdentityStatus, SHORT_ID_SIZE},
         MultiPassEventKind,
     },
-    tesseract::Tesseract,
 };
 
 use super::payload::PayloadBuilder;
@@ -86,8 +85,6 @@ pub struct IdentityStore {
     discovery: Discovery,
 
     config: config::Config,
-
-    tesseract: Tesseract,
 
     identity_command: futures::channel::mpsc::Sender<IdentityCommand>,
 
@@ -375,7 +372,6 @@ impl IdentityStore {
     pub async fn new(
         ipfs: &Ipfs,
         config: &config::Config,
-        tesseract: &Tesseract,
         tx: EventSubscription<MultiPassEventKind>,
         phonebook: &PhoneBook,
         discovery: &Discovery,
@@ -410,7 +406,6 @@ impl IdentityStore {
             identity_cache,
             discovery: discovery.clone(),
             config,
-            tesseract: tesseract.clone(),
             event,
             identity_command,
             did_key,
