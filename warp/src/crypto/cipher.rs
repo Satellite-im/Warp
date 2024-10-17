@@ -170,7 +170,6 @@ impl Cipher {
 
             let cipher = Cipher::from(key);
             let st = cipher.decrypt_async_stream(stream);
-            futures::pin_mut!(st);
 
             for await item in st {
                 yield item;
@@ -180,13 +179,12 @@ impl Cipher {
 
     pub fn self_encrypt_async_read_to_stream<'a, R: AsyncRead + Unpin + Send + 'a>(
         reader: R,
-    ) -> Result<impl Stream<Item = std::io::Result<Vec<u8>>> + Send + 'a> {
+    ) -> impl Stream<Item = std::io::Result<Vec<u8>>> + Send + 'a {
         let cipher = Cipher::new();
         let key_stream = stream::iter(Ok::<_, Error>(Ok(cipher.private_key().to_owned())));
 
         let cipher_stream = cipher.encrypt_async_read_to_stream(reader);
-        let stream = key_stream.chain(cipher_stream);
-        Ok(stream)
+        key_stream.chain(cipher_stream)
     }
 
     pub fn self_decrypt_async_read_to_stream<'a, R: AsyncRead + Unpin + Send + 'a>(
