@@ -189,15 +189,23 @@ impl Cipher {
         Ok(stream)
     }
 
-    pub async fn self_decrypt_async_read_to_stream<'a, R: AsyncRead + Unpin + Send + 'a>(
+    pub fn self_decrypt_async_read_to_stream<'a, R: AsyncRead + Unpin + Send + 'a>(
         mut reader: R,
-    ) -> Result<impl Stream<Item = std::io::Result<Vec<u8>>> + Send + 'a> {
-        let mut key = [0u8; 34];
+    ) -> impl Stream<Item = std::io::Result<Vec<u8>>> + Send + 'a {
+        let stream = async_stream::stream! {
+            let mut key = [0u8; 34];
+            if let Err(e) = reader.read_exact(&mut key).await {
+                yield Err(e);
+                return;
+            }
+            let cipher = Cipher::from(key);
+            let st = cipher.decrypt_async_read_to_stream(reader);
+            for await item in st {
+                yield item;
+            }
+        };
 
-        reader.read_exact(&mut key).await?;
-
-        let cipher = Cipher::from(key);
-        Ok(cipher.decrypt_async_read_to_stream(reader))
+        stream
     }
 
     /// Encrypts data from async stream into another async stream
