@@ -607,10 +607,11 @@ where
     async fn create_community_invite(
         &mut self,
         community_id: Uuid,
-        invite: CommunityInvite,
-    ) -> Result<Uuid, Error> {
+        target_user: Option<DID>,
+        expiry: Option<DateTime<Utc>>,
+    ) -> Result<CommunityInvite, Error> {
         self.raygun
-            .create_community_invite(community_id, invite)
+            .create_community_invite(community_id, target_user, expiry)
             .await
     }
     async fn delete_community_invite(

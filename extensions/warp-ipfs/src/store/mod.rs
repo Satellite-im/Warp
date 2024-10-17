@@ -50,6 +50,7 @@ pub const MAX_METADATA_ENTRIES: usize = 20;
 pub const MAX_THUMBNAIL_STREAM_SIZE: usize = 20 * 1024 * 1024;
 pub const MAX_CONVERSATION_ICON_SIZE: usize = 4 * 1024 * 1024;
 pub const MAX_CONVERSATION_BANNER_SIZE: usize = 8 * 1024 * 1024;
+pub const MAX_COMMUNITY_CHANNELS: usize = 20;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ConversationImageType {

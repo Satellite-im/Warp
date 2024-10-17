@@ -10,7 +10,8 @@ use warp::{
     crypto::DID,
     error::Error,
     raygun::community::{
-        Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType, CommunityInvite, CommunityPermissions, CommunityRoles, RoleId
+        Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType,
+        CommunityInvite, CommunityPermissions, CommunityRoles, RoleId,
     },
 };
 

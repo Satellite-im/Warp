@@ -173,6 +173,8 @@ pub enum Error {
     CommunityInviteDoesntExist,
     #[error("Community channel doesn't exist")]
     CommunityChannelDoesntExist,
+    #[error("Community channel limit reached")]
+    CommunityChannelLimitReached,
     #[error("Unable to change group status")]
     CannotChangeGroupStatus,
     #[error("Group name exceed maximum limit")]

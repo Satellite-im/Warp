@@ -13,7 +13,6 @@ use ipfs::{DhtMode, Ipfs, Keypair, Protocol, UninitializedIpfs};
 use parking_lot::RwLock;
 use rust_ipfs as ipfs;
 use rust_ipfs::p2p::UpgradeVersion;
-use warp::raygun::community::CommunityRoles;
 use std::any::Any;
 use std::collections::HashSet;
 use std::ffi::OsStr;
@@ -24,6 +23,7 @@ use std::time::Duration;
 use tokio_util::compat::TokioAsyncReadCompatExt;
 use tracing::{error, info, warn, Instrument, Span};
 use uuid::Uuid;
+use warp::raygun::community::CommunityRoles;
 
 use crate::config::{Bootstrap, DiscoveryType};
 use crate::rt::{Executor, LocalExecutor};
@@ -1721,10 +1721,11 @@ impl RayGunCommunity for WarpIpfs {
     async fn create_community_invite(
         &mut self,
         community_id: Uuid,
-        invite: CommunityInvite,
-    ) -> Result<Uuid, Error> {
+        target_user: Option<DID>,
+        expiry: Option<DateTime<Utc>>,
+    ) -> Result<CommunityInvite, Error> {
         self.messaging_store()?
-            .create_community_invite(community_id, invite)
+            .create_community_invite(community_id, target_user, expiry)
             .await
     }
     async fn delete_community_invite(

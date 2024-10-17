@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use either::Either;
 use futures_timeout::TimeoutExt;
 use futures_timer::Delay;
@@ -7,7 +7,6 @@ use tracing::info;
 
 use bytes::Bytes;
 use indexmap::IndexSet;
-use warp::raygun::community::CommunityRoles;
 use std::borrow::BorrowMut;
 use std::{
     collections::{hash_map::Entry as HashEntry, BTreeMap, HashMap, HashSet},
@@ -17,6 +16,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+use warp::raygun::community::CommunityRoles;
 use web_time::Instant;
 
 use futures::{
@@ -37,7 +37,7 @@ use tracing::{error, warn};
 use uuid::Uuid;
 
 use super::community::{CommunityChannelDocument, CommunityDocument, CommunityInviteDocument};
-use super::CommunityEvents;
+use super::{CommunityEvents, MAX_COMMUNITY_CHANNELS};
 use super::{
     document::root::RootDocumentMap, ds_key::DataStoreKey, ConversationImageType, PeerIdExt,
     MAX_CONVERSATION_BANNER_SIZE, MAX_CONVERSATION_DESCRIPTION, MAX_CONVERSATION_ICON_SIZE,
@@ -603,10 +603,13 @@ impl MessageStore {
     pub async fn create_community_invite(
         &mut self,
         community_id: Uuid,
-        invite: CommunityInvite,
-    ) -> Result<Uuid, Error> {
+        target_user: Option<DID>,
+        expiry: Option<DateTime<Utc>>,
+    ) -> Result<CommunityInvite, Error> {
         let inner = &mut *self.inner.write().await;
-        inner.create_community_invite(community_id, invite).await
+        inner
+            .create_community_invite(community_id, target_user, expiry)
+            .await
     }
     pub async fn delete_community_invite(
         &mut self,
@@ -4062,15 +4065,14 @@ impl ConversationInner {
     pub async fn create_community_invite(
         &mut self,
         community_id: Uuid,
-        invite: CommunityInvite,
-    ) -> Result<Uuid, Error> {
+        target_user: Option<DID>,
+        expiry: Option<DateTime<Utc>>,
+    ) -> Result<CommunityInvite, Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
-        let mut invite_doc =
-            CommunityInviteDocument::new(invite.target_user().clone(), invite.expiry());
-        let id = invite_doc.id;
-        community_doc.invites.insert(invite_doc.id, invite_doc);
+        let mut invite_doc = CommunityInviteDocument::new(target_user, expiry);
+        community_doc.invites.insert(invite_doc.id, invite_doc.clone());
         self.set_community_document(community_doc).await?;
-        Ok(id)
+        Ok(CommunityInvite::from(invite_doc))
     }
     pub async fn delete_community_invite(
         &mut self,
@@ -4144,6 +4146,9 @@ impl ConversationInner {
         channel_type: CommunityChannelType,
     ) -> Result<CommunityChannel, Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
+        if community_doc.channels.len() >= MAX_COMMUNITY_CHANNELS {
+            return Err(Error::CommunityChannelLimitReached)
+        }
         let channel_doc =
             CommunityChannelDocument::new(channel_name.to_owned(), None, channel_type);
         community_doc

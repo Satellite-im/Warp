@@ -9,9 +9,38 @@ use crate::raygun::{Error, Location};
 use super::ConversationImage;
 
 pub type RoleId = Uuid;
-pub type CommunityRoles = IndexMap<RoleId, String>;
+pub type CommunityRoles = IndexMap<RoleId, CommunityRole>;
 pub type CommunityPermissions = IndexMap<CommunityPermission, IndexSet<RoleId>>;
 pub type CommunityChannelPermissions = IndexMap<CommunityChannelPermission, IndexSet<RoleId>>;
+
+#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CommunityRole {
+    id: RoleId,
+    name: String,
+    members: IndexSet<DID>,
+}
+impl CommunityRole {
+    pub fn id(&self) -> RoleId {
+        self.id
+    }
+    pub fn name(&self) -> &String {
+        &self.name
+    }
+    pub fn members(&self) -> &IndexSet<DID> {
+        &self.members
+    }
+}
+impl CommunityRole {
+    pub fn set_id(&mut self, id: RoleId) {
+        self.id = id;
+    }
+    pub fn set_name(&mut self, name: String) {
+        self.name = name;
+    }
+    pub fn set_members(&mut self, members: IndexSet<DID>) {
+        self.members = members;
+    }
+}
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct CommunityInvite {
@@ -254,8 +283,9 @@ pub trait RayGunCommunity: Sync + Send {
     async fn create_community_invite(
         &mut self,
         _community_id: Uuid,
-        _invite: CommunityInvite,
-    ) -> Result<Uuid, Error> {
+        _target_user: Option<DID>,
+        _expiry: Option<DateTime<Utc>>,
+    ) -> Result<CommunityInvite, Error> {
         Err(Error::Unimplemented)
     }
     async fn delete_community_invite(
