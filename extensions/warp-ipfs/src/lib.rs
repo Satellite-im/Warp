@@ -5,7 +5,6 @@ use futures::future::BoxFuture;
 use futures::stream::{self, BoxStream};
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_timeout::TimeoutExt;
-use indexmap::IndexSet;
 use ipfs::p2p::{
     IdentifyConfiguration, KadConfig, KadInserts, MultiaddrExt, PubsubConfig, TransportConfig,
 };
@@ -62,7 +61,7 @@ use warp::multipass::{
 use warp::raygun::{
     community::{
         Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType,
-        CommunityInvite, CommunityPermissions, RayGunCommunity, RoleId,
+        CommunityInvite, CommunityPermissions, RayGunCommunity,
     },
     AttachmentEventStream, Conversation, ConversationImage, EmbedState, GroupPermissionOpt,
     Location, Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference,
@@ -1685,7 +1684,7 @@ impl RayGunCommunity for WarpIpfs {
     async fn delete_community(&mut self, community_id: Uuid) -> Result<(), Error> {
         self.messaging_store()?.delete_community(community_id).await
     }
-    async fn get_community(&mut self, community_id: Uuid) -> Result<Community, Error> {
+    async fn get_community(&self, community_id: Uuid) -> Result<Community, Error> {
         self.messaging_store()?.get_community(community_id).await
     }
 
@@ -1738,7 +1737,7 @@ impl RayGunCommunity for WarpIpfs {
             .await
     }
     async fn get_community_invite(
-        &mut self,
+        &self,
         community_id: Uuid,
         invite_id: Uuid,
     ) -> Result<CommunityInvite, Error> {
@@ -1786,7 +1785,7 @@ impl RayGunCommunity for WarpIpfs {
             .await
     }
     async fn get_community_channel(
-        &mut self,
+        &self,
         community_id: Uuid,
         channel_id: Uuid,
     ) -> Result<CommunityChannel, Error> {

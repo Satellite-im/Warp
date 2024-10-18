@@ -11,7 +11,7 @@ use warp::{
     error::Error,
     raygun::community::{
         Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType,
-        CommunityInvite, CommunityPermissions, CommunityRoles, RoleId,
+        CommunityInvite, CommunityPermissions, CommunityRoles,
     },
 };
 

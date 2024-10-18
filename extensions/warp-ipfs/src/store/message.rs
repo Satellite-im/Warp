@@ -6,7 +6,6 @@ use tokio_stream::StreamMap;
 use tracing::info;
 
 use bytes::Bytes;
-use indexmap::IndexSet;
 use std::borrow::BorrowMut;
 use std::{
     collections::{hash_map::Entry as HashEntry, BTreeMap, HashMap, HashSet},
@@ -71,7 +70,7 @@ use crate::rt::{Executor, LocalExecutor};
 use warp::raygun::{
     community::{
         Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType,
-        CommunityInvite, CommunityPermissions, RayGunCommunity, RoleId,
+        CommunityInvite, CommunityPermissions,
     },
     ConversationImage, GroupPermission, GroupPermissionOpt,
 };
@@ -4038,26 +4037,26 @@ impl ConversationInner {
         Ok(document.into())
     }
 
-    pub async fn get_community_icon(&self, community_id: Uuid) -> Result<ConversationImage, Error> {
+    pub async fn get_community_icon(&self, _community_id: Uuid) -> Result<ConversationImage, Error> {
         Err(Error::Unimplemented)
     }
     pub async fn get_community_banner(
         &self,
-        community_id: Uuid,
+        _community_id: Uuid,
     ) -> Result<ConversationImage, Error> {
         Err(Error::Unimplemented)
     }
     pub async fn edit_community_icon(
         &mut self,
-        community_id: Uuid,
-        location: Location,
+        _community_id: Uuid,
+        _location: Location,
     ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
     pub async fn edit_community_banner(
         &mut self,
-        community_id: Uuid,
-        location: Location,
+        _community_id: Uuid,
+        _location: Location,
     ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
@@ -4069,7 +4068,7 @@ impl ConversationInner {
         expiry: Option<DateTime<Utc>>,
     ) -> Result<CommunityInvite, Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
-        let mut invite_doc = CommunityInviteDocument::new(target_user, expiry);
+        let invite_doc = CommunityInviteDocument::new(target_user, expiry);
         community_doc
             .invites
             .insert(invite_doc.id, invite_doc.clone());
@@ -4240,7 +4239,7 @@ impl ConversationInner {
         name: &str,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
-        let mut channel_doc = community_doc
+        let channel_doc = community_doc
             .channels
             .get_mut(&channel_id)
             .ok_or(Error::CommunityChannelDoesntExist)?;
@@ -4255,7 +4254,7 @@ impl ConversationInner {
         description: Option<String>,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
-        let mut channel_doc = community_doc
+        let channel_doc = community_doc
             .channels
             .get_mut(&channel_id)
             .ok_or(Error::CommunityChannelDoesntExist)?;
@@ -4270,7 +4269,7 @@ impl ConversationInner {
         permissions: CommunityChannelPermissions,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
-        let mut channel_doc = community_doc
+        let channel_doc = community_doc
             .channels
             .get_mut(&channel_id)
             .ok_or(Error::CommunityChannelDoesntExist)?;
@@ -4280,17 +4279,17 @@ impl ConversationInner {
     }
     pub async fn send_community_channel_message(
         &mut self,
-        community_id: Uuid,
-        channel_id: Uuid,
-        message: &str,
+        _community_id: Uuid,
+        _channel_id: Uuid,
+        _message: &str,
     ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
     pub async fn delete_community_channel_message(
         &mut self,
-        community_id: Uuid,
-        channel_id: Uuid,
-        message_id: Uuid,
+        _community_id: Uuid,
+        _channel_id: Uuid,
+        _message_id: Uuid,
     ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }

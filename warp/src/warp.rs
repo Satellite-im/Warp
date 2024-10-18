@@ -19,7 +19,7 @@ use crate::raygun::community::CommunityRoles;
 use crate::raygun::{
     community::{
         Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType,
-        CommunityInvite, CommunityPermissions, RayGunCommunity, RoleId,
+        CommunityInvite, CommunityPermissions, RayGunCommunity,
     },
     AttachmentEventStream, Conversation, ConversationImage, EmbedState, GroupPermissionOpt,
     Location, Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference,
@@ -32,7 +32,6 @@ use crate::{Extension, SingleHandle};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use futures::stream::BoxStream;
-use indexmap::IndexSet;
 use std::any::Any;
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -575,7 +574,7 @@ where
     async fn delete_community(&mut self, community_id: Uuid) -> Result<(), Error> {
         self.raygun.delete_community(community_id).await
     }
-    async fn get_community(&mut self, community_id: Uuid) -> Result<Community, Error> {
+    async fn get_community(&self, community_id: Uuid) -> Result<Community, Error> {
         self.raygun.get_community(community_id).await
     }
 
@@ -624,7 +623,7 @@ where
             .await
     }
     async fn get_community_invite(
-        &mut self,
+        &self,
         community_id: Uuid,
         invite_id: Uuid,
     ) -> Result<CommunityInvite, Error> {
@@ -672,7 +671,7 @@ where
             .await
     }
     async fn get_community_channel(
-        &mut self,
+        &self,
         community_id: Uuid,
         channel_id: Uuid,
     ) -> Result<CommunityChannel, Error> {

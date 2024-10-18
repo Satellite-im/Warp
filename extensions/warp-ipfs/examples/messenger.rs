@@ -406,6 +406,7 @@ async fn main() -> anyhow::Result<()> {
                                 writeln!(stdout, "Conversation {conversation_id} has been deleted")?;
                             }
                         },
+                        warp::raygun::RayGunEventKind::CommunityCreated { community_id } => todo!()
                     }
                 }
             }
