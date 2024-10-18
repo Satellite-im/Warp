@@ -90,7 +90,7 @@ impl CommunityInvite {
         self.id
     }
     pub fn target_user(&self) -> Option<&DID> {
-        &self.target_user.as_ref()
+        self.target_user.as_ref()
     }
     pub fn created(&self) -> DateTime<Utc> {
         self.created

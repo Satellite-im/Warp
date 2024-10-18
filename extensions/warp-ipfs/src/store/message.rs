@@ -4251,7 +4251,7 @@ impl ConversationInner {
             .invites
             .get_mut(&invite_id)
             .ok_or(Error::CommunityInviteDoesntExist)?;
-        invite_doc.target_user = invite.target_user().clone();
+        invite_doc.target_user = invite.target_user().cloned();
         invite_doc.expiry = invite.expiry();
         self.set_community_document(community_doc).await?;
         Ok(())
