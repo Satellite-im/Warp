@@ -22,7 +22,9 @@ use std::time::Duration;
 use tokio_util::compat::TokioAsyncReadCompatExt;
 use tracing::{error, info, warn, Instrument, Span};
 use uuid::Uuid;
-use warp::raygun::community::CommunityRoles;
+use warp::raygun::community::{
+    CommunityChannelPermission, CommunityPermission, CommunityRole, CommunityRoles, RoleId,
+};
 
 use crate::config::{Bootstrap, DiscoveryType};
 use crate::rt::{Executor, LocalExecutor};
@@ -1765,6 +1767,55 @@ impl RayGunCommunity for WarpIpfs {
             .await
     }
 
+    async fn create_community_role(
+        &mut self,
+        community_id: Uuid,
+        name: &str,
+    ) -> Result<CommunityRole, Error> {
+        self.messaging_store()?
+            .create_community_role(community_id, name)
+            .await
+    }
+    async fn delete_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .delete_community_role(community_id, role_id)
+            .await
+    }
+    async fn edit_community_role_name(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+        new_name: String,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .edit_community_role_name(community_id, role_id, new_name)
+            .await
+    }
+    async fn grant_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+        user: DID,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .grant_community_role(community_id, role_id, user)
+            .await
+    }
+    async fn revoke_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+        user: DID,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .revoke_community_role(community_id, role_id, user)
+            .await
+    }
+
     async fn create_community_channel(
         &mut self,
         community_id: Uuid,
@@ -1808,22 +1859,42 @@ impl RayGunCommunity for WarpIpfs {
             .edit_community_description(community_id, description)
             .await
     }
-    async fn edit_community_roles(
+    async fn grant_community_permission(
         &mut self,
         community_id: Uuid,
-        roles: CommunityRoles,
+        permission: CommunityPermission,
+        role_id: RoleId,
     ) -> Result<(), Error> {
         self.messaging_store()?
-            .edit_community_roles(community_id, roles)
+            .grant_community_permission(community_id, permission, role_id)
             .await
     }
-    async fn edit_community_permissions(
+    async fn revoke_community_permission(
         &mut self,
         community_id: Uuid,
-        permissions: CommunityPermissions,
+        permission: CommunityPermission,
+        role_id: RoleId,
     ) -> Result<(), Error> {
         self.messaging_store()?
-            .edit_community_permissions(community_id, permissions)
+            .revoke_community_permission(community_id, permission, role_id)
+            .await
+    }
+    async fn grant_community_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        permission: CommunityPermission,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .grant_community_permission_for_all(community_id, permission)
+            .await
+    }
+    async fn revoke_community_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        permission: CommunityPermission,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .revoke_community_permission_for_all(community_id, permission)
             .await
     }
     async fn remove_community_member(
@@ -1856,14 +1927,46 @@ impl RayGunCommunity for WarpIpfs {
             .edit_community_channel_description(community_id, channel_id, description)
             .await
     }
-    async fn edit_community_channel_permissions(
+    async fn grant_community_channel_permission(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
-        permissions: CommunityChannelPermissions,
+        permission: CommunityChannelPermission,
+        role_id: RoleId,
     ) -> Result<(), Error> {
         self.messaging_store()?
-            .edit_community_channel_permissions(community_id, channel_id, permissions)
+            .grant_community_channel_permission(community_id, channel_id, permission, role_id)
+            .await
+    }
+    async fn revoke_community_channel_permission(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+        role_id: RoleId,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .revoke_community_channel_permission(community_id, channel_id, permission, role_id)
+            .await
+    }
+    async fn grant_community_channel_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .grant_community_channel_permission_for_all(community_id, channel_id, permission)
+            .await
+    }
+    async fn revoke_community_channel_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .revoke_community_channel_permission_for_all(community_id, channel_id, permission)
             .await
     }
     async fn send_community_channel_message(

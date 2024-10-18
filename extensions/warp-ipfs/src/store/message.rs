@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use either::Either;
 use futures_timeout::TimeoutExt;
 use futures_timer::Delay;
+use rust_ipfs::libp2p::relay::client::new;
 use tokio_stream::StreamMap;
 use tracing::info;
 
@@ -15,7 +16,9 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use warp::raygun::community::CommunityRoles;
+use warp::raygun::community::{
+    CommunityChannelPermission, CommunityPermission, CommunityRole, CommunityRoles, RoleId,
+};
 use web_time::Instant;
 
 use futures::{
@@ -24,7 +27,7 @@ use futures::{
     stream::{self, BoxStream, FuturesUnordered, SelectAll},
     FutureExt, SinkExt, Stream, StreamExt, TryFutureExt,
 };
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use ipld_core::cid::Cid;
 
 use rust_ipfs::{libp2p::gossipsub::Message, p2p::MultiaddrExt, Ipfs, IpfsPath, Keypair, PeerId};
@@ -35,7 +38,9 @@ use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{error, warn};
 use uuid::Uuid;
 
-use super::community::{CommunityChannelDocument, CommunityDocument, CommunityInviteDocument};
+use super::community::{
+    CommunityChannelDocument, CommunityDocument, CommunityInviteDocument, CommunityRoleDocument,
+};
 use super::{
     document::root::RootDocumentMap, ds_key::DataStoreKey, ConversationImageType, PeerIdExt,
     MAX_CONVERSATION_BANNER_SIZE, MAX_CONVERSATION_DESCRIPTION, MAX_CONVERSATION_ICON_SIZE,
@@ -646,6 +651,56 @@ impl MessageStore {
             .await
     }
 
+    pub async fn create_community_role(
+        &mut self,
+        community_id: Uuid,
+        name: &str,
+    ) -> Result<CommunityRole, Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.create_community_role(community_id, name).await
+    }
+    pub async fn delete_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.delete_community_role(community_id, role_id).await
+    }
+    pub async fn edit_community_role_name(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+        new_name: String,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .edit_community_role_name(community_id, role_id, new_name)
+            .await
+    }
+    pub async fn grant_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+        user: DID,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .grant_community_role(community_id, role_id, user)
+            .await
+    }
+    pub async fn revoke_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+        user: DID,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .revoke_community_role(community_id, role_id, user)
+            .await
+    }
+
     pub async fn create_community_channel(
         &mut self,
         community_id: Uuid,
@@ -694,22 +749,46 @@ impl MessageStore {
             .edit_community_description(community_id, description)
             .await
     }
-    pub async fn edit_community_roles(
+    pub async fn grant_community_permission(
         &mut self,
         community_id: Uuid,
-        roles: CommunityRoles,
-    ) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
-        inner.edit_community_roles(community_id, roles).await
-    }
-    pub async fn edit_community_permissions(
-        &mut self,
-        community_id: Uuid,
-        permissions: CommunityPermissions,
+        permission: CommunityPermission,
+        role_id: RoleId,
     ) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
         inner
-            .edit_community_permissions(community_id, permissions)
+            .grant_community_permission(community_id, permission, role_id)
+            .await
+    }
+    pub async fn revoke_community_permission(
+        &mut self,
+        community_id: Uuid,
+        permission: CommunityPermission,
+        role_id: RoleId,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .revoke_community_permission(community_id, permission, role_id)
+            .await
+    }
+    pub async fn grant_community_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        permission: CommunityPermission,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .grant_community_permission_for_all(community_id, permission)
+            .await
+    }
+    pub async fn revoke_community_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        permission: CommunityPermission,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .revoke_community_permission_for_all(community_id, permission)
             .await
     }
     pub async fn remove_community_member(
@@ -743,15 +822,50 @@ impl MessageStore {
             .edit_community_channel_description(community_id, channel_id, description)
             .await
     }
-    pub async fn edit_community_channel_permissions(
+    pub async fn grant_community_channel_permission(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
-        permissions: CommunityChannelPermissions,
+        permission: CommunityChannelPermission,
+        role_id: RoleId,
     ) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
         inner
-            .edit_community_channel_permissions(community_id, channel_id, permissions)
+            .grant_community_channel_permission(community_id, channel_id, permission, role_id)
+            .await
+    }
+    pub async fn revoke_community_channel_permission(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+        role_id: RoleId,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .revoke_community_channel_permission(community_id, channel_id, permission, role_id)
+            .await
+    }
+    pub async fn grant_community_channel_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .grant_community_channel_permission_for_all(community_id, channel_id, permission)
+            .await
+    }
+    pub async fn revoke_community_channel_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .revoke_community_channel_permission_for_all(community_id, channel_id, permission)
             .await
     }
     pub async fn send_community_channel_message(
@@ -4037,7 +4151,10 @@ impl ConversationInner {
         Ok(document.into())
     }
 
-    pub async fn get_community_icon(&self, _community_id: Uuid) -> Result<ConversationImage, Error> {
+    pub async fn get_community_icon(
+        &self,
+        _community_id: Uuid,
+    ) -> Result<ConversationImage, Error> {
         Err(Error::Unimplemented)
     }
     pub async fn get_community_banner(
@@ -4140,6 +4257,85 @@ impl ConversationInner {
         Ok(())
     }
 
+    pub async fn create_community_role(
+        &mut self,
+        community_id: Uuid,
+        name: &str,
+    ) -> Result<CommunityRole, Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let role = CommunityRoleDocument::new(name.to_owned());
+        community_doc.roles.insert(role.id, role.clone());
+        self.set_community_document(community_doc).await?;
+        Ok(CommunityRole::from(role))
+    }
+    pub async fn delete_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        community_doc.roles.swap_remove(&role_id);
+        let _ = community_doc
+            .permissions
+            .iter_mut()
+            .map(|(_, roles)| roles.swap_remove(&role_id));
+        let _ = community_doc.channels.iter_mut().map(|(_, channel_doc)| {
+            channel_doc
+                .permissions
+                .iter_mut()
+                .map(|(_, roles)| roles.swap_remove(&role_id))
+        });
+        self.set_community_document(community_doc).await?;
+        Ok(())
+    }
+    pub async fn edit_community_role_name(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+        new_name: String,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        community_doc
+            .roles
+            .get_mut(&role_id)
+            .ok_or(Error::CommunityRoleDoesntExist)?
+            .name = new_name;
+        self.set_community_document(community_doc).await?;
+        Ok(())
+    }
+    pub async fn grant_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+        user: DID,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        community_doc
+            .roles
+            .get_mut(&role_id)
+            .ok_or(Error::CommunityRoleDoesntExist)?
+            .members
+            .insert(user);
+        self.set_community_document(community_doc).await?;
+        Ok(())
+    }
+    pub async fn revoke_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+        user: DID,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        community_doc
+            .roles
+            .get_mut(&role_id)
+            .ok_or(Error::CommunityRoleDoesntExist)?
+            .members
+            .swap_remove(&user);
+        self.set_community_document(community_doc).await?;
+        Ok(())
+    }
+
     pub async fn create_community_channel(
         &mut self,
         community_id: Uuid,
@@ -4201,23 +4397,60 @@ impl ConversationInner {
         self.set_community_document(community_doc).await?;
         Ok(())
     }
-    pub async fn edit_community_roles(
+    pub async fn grant_community_permission(
         &mut self,
         community_id: Uuid,
-        roles: CommunityRoles,
+        permission: CommunityPermission,
+        role_id: RoleId,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
-        community_doc.roles = roles;
+        match community_doc.permissions.get_mut(&permission) {
+            Some(authorized_roles) => {
+                authorized_roles.insert(role_id);
+            }
+            None => {
+                let mut roles = IndexSet::new();
+                roles.insert(role_id);
+                community_doc.permissions.insert(permission, roles);
+            }
+        }
         self.set_community_document(community_doc).await?;
         Ok(())
     }
-    pub async fn edit_community_permissions(
+    pub async fn revoke_community_permission(
         &mut self,
         community_id: Uuid,
-        permissions: CommunityPermissions,
+        permission: CommunityPermission,
+        role_id: RoleId,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
-        community_doc.permissions = permissions;
+        if let Some(authorized_roles) = community_doc.permissions.get_mut(&permission) {
+            authorized_roles.swap_remove(&role_id);
+        }
+        self.set_community_document(community_doc).await?;
+        Ok(())
+    }
+    pub async fn grant_community_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        permission: CommunityPermission,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        if community_doc.permissions.contains_key(&permission) {
+            community_doc.permissions.swap_remove(&permission);
+            self.set_community_document(community_doc).await?;
+        }
+        Ok(())
+    }
+    pub async fn revoke_community_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        permission: CommunityPermission,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        community_doc
+            .permissions
+            .insert(permission, IndexSet::new());
         self.set_community_document(community_doc).await?;
         Ok(())
     }
@@ -4262,18 +4495,78 @@ impl ConversationInner {
         self.set_community_document(community_doc).await?;
         Ok(())
     }
-    pub async fn edit_community_channel_permissions(
+    pub async fn grant_community_channel_permission(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
-        permissions: CommunityChannelPermissions,
+        permission: CommunityChannelPermission,
+        role_id: RoleId,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
         let channel_doc = community_doc
             .channels
             .get_mut(&channel_id)
             .ok_or(Error::CommunityChannelDoesntExist)?;
-        channel_doc.permissions = permissions;
+        match channel_doc.permissions.get_mut(&permission) {
+            Some(authorized_roles) => {
+                authorized_roles.insert(role_id);
+            }
+            None => {
+                let mut roles = IndexSet::new();
+                roles.insert(role_id);
+                channel_doc.permissions.insert(permission, roles);
+            }
+        }
+        self.set_community_document(community_doc).await?;
+        Ok(())
+    }
+    pub async fn revoke_community_channel_permission(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+        role_id: RoleId,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let channel_doc = community_doc
+            .channels
+            .get_mut(&channel_id)
+            .ok_or(Error::CommunityChannelDoesntExist)?;
+        if let Some(authorized_roles) = channel_doc.permissions.get_mut(&permission) {
+            authorized_roles.swap_remove(&role_id);
+        }
+        self.set_community_document(community_doc).await?;
+        Ok(())
+    }
+    pub async fn grant_community_channel_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let channel_doc = community_doc
+            .channels
+            .get_mut(&channel_id)
+            .ok_or(Error::CommunityChannelDoesntExist)?;
+        if channel_doc.permissions.contains_key(&permission) {
+            channel_doc.permissions.swap_remove(&permission);
+            self.set_community_document(community_doc).await?;
+        }
+        Ok(())
+    }
+    pub async fn revoke_community_channel_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let channel_doc = community_doc
+            .channels
+            .get_mut(&channel_id)
+            .ok_or(Error::CommunityChannelDoesntExist)?;
+        channel_doc.permissions.insert(permission, IndexSet::new());
         self.set_community_document(community_doc).await?;
         Ok(())
     }

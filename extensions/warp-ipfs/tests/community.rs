@@ -2,7 +2,7 @@ mod common;
 #[cfg(test)]
 mod test {
     use chrono::{Duration, Utc};
-    use warp::raygun::community::RayGunCommunity;
+    use warp::raygun::community::{CommunityPermission, RayGunCommunity};
 
     #[cfg(target_arch = "wasm32")]
     use wasm_bindgen_test::wasm_bindgen_test as async_test;
@@ -29,12 +29,16 @@ mod test {
             instance_a.create_community("Community1").await?, //with expired invite
             instance_a.create_community("Community2").await?, //with invite targeting a different user
         ];
-        instance_a.create_community_invite(
-            communities[1].id(),
-            None,
-            Some(Utc::now() - Duration::days(1)),
-        ).await?;
-        instance_a.create_community_invite(communities[2].id(), Some(did_a.clone()), None).await?;
+        instance_a
+            .create_community_invite(
+                communities[1].id(),
+                None,
+                Some(Utc::now() - Duration::days(1)),
+            )
+            .await?;
+        instance_a
+            .create_community_invite(communities[2].id(), Some(did_a.clone()), None)
+            .await?;
 
         let (instance_b, _, _) = &accounts[1];
         for (i, community) in communities.iter().enumerate() {
@@ -61,12 +65,16 @@ mod test {
             instance_a.create_community("Community0").await?, //with open invite
             instance_a.create_community("Community1").await?, //with specifically targeted invite
         ];
-        instance_a.create_community_invite(communities[0].id(), None, None).await?;
-        instance_a.create_community_invite(
-            communities[1].id(),
-            Some(did_b),
-            Some(Utc::now() + Duration::days(1)),
-        ).await?;
+        instance_a
+            .create_community_invite(communities[0].id(), None, None)
+            .await?;
+        instance_a
+            .create_community_invite(
+                communities[1].id(),
+                Some(did_b),
+                Some(Utc::now() + Duration::days(1)),
+            )
+            .await?;
 
         let (instance_b, _, _) = &accounts[1];
         for (i, community) in communities.iter().enumerate() {
@@ -155,12 +163,18 @@ mod test {
     async fn get_community_invite() -> anyhow::Result<()> {
         let context = Some("test::get_community_invite".into());
         let account_opts = (None, None, context);
-        let mut accounts = create_accounts(vec![account_opts]).await?;
+        let mut accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
 
         let (instance_a, _, _) = &mut accounts[0];
         let community = instance_a.create_community("Community0").await?;
-        let invite = instance_a.create_community_invite(community.id(), None, None).await?;
-        instance_a.get_community_invite(community.id(), invite.id()).await?;
+        let invite = instance_a
+            .create_community_invite(community.id(), None, None)
+            .await?;
+
+        let (instance_b, _, _) = &accounts[1];
+        instance_b
+            .get_community_invite(community.id(), invite.id())
+            .await?;
         Ok(())
     }
     #[async_test]
@@ -170,17 +184,40 @@ mod test {
         let mut accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
         let (instance_a, _, _) = &mut accounts[0];
         let community = instance_a.create_community("Community0").await?;
-        assert!(false);
+
+        let (instance_b, _, _) = &mut accounts[1];
+        match instance_b
+            .create_community_invite(community.id(), None, None)
+            .await
+        {
+            Err(e) => match e {
+                Error::Unauthorized => {}
+                _ => panic!("error should be Error::Unauthorized"),
+            },
+            Ok(_) => panic!("should be unauthorized to delete community"),
+        }
         Ok(())
     }
     #[async_test]
     async fn authorized_create_community_invite() -> anyhow::Result<()> {
         let context = Some("test::authorized_create_community_invite".into());
         let account_opts = (None, None, context);
-        let mut accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let mut accounts = create_accounts(vec![account_opts.clone(), account_opts.clone(), account_opts]).await?;
+        
+        let (_, did_b, _) = &accounts[1];
+        let did_b = did_b.clone();
         let (instance_a, _, _) = &mut accounts[0];
         let community = instance_a.create_community("Community0").await?;
-        assert!(false);
+        let role = instance_a.create_community_role(community.id(), "Role0").await?;
+        instance_a.grant_community_role(community.id(), role.id(), did_b).await?;
+
+        let (instance_b, _, _) = &mut accounts[1];
+        let invite = instance_b
+            .create_community_invite(community.id(), None, None)
+            .await?;
+
+        let (instance_c, _, _) = &mut accounts[2];
+        instance_c.accept_community_invite(community.id(), invite.id()).await?;
         Ok(())
     }
     #[async_test]

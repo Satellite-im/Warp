@@ -11,10 +11,34 @@ use warp::{
     error::Error,
     raygun::community::{
         Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType,
-        CommunityInvite, CommunityPermissions, CommunityRoles,
+        CommunityInvite, CommunityPermissions, CommunityRole, CommunityRoles, RoleId,
     },
 };
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CommunityRoleDocument {
+    pub id: RoleId,
+    pub name: String,
+    pub members: IndexSet<DID>,
+}
+impl CommunityRoleDocument {
+    pub fn new(name: String) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            name,
+            members: IndexSet::new(),
+        }
+    }
+}
+impl From<CommunityRoleDocument> for CommunityRole {
+    fn from(value: CommunityRoleDocument) -> Self {
+        let mut role = CommunityRole::default();
+        role.set_id(value.id);
+        role.set_name(value.name);
+        role.set_members(value.members);
+        role
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommunityInviteDocument {
     pub id: Uuid,
@@ -54,7 +78,7 @@ pub struct CommunityDocument {
     pub modified: DateTime<Utc>,
     pub members: IndexSet<DID>,
     pub channels: IndexMap<Uuid, CommunityChannelDocument>,
-    pub roles: CommunityRoles,
+    pub roles: IndexMap<RoleId, CommunityRoleDocument>,
     pub permissions: CommunityPermissions,
     pub invites: IndexMap<Uuid, CommunityInviteDocument>,
     #[serde(default)]
@@ -148,7 +172,7 @@ impl CommunityDocument {
             modified: Utc::now(),
             members: IndexSet::new(),
             channels: IndexMap::new(),
-            roles: CommunityRoles::new(),
+            roles: IndexMap::new(),
             permissions: CommunityPermissions::new(),
             invites: IndexMap::new(),
             deleted: false,
@@ -169,7 +193,7 @@ impl From<CommunityDocument> for Community {
         community.set_modified(value.modified);
         community.set_members(value.members);
         community.set_channels(value.channels.iter().map(|(k, _)| *k).collect());
-        community.set_roles(value.roles);
+        community.set_roles(value.roles.iter().map(|(k, _)| *k).collect());
         community.set_permissions(value.permissions);
         community.set_invites(value.invites.iter().map(|(k, _)| *k).collect());
         community

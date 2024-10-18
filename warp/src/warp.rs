@@ -15,7 +15,9 @@ use crate::multipass::{
     Friends, GetIdentity, IdentityImportOption, IdentityInformation, ImportLocation, LocalIdentity,
     MultiPass, MultiPassEvent, MultiPassEventStream, MultiPassImportExport,
 };
-use crate::raygun::community::CommunityRoles;
+use crate::raygun::community::{
+    CommunityChannelPermission, CommunityPermission, CommunityRole, CommunityRoles, RoleId,
+};
 use crate::raygun::{
     community::{
         Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType,
@@ -651,6 +653,53 @@ where
             .await
     }
 
+    async fn create_community_role(
+        &mut self,
+        community_id: Uuid,
+        name: &str,
+    ) -> Result<CommunityRole, Error> {
+        self.raygun.create_community_role(community_id, name).await
+    }
+    async fn delete_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+    ) -> Result<(), Error> {
+        self.raygun
+            .delete_community_role(community_id, role_id)
+            .await
+    }
+    async fn edit_community_role_name(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+        new_name: String,
+    ) -> Result<(), Error> {
+        self.raygun
+            .edit_community_role_name(community_id, role_id, new_name)
+            .await
+    }
+    async fn grant_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+        user: DID,
+    ) -> Result<(), Error> {
+        self.raygun
+            .grant_community_role(community_id, role_id, user)
+            .await
+    }
+    async fn revoke_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+        user: DID,
+    ) -> Result<(), Error> {
+        self.raygun
+            .revoke_community_role(community_id, role_id, user)
+            .await
+    }
+
     async fn create_community_channel(
         &mut self,
         community_id: Uuid,
@@ -692,20 +741,42 @@ where
             .edit_community_description(community_id, description)
             .await
     }
-    async fn edit_community_roles(
+    async fn grant_community_permission(
         &mut self,
         community_id: Uuid,
-        roles: CommunityRoles,
-    ) -> Result<(), Error> {
-        self.raygun.edit_community_roles(community_id, roles).await
-    }
-    async fn edit_community_permissions(
-        &mut self,
-        community_id: Uuid,
-        permissions: CommunityPermissions,
+        permission: CommunityPermission,
+        role_id: RoleId,
     ) -> Result<(), Error> {
         self.raygun
-            .edit_community_permissions(community_id, permissions)
+            .grant_community_permission(community_id, permission, role_id)
+            .await
+    }
+    async fn revoke_community_permission(
+        &mut self,
+        community_id: Uuid,
+        permission: CommunityPermission,
+        role_id: RoleId,
+    ) -> Result<(), Error> {
+        self.raygun
+            .revoke_community_permission(community_id, permission, role_id)
+            .await
+    }
+    async fn grant_community_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        permission: CommunityPermission,
+    ) -> Result<(), Error> {
+        self.raygun
+            .grant_community_permission_for_all(community_id, permission)
+            .await
+    }
+    async fn revoke_community_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        permission: CommunityPermission,
+    ) -> Result<(), Error> {
+        self.raygun
+            .revoke_community_permission_for_all(community_id, permission)
             .await
     }
     async fn remove_community_member(
@@ -738,14 +809,46 @@ where
             .edit_community_channel_description(community_id, channel_id, description)
             .await
     }
-    async fn edit_community_channel_permissions(
+    async fn grant_community_channel_permission(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
-        permissions: CommunityChannelPermissions,
+        permission: CommunityChannelPermission,
+        role_id: RoleId,
     ) -> Result<(), Error> {
         self.raygun
-            .edit_community_channel_permissions(community_id, channel_id, permissions)
+            .grant_community_channel_permission(community_id, channel_id, permission, role_id)
+            .await
+    }
+    async fn revoke_community_channel_permission(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+        role_id: RoleId,
+    ) -> Result<(), Error> {
+        self.raygun
+            .revoke_community_channel_permission(community_id, channel_id, permission, role_id)
+            .await
+    }
+    async fn grant_community_channel_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+    ) -> Result<(), Error> {
+        self.raygun
+            .grant_community_channel_permission_for_all(community_id, channel_id, permission)
+            .await
+    }
+    async fn revoke_community_channel_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+    ) -> Result<(), Error> {
+        self.raygun
+            .revoke_community_channel_permission_for_all(community_id, channel_id, permission)
             .await
     }
     async fn send_community_channel_message(

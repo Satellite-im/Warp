@@ -124,7 +124,7 @@ pub struct Community {
     modified: DateTime<Utc>,
     members: IndexSet<DID>,
     channels: IndexSet<Uuid>,
-    roles: CommunityRoles,
+    roles: IndexSet<RoleId>,
     permissions: CommunityPermissions,
     invites: IndexSet<Uuid>,
 }
@@ -153,7 +153,7 @@ impl Community {
     pub fn channels(&self) -> &IndexSet<Uuid> {
         &self.channels
     }
-    pub fn roles(&self) -> &CommunityRoles {
+    pub fn roles(&self) -> &IndexSet<RoleId> {
         &self.roles
     }
     pub fn permissions(&self) -> &CommunityPermissions {
@@ -188,7 +188,7 @@ impl Community {
     pub fn set_channels(&mut self, channels: IndexSet<Uuid>) {
         self.channels = channels;
     }
-    pub fn set_roles(&mut self, roles: CommunityRoles) {
+    pub fn set_roles(&mut self, roles: IndexSet<RoleId>) {
         self.roles = roles;
     }
     pub fn set_permissions(&mut self, permissions: CommunityPermissions) {
@@ -272,6 +272,7 @@ pub enum CommunityPermission {
     ManagePermissions,
     ManageMembers,
     ManageChannels,
+    ManageInvites,
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -354,6 +355,45 @@ pub trait RayGunCommunity: Sync + Send {
         Err(Error::Unimplemented)
     }
 
+    async fn create_community_role(
+        &mut self,
+        _community_id: Uuid,
+        _name: &str,
+    ) -> Result<CommunityRole, Error> {
+        Err(Error::Unimplemented)
+    }
+    async fn delete_community_role(
+        &mut self,
+        _community_id: Uuid,
+        _role_id: RoleId,
+    ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+    async fn edit_community_role_name(
+        &mut self,
+        _community_id: Uuid,
+        _role_id: RoleId,
+        _new_name: String,
+    ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+    async fn grant_community_role(
+        &mut self,
+        _community_id: Uuid,
+        _role_id: RoleId,
+        _user: DID,
+    ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+    async fn revoke_community_role(
+        &mut self,
+        _community_id: Uuid,
+        _role_id: RoleId,
+        _user: DID,
+    ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+
     async fn create_community_channel(
         &mut self,
         _community_id: Uuid,
@@ -387,17 +427,33 @@ pub trait RayGunCommunity: Sync + Send {
     ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
-    async fn edit_community_roles(
+    async fn grant_community_permission(
         &mut self,
         _community_id: Uuid,
-        _roles: CommunityRoles,
+        _permission: CommunityPermission,
+        _role_id: RoleId,
     ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
-    async fn edit_community_permissions(
+    async fn revoke_community_permission(
         &mut self,
         _community_id: Uuid,
-        _permissions: CommunityPermissions,
+        _permission: CommunityPermission,
+        _role_id: RoleId,
+    ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+    async fn grant_community_permission_for_all(
+        &mut self,
+        _community_id: Uuid,
+        _permission: CommunityPermission,
+    ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+    async fn revoke_community_permission_for_all(
+        &mut self,
+        _community_id: Uuid,
+        _permission: CommunityPermission,
     ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
@@ -425,11 +481,37 @@ pub trait RayGunCommunity: Sync + Send {
     ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
-    async fn edit_community_channel_permissions(
+    async fn grant_community_channel_permission(
         &mut self,
         _community_id: Uuid,
         _channel_id: Uuid,
-        _permissions: CommunityChannelPermissions,
+        _permission: CommunityChannelPermission,
+        _role_id: RoleId,
+    ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+    async fn revoke_community_channel_permission(
+        &mut self,
+        _community_id: Uuid,
+        _channel_id: Uuid,
+        _permission: CommunityChannelPermission,
+        _role_id: RoleId,
+    ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+    async fn grant_community_channel_permission_for_all(
+        &mut self,
+        _community_id: Uuid,
+        _channel_id: Uuid,
+        _permission: CommunityChannelPermission,
+    ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+    async fn revoke_community_channel_permission_for_all(
+        &mut self,
+        _community_id: Uuid,
+        _channel_id: Uuid,
+        _permission: CommunityChannelPermission,
     ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
