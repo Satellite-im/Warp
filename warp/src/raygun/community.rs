@@ -59,7 +59,7 @@ impl CommunityRole {
     pub fn id(&self) -> RoleId {
         self.id
     }
-    pub fn name(&self) -> &String {
+    pub fn name(&self) -> &str {
         &self.name
     }
     pub fn members(&self) -> &IndexSet<DID> {
@@ -89,8 +89,8 @@ impl CommunityInvite {
     pub fn id(&self) -> Uuid {
         self.id
     }
-    pub fn target_user(&self) -> &Option<DID> {
-        &self.target_user
+    pub fn target_user(&self) -> Option<&DID> {
+        &self.target_user.as_ref()
     }
     pub fn created(&self) -> DateTime<Utc> {
         self.created
@@ -132,11 +132,11 @@ impl Community {
     pub fn id(&self) -> Uuid {
         self.id
     }
-    pub fn name(&self) -> &String {
+    pub fn name(&self) -> &str {
         &self.name
     }
-    pub fn description(&self) -> &Option<String> {
-        &self.description
+    pub fn description(&self) -> Option<&str> {
+        self.description.as_deref()
     }
     pub fn creator(&self) -> &DID {
         &self.creator
@@ -214,11 +214,11 @@ impl CommunityChannel {
     pub fn id(&self) -> Uuid {
         self.id
     }
-    pub fn name(&self) -> &String {
+    pub fn name(&self) -> &str {
         &self.name
     }
-    pub fn description(&self) -> &Option<String> {
-        &self.description
+    pub fn description(&self) -> Option<&str> {
+        self.description.as_deref()
     }
     pub fn created(&self) -> DateTime<Utc> {
         self.created
