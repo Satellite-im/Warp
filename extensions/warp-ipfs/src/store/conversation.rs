@@ -1,4 +1,5 @@
 pub mod message;
+mod message_page_st;
 mod reference;
 
 use super::{keystore::Keystore, topics::ConversationTopic, verify_serde_sig, PeerIdExt};
@@ -542,6 +543,146 @@ impl ConversationDocument {
 
         Ok(stream.boxed())
     }
+
+    // pub async fn get_messages_pages_stream(
+    //     &self,
+    //     ipfs: &Ipfs,
+    //     keypair: &Keypair,
+    //     option: MessageOptions,
+    //     keystore: Either<DID, Keystore>,
+    // ) -> Result<BoxStream<'static, Vec<Message>>, Error> {
+    //     let message_list = self.message_reference_list(ipfs).await?;
+    //     let count = message_list.count(&ipfs).await;
+    //     let ipfs = ipfs.clone();
+    //     let keypair = keypair.clone();
+    //     let keystore = keystore.clone();
+    //
+    //     let st = async_stream::stream! {
+    //
+    //         if count == 0 {
+    //             return;
+    //         }
+    //
+    //         // TODO: Reverse
+    //
+    //         let (page_index, amount_per_page) = match option.messages_type() {
+    //             MessagesType::Pages {
+    //                 page,
+    //                 amount_per_page,
+    //             } => (
+    //                 page,
+    //                 amount_per_page
+    //                     .map(|amount| if amount == 0 { u8::MAX as _ } else { amount })
+    //                     .unwrap_or(u8::MAX as _),
+    //             ),
+    //             _ => (None, u8::MAX as _),
+    //         };
+    //
+    //         let mut index_counter = 0;
+    //         let mut chunk_set: BTreeSet<Message> = BTreeSet::new();
+    //         let list = message_list.list(&ipfs);
+    //
+    //         let chunk_list = list.chunks(amount_per_page as _);
+    //
+    //         for await chunks in chunk_list {
+    //
+    //             let mut messages =
+    //                 FuturesOrdered::from_iter(chunks.iter().map(|document| document.resolve(&ipfs, &keypair, true, keystore.as_ref()).into_future()))
+    //                 .filter_map(|document| async move {
+    //                      document.ok()
+    //                 }).filter(|message| futures::future::ready(option.pinned() && !message.pinned()));
+    //
+    //             // for message in messages {
+    //             //
+    //             //
+    //             //     if option.pinned() && !message.pinned() {
+    //             //         continue;
+    //             //     }
+    //             //
+    //             //     chunk_set.insert(message);
+    //             // }
+    //
+    //             if !chunk_set.is_empty() {
+    //                 let set = std::mem::take(&mut chunk_set);
+    //
+    //                 if page_index.is_some_and(|index| index != index_counter) {
+    //                     continue;
+    //                 }
+    //
+    //                 index_counter += 1;
+    //
+    //                 yield Vec::from_iter(set);
+    //             }
+    //
+    //
+    //         }
+    //
+    //
+    //     };
+    //
+    //     Ok(st.boxed())
+    //
+    //     // if message_list.is_empty() {
+    //     //     return Ok(Messages::Page {
+    //     //         pages: vec![],
+    //     //         total: 0,
+    //     //     });
+    //     // }
+    //     //
+    //     // let mut messages = Vec::from_iter(message_list);
+    //     //
+    //     // if option.reverse() {
+    //     //     messages.reverse()
+    //     // }
+    //     //
+    //     // let (page_index, amount_per_page) = match option.messages_type() {
+    //     //     MessagesType::Pages {
+    //     //         page,
+    //     //         amount_per_page,
+    //     //     } => (
+    //     //         page,
+    //     //         amount_per_page
+    //     //             .map(|amount| if amount == 0 { u8::MAX as _ } else { amount })
+    //     //             .unwrap_or(u8::MAX as _),
+    //     //     ),
+    //     //     _ => (None, u8::MAX as _),
+    //     // };
+    //     //
+    //     // let messages_chunk = messages.chunks(amount_per_page as _).collect::<Vec<_>>();
+    //     // let mut pages = vec![];
+    //     // // First check to determine if there is a page that was selected
+    //     // if let Some(index) = page_index {
+    //     //     let page = messages_chunk.get(index).ok_or(Error::PageNotFound)?;
+    //     //     let mut messages = vec![];
+    //     //     for document in page.iter() {
+    //     //         if let Ok(message) = document.resolve(ipfs, did, true, keystore).await {
+    //     //             messages.push(message);
+    //     //         }
+    //     //     }
+    //     //     let total = messages.len();
+    //     //     pages.push(MessagePage::new(index, messages, total));
+    //     //     return Ok(Messages::Page { pages, total: 1 });
+    //     // }
+    //     //
+    //     // for (index, chunk) in messages_chunk.iter().enumerate() {
+    //     //     let mut messages = vec![];
+    //     //     for document in chunk.iter() {
+    //     //         if let Ok(message) = document.resolve(ipfs, did, true, keystore).await {
+    //     //             if option.pinned() && !message.pinned() {
+    //     //                 continue;
+    //     //             }
+    //     //             messages.push(message);
+    //     //         }
+    //     //     }
+    //     //
+    //     //     let total = messages.len();
+    //     //     pages.push(MessagePage::new(index, messages, total));
+    //     // }
+    //     //
+    //     // let total = pages.len();
+    //     //
+    //     // Ok(Messages::Page { pages, total })
+    // }
 
     pub async fn get_messages_pages(
         &self,
