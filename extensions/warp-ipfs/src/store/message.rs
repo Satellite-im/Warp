@@ -1604,7 +1604,10 @@ impl ConversationInner {
     }
 
     pub async fn set_keystore_map(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
-        self.root.set_conversation_keystore_map(map).await
+        self.root.set_community_keystore_map(map).await
+    }
+    pub async fn set_community_keystore_map(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
+        self.root.set_community_keystore_map(map).await
     }
 
     pub async fn set_document<B: BorrowMut<ConversationDocument>>(
@@ -4102,6 +4105,29 @@ impl ConversationInner {
         self.identity.export_root_document().await?;
         Ok(())
     }
+    pub async fn set_community_keystore(&mut self, id: Uuid, document: Keystore) -> Result<(), Error> {
+        if !self.contains_community(id).await {
+            return Err(Error::InvalidCommunity);
+        }
+
+        let mut map = self.root.get_community_keystore_map().await?;
+
+        let id = id.to_string();
+        let cid = self.ipfs.put_dag(document).await?;
+
+        map.insert(id, cid);
+
+        self.set_keystore_map(map).await
+    }
+    pub async fn contains_community(&self, id: Uuid) -> bool {
+        self.list_community_stream()
+            .await
+            .any(|community| async move { community.id() == id })
+            .await
+    }
+    pub async fn list_community_stream(&self) -> impl Stream<Item = CommunityDocument> + Unpin {
+        self.root.list_community_document().await
+    }
 }
 
 impl ConversationInner {
@@ -4127,7 +4153,7 @@ impl ConversationInner {
         let mut keystore = Keystore::new(community_id);
         keystore.insert(self.root.keypair(), own_did, warp::crypto::generate::<64>())?;
 
-        self.set_keystore(community_id, keystore).await?;
+        self.set_community_keystore(community_id, keystore).await?;
 
         self.create_community_task(community_id).await?;
 

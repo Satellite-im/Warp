@@ -96,6 +96,9 @@ pub struct RootDocument {
     /// map of keystore for group chat conversations
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conversations_keystore: Option<Cid>,
+    /// map of keystore for communities
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub communities_keystore: Option<Cid>,
     /// index to constellation
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_index: Option<Cid>,
@@ -353,6 +356,7 @@ impl RootDocument {
             request: None,
             conversations: None,
             conversations_keystore: None,
+            communities_keystore: None,
             communities: None,
             file_index: None,
             status: None,

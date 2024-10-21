@@ -175,10 +175,18 @@ impl RootDocumentMap {
         let inner = &*self.inner.read().await;
         inner.get_conversation_keystore_map().await
     }
+    pub async fn get_community_keystore_map(&self) -> Result<BTreeMap<String, Cid>, Error> {
+        let inner = &*self.inner.read().await;
+        inner.get_community_keystore_map().await
+    }
 
     pub async fn list_conversation_document(&self) -> BoxStream<'static, ConversationDocument> {
         let inner = &*self.inner.read().await;
         inner.list_conversation_stream().await
+    }
+    pub async fn list_community_document(&self) -> BoxStream<'static, CommunityDocument> {
+        let inner = &*self.inner.read().await;
+        inner.list_community_stream().await
     }
 
     pub async fn get_conversation_document(&self, id: Uuid) -> Result<ConversationDocument, Error> {
@@ -218,6 +226,13 @@ impl RootDocumentMap {
     ) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
         inner.set_conversation_keystore(document).await
+    }
+    pub async fn set_community_keystore_map(
+        &self,
+        document: BTreeMap<String, Cid>,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.set_community_keystore(document).await
     }
 
     pub async fn get_directory_index(&self) -> Result<Directory, Error> {
@@ -890,11 +905,31 @@ impl RootDocumentInner {
         document.conversations_keystore = Some(self.ipfs.put_dag(map).await?);
         self.set_root_document(document).await
     }
+    async fn set_community_keystore(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
+        let mut document = self.get_root_document().await?;
+        document.communities_keystore = Some(self.ipfs.put_dag(map).await?);
+        self.set_root_document(document).await
+    }
 
     async fn get_conversation_keystore_map(&self) -> Result<BTreeMap<String, Cid>, Error> {
         let document = self.get_root_document().await?;
 
         let cid = match document.conversations_keystore {
+            Some(cid) => cid,
+            None => return Ok(BTreeMap::new()),
+        };
+
+        self.ipfs
+            .get_dag(cid)
+            .local()
+            .deserialized()
+            .await
+            .map_err(Error::from)
+    }
+    async fn get_community_keystore_map(&self) -> Result<BTreeMap<String, Cid>, Error> {
+        let document = self.get_root_document().await?;
+
+        let cid = match document.communities_keystore {
             Some(cid) => cid,
             None => return Ok(BTreeMap::new()),
         };
@@ -1017,6 +1052,46 @@ impl RootDocumentInner {
 
             for await conversation in unordered {
                 yield conversation;
+            }
+        };
+
+        stream.boxed()
+    }
+
+    pub async fn list_community_stream(&self) -> BoxStream<'static, CommunityDocument> {
+        let document = match self.get_root_document().await.ok() {
+            Some(document) => document,
+            None => return futures::stream::empty().boxed(),
+        };
+
+        let cid = match document.communities {
+            Some(cid) => cid,
+            None => return futures::stream::empty().boxed(),
+        };
+
+        let ipfs = self.ipfs.clone();
+
+        let stream = async_stream::stream! {
+            let community_map: BTreeMap<String, Cid> = ipfs
+                .get_dag(cid)
+                .local()
+                .deserialized()
+                .await
+                .unwrap_or_default();
+
+            let unordered = FuturesUnordered::from_iter(
+                community_map
+                    .values()
+                    .map(|cid| ipfs.get_dag(*cid).local().deserialized().into_future()),
+            )
+            .filter_map(|result: Result<CommunityDocument, _>| async move { result.ok() })
+            .filter(|document| {
+                let deleted = document.deleted;
+                async move { !deleted }
+            });
+
+            for await community in unordered {
+                yield community;
             }
         };
 
