@@ -4214,7 +4214,7 @@ impl ConversationInner {
         let invite_doc = CommunityInviteDocument::new(target_user, expiry);
         community_doc
             .invites
-            .insert(invite_doc.id, invite_doc.clone());
+            .insert(invite_doc.id.to_string(), invite_doc.clone());
         self.set_community_document(community_doc).await?;
         Ok(CommunityInvite::from(invite_doc))
     }
@@ -4224,7 +4224,7 @@ impl ConversationInner {
         invite_id: Uuid,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
-        community_doc.invites.swap_remove(&invite_id);
+        community_doc.invites.swap_remove(&invite_id.to_string());
         self.set_community_document(community_doc).await?;
         Ok(())
     }
@@ -4234,7 +4234,7 @@ impl ConversationInner {
         invite_id: Uuid,
     ) -> Result<CommunityInvite, Error> {
         let community_doc = self.get_community_document(community_id).await?;
-        match community_doc.invites.get(&invite_id) {
+        match community_doc.invites.get(&invite_id.to_string()) {
             Some(invite_doc) => Ok(CommunityInvite::from(invite_doc.clone())),
             None => Err(Error::CommunityInviteDoesntExist),
         }
@@ -4248,7 +4248,7 @@ impl ConversationInner {
         let mut community_doc = self.get_community_document(community_id).await?;
         let invite_doc = community_doc
             .invites
-            .get(&invite_id)
+            .get(&invite_id.to_string())
             .ok_or(Error::CommunityInviteDoesntExist)?;
 
         if let Some(target_user) = &invite_doc.target_user {
@@ -4275,7 +4275,7 @@ impl ConversationInner {
         let mut community_doc = self.get_community_document(community_id).await?;
         let invite_doc = community_doc
             .invites
-            .get_mut(&invite_id)
+            .get_mut(&invite_id.to_string())
             .ok_or(Error::CommunityInviteDoesntExist)?;
         invite_doc.target_user = invite.target_user().cloned();
         invite_doc.expiry = invite.expiry();
@@ -4290,7 +4290,7 @@ impl ConversationInner {
     ) -> Result<CommunityRole, Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
         let role = CommunityRoleDocument::new(name.to_owned());
-        community_doc.roles.insert(role.id, role.clone());
+        community_doc.roles.insert(role.id.to_string(), role.clone());
         self.set_community_document(community_doc).await?;
         Ok(CommunityRole::from(role))
     }
@@ -4300,7 +4300,7 @@ impl ConversationInner {
         role_id: RoleId,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
-        community_doc.roles.swap_remove(&role_id);
+        community_doc.roles.swap_remove(&role_id.to_string());
         let _ = community_doc
             .permissions
             .iter_mut()
@@ -4323,7 +4323,7 @@ impl ConversationInner {
         let mut community_doc = self.get_community_document(community_id).await?;
         community_doc
             .roles
-            .get_mut(&role_id)
+            .get_mut(&role_id.to_string())
             .ok_or(Error::CommunityRoleDoesntExist)?
             .name = new_name;
         self.set_community_document(community_doc).await?;
@@ -4338,7 +4338,7 @@ impl ConversationInner {
         let mut community_doc = self.get_community_document(community_id).await?;
         community_doc
             .roles
-            .get_mut(&role_id)
+            .get_mut(&role_id.to_string())
             .ok_or(Error::CommunityRoleDoesntExist)?
             .members
             .insert(user);
@@ -4354,7 +4354,7 @@ impl ConversationInner {
         let mut community_doc = self.get_community_document(community_id).await?;
         community_doc
             .roles
-            .get_mut(&role_id)
+            .get_mut(&role_id.to_string())
             .ok_or(Error::CommunityRoleDoesntExist)?
             .members
             .swap_remove(&user);
@@ -4376,7 +4376,7 @@ impl ConversationInner {
             CommunityChannelDocument::new(channel_name.to_owned(), None, channel_type);
         community_doc
             .channels
-            .insert(channel_doc.id, channel_doc.clone());
+            .insert(channel_doc.id.to_string(), channel_doc.clone());
         self.set_community_document(community_doc).await?;
         Ok(CommunityChannel::from(channel_doc))
     }
@@ -4386,7 +4386,7 @@ impl ConversationInner {
         channel_id: Uuid,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
-        community_doc.channels.swap_remove(&channel_id);
+        community_doc.channels.swap_remove(&channel_id.to_string());
         self.set_community_document(community_doc).await?;
         Ok(())
     }
@@ -4398,7 +4398,7 @@ impl ConversationInner {
         let community_doc = self.get_community_document(community_id).await?;
         let channel_doc = community_doc
             .channels
-            .get(&channel_id)
+            .get(&channel_id.to_string())
             .ok_or(Error::CommunityChannelDoesntExist)?;
         Ok(CommunityChannel::from(channel_doc.clone()))
     }
@@ -4500,7 +4500,7 @@ impl ConversationInner {
         let mut community_doc = self.get_community_document(community_id).await?;
         let channel_doc = community_doc
             .channels
-            .get_mut(&channel_id)
+            .get_mut(&channel_id.to_string())
             .ok_or(Error::CommunityChannelDoesntExist)?;
         channel_doc.name = name.to_owned();
         self.set_community_document(community_doc).await?;
@@ -4515,7 +4515,7 @@ impl ConversationInner {
         let mut community_doc = self.get_community_document(community_id).await?;
         let channel_doc = community_doc
             .channels
-            .get_mut(&channel_id)
+            .get_mut(&channel_id.to_string())
             .ok_or(Error::CommunityChannelDoesntExist)?;
         channel_doc.description = description;
         self.set_community_document(community_doc).await?;
@@ -4531,7 +4531,7 @@ impl ConversationInner {
         let mut community_doc = self.get_community_document(community_id).await?;
         let channel_doc = community_doc
             .channels
-            .get_mut(&channel_id)
+            .get_mut(&channel_id.to_string())
             .ok_or(Error::CommunityChannelDoesntExist)?;
         match channel_doc.permissions.get_mut(&permission) {
             Some(authorized_roles) => {
@@ -4556,7 +4556,7 @@ impl ConversationInner {
         let mut community_doc = self.get_community_document(community_id).await?;
         let channel_doc = community_doc
             .channels
-            .get_mut(&channel_id)
+            .get_mut(&channel_id.to_string())
             .ok_or(Error::CommunityChannelDoesntExist)?;
         if let Some(authorized_roles) = channel_doc.permissions.get_mut(&permission) {
             authorized_roles.swap_remove(&role_id);
@@ -4573,7 +4573,7 @@ impl ConversationInner {
         let mut community_doc = self.get_community_document(community_id).await?;
         let channel_doc = community_doc
             .channels
-            .get_mut(&channel_id)
+            .get_mut(&channel_id.to_string())
             .ok_or(Error::CommunityChannelDoesntExist)?;
         if channel_doc.permissions.contains_key(&permission) {
             channel_doc.permissions.swap_remove(&permission);
@@ -4590,7 +4590,7 @@ impl ConversationInner {
         let mut community_doc = self.get_community_document(community_id).await?;
         let channel_doc = community_doc
             .channels
-            .get_mut(&channel_id)
+            .get_mut(&channel_id.to_string())
             .ok_or(Error::CommunityChannelDoesntExist)?;
         channel_doc.permissions.insert(permission, IndexSet::new());
         self.set_community_document(community_doc).await?;

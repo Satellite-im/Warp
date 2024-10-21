@@ -77,10 +77,10 @@ pub struct CommunityDocument {
     pub created: DateTime<Utc>,
     pub modified: DateTime<Utc>,
     pub members: IndexSet<DID>,
-    pub channels: IndexMap<Uuid, CommunityChannelDocument>,
-    pub roles: IndexMap<RoleId, CommunityRoleDocument>,
+    pub channels: IndexMap<String, CommunityChannelDocument>,
+    pub roles: IndexMap<String, CommunityRoleDocument>,
     pub permissions: CommunityPermissions,
-    pub invites: IndexMap<Uuid, CommunityInviteDocument>,
+    pub invites: IndexMap<String, CommunityInviteDocument>,
     #[serde(default)]
     pub deleted: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -192,10 +192,10 @@ impl From<CommunityDocument> for Community {
         community.set_created(value.created);
         community.set_modified(value.modified);
         community.set_members(value.members);
-        community.set_channels(value.channels.iter().map(|(k, _)| *k).collect());
-        community.set_roles(value.roles.iter().map(|(k, _)| *k).collect());
+        community.set_channels(value.channels.iter().map(|(k, _)| RoleId::parse_str(&k).expect("should be valid uuid")).collect());
+        community.set_roles(value.roles.iter().map(|(k, _)| RoleId::parse_str(&k).expect("should be valid uuid")).collect());
         community.set_permissions(value.permissions);
-        community.set_invites(value.invites.iter().map(|(k, _)| *k).collect());
+        community.set_invites(value.invites.iter().map(|(k, _)| RoleId::parse_str(&k).expect("should be valid uuid")).collect());
         community
     }
 }
