@@ -411,9 +411,12 @@ impl Stream for ReferenceListStream {
 }
 
 fn pop_front(map: &mut IndexMap<String, Option<Cid>>) -> Option<Cid> {
-    let (key, value) = map.iter_mut().next_back()?;
+    let (key, value) = map.iter_mut().next()?;
     let k = key.to_string();
     let val = *value;
     map.shift_remove(&k);
+    if map.is_empty() {
+        map.shrink_to_fit();
+    }
     val
 }
