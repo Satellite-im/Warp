@@ -410,7 +410,7 @@ impl Stream for ReferenceListStream {
     }
 }
 
-pub fn pop_front(map: &mut IndexMap<String, Option<Cid>>) -> Option<Cid> {
+fn pop_front(map: &mut IndexMap<String, Option<Cid>>) -> Option<Cid> {
     let (key, value) = map.iter_mut().next_back()?;
     let k = key.to_string();
     let val = *value;
