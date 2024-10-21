@@ -210,6 +210,7 @@ mod test {
         let community = instance_a.create_community("Community0").await?;
         let role = instance_a.create_community_role(community.id(), "Role0").await?;
         instance_a.grant_community_role(community.id(), role.id(), did_b).await?;
+        instance_a.grant_community_permission(community.id(), CommunityPermission::ManageInvites, role.id()).await?;
 
         let (instance_b, _, _) = &mut accounts[1];
         let invite = instance_b
@@ -227,7 +228,16 @@ mod test {
         let mut accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
         let (instance_a, _, _) = &mut accounts[0];
         let community = instance_a.create_community("Community0").await?;
-        assert!(false);
+        let invite = instance_a.create_community_invite(community.id(), None, None).await?;
+        
+        let (instance_b, _, _) = &mut accounts[0];
+        match instance_b.delete_community_invite(community.id(), invite.id()).await {
+            Err(e) => match e {
+                Error::Unauthorized => {}
+                _ => panic!("error should be Error::Unauthorized"),
+            },
+            Ok(_) => panic!("should be unauthorized to delete community"),
+        }
         Ok(())
     }
     #[async_test]
@@ -235,9 +245,18 @@ mod test {
         let context = Some("test::authorized_delete_community_invite".into());
         let account_opts = (None, None, context);
         let mut accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        
+        let (_, did_b, _) = &accounts[1];
+        let did_b = did_b.clone();
         let (instance_a, _, _) = &mut accounts[0];
         let community = instance_a.create_community("Community0").await?;
-        assert!(false);
+        let role = instance_a.create_community_role(community.id(), "Role0").await?;
+        instance_a.grant_community_role(community.id(), role.id(), did_b).await?;
+        instance_a.grant_community_permission(community.id(), CommunityPermission::ManageInvites, role.id()).await?;
+        let invite = instance_a.create_community_invite(community.id(), None, None).await?;
+        
+        let (instance_b, _, _) = &mut accounts[1];
+        instance_b.delete_community_invite(community.id(), invite.id()).await?;
         Ok(())
     }
     #[async_test]
