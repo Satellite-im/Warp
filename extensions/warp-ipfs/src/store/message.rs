@@ -4211,10 +4211,17 @@ impl ConversationInner {
         expiry: Option<DateTime<Utc>>,
     ) -> Result<CommunityInvite, Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
-        let invite_doc = CommunityInviteDocument::new(target_user, expiry);
+        let invite_doc = CommunityInviteDocument::new(target_user.clone(), expiry);
         community_doc
             .invites
             .insert(invite_doc.id.to_string(), invite_doc.clone());
+
+        if let Some(target) = target_user {
+            if !self.discovery.contains(target.clone()).await {
+                self.discovery.insert(target).await?;
+            }
+        }
+
         self.set_community_document(community_doc).await?;
         Ok(CommunityInvite::from(invite_doc))
     }

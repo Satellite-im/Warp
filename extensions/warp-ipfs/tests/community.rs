@@ -93,10 +93,13 @@ mod test {
         let account_opts = (None, None, context);
         let mut accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
 
+        let (_, did_b, _) = &accounts[1];
+        let did_b = did_b.clone();
+
         let (instance_a, _, _) = &mut accounts[0];
         let community = instance_a.create_community("Community0").await?;
         let invite = instance_a
-            .create_community_invite(community.id(), None, None)
+            .create_community_invite(community.id(), Some(did_b), None)
             .await?;
 
         let (instance_b, _, _) = &mut accounts[1];
