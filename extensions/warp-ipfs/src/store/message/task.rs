@@ -3676,7 +3676,10 @@ async fn process_request_response_event(
             }
             ConversationResponseKind::Pong => {
                 if this.pending_ping_response.remove(&sender).is_none() {
-                    // TODO: Never sent a ping request
+                    // Note: Never sent a ping request so we can reject it
+                    // TODO: Possibly blacklist peer if a request was never sent, however, we have to consider
+                    //       the possibility of the peer reinitializing the task (ie, restarting) after the ping request is sent out
+                    //       and possibly receiving a response after.
                     return Ok(());
                 }
                 if let Some(instant) = this.ping_duration.shift_remove(&sender) {
@@ -3688,8 +3691,7 @@ async fn process_request_response_event(
                 }
 
                 // Perform a check to determine if we have a key for the user. If not, request it
-
-                if !matches!(this.document.conversation_type(), ConversationType::Group) {
+                if matches!(this.document.conversation_type(), ConversationType::Direct) {
                     return Ok(());
                 }
 
