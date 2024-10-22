@@ -350,6 +350,12 @@ impl ConversationTask {
             task.queue = data;
         }
 
+        for recipient in task.document.recipients() {
+            if !task.discovery.contains(&recipient).await {
+                let _ = task.discovery.insert(recipient).await;
+            }
+        }
+
         tracing::info!(%conversation_id, "conversation task created");
         Ok(task)
     }
