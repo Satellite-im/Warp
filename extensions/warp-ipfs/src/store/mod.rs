@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use uuid::Uuid;
 
+use crate::store::community::CommunityInviteDocument;
 use ipfs::{libp2p::identity::KeyType, Keypair, PeerId, PublicKey};
 use warp::{
     crypto::{
@@ -79,6 +80,10 @@ pub(super) mod topics {
         }
         fn messaging(&self) -> String {
             format!("/id/{self}/messaging")
+        }
+
+        fn invites(&self) -> String {
+            format!("/id/{self}/messaging/invites")
         }
     }
 
@@ -345,6 +350,11 @@ pub enum ConversationEvents {
     },
     DeleteConversation {
         conversation_id: Uuid,
+    },
+    NewCommunityInvite {
+        conversation_id: Uuid,
+        community_document: CommunityDocument,
+        invite: CommunityInviteDocument,
     },
 }
 

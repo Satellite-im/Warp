@@ -1606,7 +1606,10 @@ impl ConversationInner {
     pub async fn set_keystore_map(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
         self.root.set_community_keystore_map(map).await
     }
-    pub async fn set_community_keystore_map(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
+    pub async fn set_community_keystore_map(
+        &mut self,
+        map: BTreeMap<String, Cid>,
+    ) -> Result<(), Error> {
         self.root.set_community_keystore_map(map).await
     }
 
@@ -4105,7 +4108,11 @@ impl ConversationInner {
         self.identity.export_root_document().await?;
         Ok(())
     }
-    pub async fn set_community_keystore(&mut self, id: Uuid, document: Keystore) -> Result<(), Error> {
+    pub async fn set_community_keystore(
+        &mut self,
+        id: Uuid,
+        document: Keystore,
+    ) -> Result<(), Error> {
         if !self.contains_community(id).await {
             return Err(Error::InvalidCommunity);
         }
@@ -4216,13 +4223,63 @@ impl ConversationInner {
             .invites
             .insert(invite_doc.id.to_string(), invite_doc.clone());
 
-        if let Some(target) = target_user {
-            if !self.discovery.contains(target.clone()).await {
+        self.set_community_document(&mut community_doc).await?;
+
+        if let Some(target) = target_user.as_ref() {
+            if !self.discovery.contains(target).await {
                 self.discovery.insert(target).await?;
+            }
+
+            let event = ConversationEvents::NewCommunityInvite {
+                conversation_id: community_id,
+                community_document: community_doc.clone(),
+                invite: invite_doc.clone(),
+            };
+
+            let bytes = ecdh_encrypt(
+                self.root.keypair(),
+                Some(target),
+                serde_json::to_vec(&event)?,
+            )?;
+
+            let payload = PayloadBuilder::new(self.root.keypair(), bytes)
+                .from_ipfs(&self.ipfs)
+                .await?;
+
+            let peers = self.ipfs.pubsub_peers(Some(target.invites())).await?;
+
+            let peer_id = target.to_peer_id()?;
+
+            if !peers.contains(&peer_id)
+                || (peers.contains(&peer_id)
+                    && self
+                        .ipfs
+                        .pubsub_publish(target.invites(), payload.to_bytes()?)
+                        .await
+                        .is_err())
+            {
+                warn!(conversation_id = %community_id, "Unable to publish to topic. Queuing event");
+                self.queue_event(
+                    target.clone(),
+                    Queue::direct(
+                        community_id,
+                        None,
+                        peer_id,
+                        target.invites(),
+                        payload.message().to_vec(),
+                    ),
+                )
+                .await;
             }
         }
 
-        self.set_community_document(community_doc).await?;
+        self.event
+            .emit(RayGunEventKind::CommunityInvite {
+                community_id,
+                invite_id: invite_doc.id,
+            })
+            .await;
+
         Ok(CommunityInvite::from(invite_doc))
     }
     pub async fn delete_community_invite(
@@ -4297,7 +4354,9 @@ impl ConversationInner {
     ) -> Result<CommunityRole, Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
         let role = CommunityRoleDocument::new(name.to_owned());
-        community_doc.roles.insert(role.id.to_string(), role.clone());
+        community_doc
+            .roles
+            .insert(role.id.to_string(), role.clone());
         self.set_community_document(community_doc).await?;
         Ok(CommunityRole::from(role))
     }
@@ -4821,6 +4880,26 @@ async fn process_conversation(
             };
 
             this.delete_conversation(conversation_id, false).await?;
+        }
+        ConversationEvents::NewCommunityInvite {
+            conversation_id,
+            invite,
+            community_document,
+        } => {
+            if this.contains_community(conversation_id).await {
+                return Err(anyhow::anyhow!("Already apart of {conversation_id}").into());
+            }
+
+            //TODO: Process and store invite and signal to subscription event about new invite
+
+            this.set_community_document(community_document).await?;
+
+            this.event
+                .emit(RayGunEventKind::CommunityInvite {
+                    community_id: conversation_id,
+                    invite_id: invite.id,
+                })
+                .await;
         }
     }
     Ok(())
