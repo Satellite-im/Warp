@@ -13,42 +13,6 @@ pub type CommunityRoles = IndexMap<RoleId, CommunityRole>;
 pub type CommunityPermissions = IndexMap<CommunityPermission, IndexSet<RoleId>>;
 pub type CommunityChannelPermissions = IndexMap<CommunityChannelPermission, IndexSet<RoleId>>;
 
-pub fn user_has_community_permission(
-    user: &DID,
-    has_permission: &CommunityPermission,
-    roles_map: &CommunityRoles,
-    permissions_map: &CommunityPermissions,
-) -> bool {
-    if let Some(authorized_roles) = permissions_map.get(has_permission) {
-        for authorized_role in authorized_roles {
-            if let Some(role) = roles_map.get(authorized_role) {
-                if role.members.contains(user) {
-                    return true;
-                }
-            }
-        }
-    }
-    false
-}
-
-pub fn user_has_community_channel_permission(
-    user: &DID,
-    has_permission: &CommunityChannelPermission,
-    roles_map: &CommunityRoles,
-    permissions_map: &CommunityChannelPermissions,
-) -> bool {
-    if let Some(authorized_roles) = permissions_map.get(has_permission) {
-        for authorized_role in authorized_roles {
-            if let Some(role) = roles_map.get(authorized_role) {
-                if role.members.contains(user) {
-                    return true;
-                }
-            }
-        }
-    }
-    false
-}
-
 #[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommunityRole {
     id: RoleId,
@@ -268,6 +232,8 @@ pub enum CommunityChannelType {
 pub enum CommunityPermission {
     EditName,
     EditDescription,
+    EditIcon,
+    EditBanner,
     ManageRoles,
     ManagePermissions,
     ManageMembers,

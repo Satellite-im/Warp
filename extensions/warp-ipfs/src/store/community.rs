@@ -10,8 +10,9 @@ use warp::{
     crypto::DID,
     error::Error,
     raygun::community::{
-        Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType,
-        CommunityInvite, CommunityPermissions, CommunityRole, CommunityRoles, RoleId,
+        Community, CommunityChannel, CommunityChannelPermission, CommunityChannelPermissions,
+        CommunityChannelType, CommunityInvite, CommunityPermission, CommunityPermissions,
+        CommunityRole, CommunityRoles, RoleId,
     },
 };
 
@@ -163,6 +164,17 @@ impl CommunityDocument {
 impl CommunityDocument {
     pub fn new(keypair: &Keypair, name: String) -> Result<Self, Error> {
         let did = keypair.to_did()?;
+        let mut permissions = CommunityPermissions::new();
+        permissions.insert(CommunityPermission::EditName, IndexSet::new());
+        permissions.insert(CommunityPermission::EditDescription, IndexSet::new());
+        permissions.insert(CommunityPermission::EditIcon, IndexSet::new());
+        permissions.insert(CommunityPermission::EditBanner, IndexSet::new());
+        permissions.insert(CommunityPermission::ManageRoles, IndexSet::new());
+        permissions.insert(CommunityPermission::ManagePermissions, IndexSet::new());
+        permissions.insert(CommunityPermission::ManageMembers, IndexSet::new());
+        permissions.insert(CommunityPermission::ManageChannels, IndexSet::new());
+        permissions.insert(CommunityPermission::ManageInvites, IndexSet::new());
+
         let mut document = Self {
             id: Uuid::new_v4(),
             name,
@@ -173,7 +185,7 @@ impl CommunityDocument {
             members: IndexSet::new(),
             channels: IndexMap::new(),
             roles: IndexMap::new(),
-            permissions: CommunityPermissions::new(),
+            permissions: permissions,
             invites: IndexMap::new(),
             deleted: false,
             signature: None,
@@ -192,14 +204,95 @@ impl From<CommunityDocument> for Community {
         community.set_created(value.created);
         community.set_modified(value.modified);
         community.set_members(value.members);
-        community.set_channels(value.channels.iter().map(|(k, _)| RoleId::parse_str(&k).expect("should be valid uuid")).collect());
-        community.set_roles(value.roles.iter().map(|(k, _)| RoleId::parse_str(&k).expect("should be valid uuid")).collect());
+        community.set_channels(
+            value
+                .channels
+                .iter()
+                .map(|(k, _)| RoleId::parse_str(&k).expect("should be valid uuid"))
+                .collect(),
+        );
+        community.set_roles(
+            value
+                .roles
+                .iter()
+                .map(|(k, _)| RoleId::parse_str(&k).expect("should be valid uuid"))
+                .collect(),
+        );
         community.set_permissions(value.permissions);
-        community.set_invites(value.invites.iter().map(|(k, _)| RoleId::parse_str(&k).expect("should be valid uuid")).collect());
+        community.set_invites(
+            value
+                .invites
+                .iter()
+                .map(|(k, _)| RoleId::parse_str(&k).expect("should be valid uuid"))
+                .collect(),
+        );
         community
     }
 }
+impl CommunityDocument {
+    pub fn has_valid_invite(&self, user: &DID) -> bool {
+        for (_, invite) in &self.invites {
+            let is_expired = match &invite.expiry {
+                Some(expiry) => expiry < &Utc::now(),
+                None => false,
+            };
+            let is_valid_target = match &invite.target_user {
+                Some(target) => user == target,
+                None => true,
+            };
+            if !is_expired && is_valid_target {
+                return true;
+            }
+        }
+        false
+    }
+    pub fn has_permission(&self, user: &DID, has_permission: &CommunityPermission) -> bool {
+        if &self.creator == user {
+            return true;
+        }
+        if self.members.contains(user) {
+            if let Some(authorized_roles) = self.permissions.get(has_permission) {
+                for authorized_role in authorized_roles {
+                    if let Some(role) = self.roles.get(&authorized_role.to_string()) {
+                        if role.members.contains(user) {
+                            return true;
+                        }
+                    }
+                }
+            } else {
+                return true;
+            }
+        }
+        false
+    }
 
+    pub fn has_channel_permission(
+        &self,
+        user: &DID,
+        has_permission: &CommunityChannelPermission,
+        channel_id: Uuid,
+    ) -> bool {
+        if &self.creator == user {
+            return true;
+        }
+        if self.members.contains(user) {
+            if let Some(channel) = self.channels.get(&channel_id.to_string()) {
+                if let Some(authorized_roles) = channel.permissions.get(has_permission) {
+                    for authorized_role in authorized_roles {
+                        if let Some(role) = self.roles.get(&authorized_role.to_string()) {
+                            if role.members.contains(user) {
+                                return true;
+                            }
+                        }
+                    }
+                } else {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommunityChannelDocument {
     pub id: Uuid,
@@ -216,6 +309,10 @@ impl CommunityChannelDocument {
         description: Option<String>,
         channel_type: CommunityChannelType,
     ) -> Self {
+        let mut permissions = CommunityChannelPermissions::new();
+        permissions.insert(CommunityChannelPermission::EditName, IndexSet::new());
+        permissions.insert(CommunityChannelPermission::EditDescription, IndexSet::new());
+        permissions.insert(CommunityChannelPermission::DeleteMessages, IndexSet::new());
         Self {
             id: Uuid::new_v4(),
             name,
@@ -223,7 +320,7 @@ impl CommunityChannelDocument {
             created: Utc::now(),
             modified: Utc::now(),
             channel_type,
-            permissions: CommunityChannelPermissions::new(),
+            permissions: permissions,
         }
     }
 }

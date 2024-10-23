@@ -4177,11 +4177,24 @@ impl ConversationInner {
         Ok(Community::from(community))
     }
     pub async fn delete_community(&mut self, community_id: Uuid) -> Result<(), Error> {
+        let document = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if &document.creator != own_did {
+            return Err(Error::Unauthorized);
+        }
+
         Err(Error::Unimplemented)
     }
     pub async fn get_community(&mut self, community_id: Uuid) -> Result<Community, Error> {
-        let document = self.get_community_document(community_id).await?;
-        Ok(document.into())
+        let doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if own_did != &doc.creator
+            && !doc.has_valid_invite(own_did)
+            && !doc.members.contains(own_did)
+        {
+            return Err(Error::Unauthorized);
+        }
+        Ok(doc.into())
     }
 
     pub async fn get_community_icon(
@@ -4198,16 +4211,26 @@ impl ConversationInner {
     }
     pub async fn edit_community_icon(
         &mut self,
-        _community_id: Uuid,
+        community_id: Uuid,
         _location: Location,
     ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::EditIcon) {
+            return Err(Error::Unauthorized);
+        }
         Err(Error::Unimplemented)
     }
     pub async fn edit_community_banner(
         &mut self,
-        _community_id: Uuid,
+        community_id: Uuid,
         _location: Location,
     ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::EditBanner) {
+            return Err(Error::Unauthorized);
+        }
         Err(Error::Unimplemented)
     }
 
@@ -4218,6 +4241,11 @@ impl ConversationInner {
         expiry: Option<DateTime<Utc>>,
     ) -> Result<CommunityInvite, Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManageInvites) {
+            return Err(Error::Unauthorized);
+        }
+
         let invite_doc = CommunityInviteDocument::new(target_user.clone(), expiry);
         community_doc
             .invites
@@ -4288,6 +4316,11 @@ impl ConversationInner {
         invite_id: Uuid,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManageInvites) {
+            return Err(Error::Unauthorized);
+        }
+        
         community_doc.invites.swap_remove(&invite_id.to_string());
         self.set_community_document(community_doc).await?;
         Ok(())
@@ -4337,6 +4370,11 @@ impl ConversationInner {
         invite: CommunityInvite,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManageInvites) {
+            return Err(Error::Unauthorized);
+        }
+
         let invite_doc = community_doc
             .invites
             .get_mut(&invite_id.to_string())
@@ -4353,6 +4391,11 @@ impl ConversationInner {
         name: &str,
     ) -> Result<CommunityRole, Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManageRoles) {
+            return Err(Error::Unauthorized);
+        }
+
         let role = CommunityRoleDocument::new(name.to_owned());
         community_doc
             .roles
@@ -4366,6 +4409,11 @@ impl ConversationInner {
         role_id: RoleId,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManageRoles) {
+            return Err(Error::Unauthorized);
+        }
+
         community_doc.roles.swap_remove(&role_id.to_string());
         let _ = community_doc
             .permissions
@@ -4387,6 +4435,11 @@ impl ConversationInner {
         new_name: String,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManageRoles) {
+            return Err(Error::Unauthorized);
+        }
+
         community_doc
             .roles
             .get_mut(&role_id.to_string())
@@ -4402,6 +4455,11 @@ impl ConversationInner {
         user: DID,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManageRoles) {
+            return Err(Error::Unauthorized);
+        }
+
         community_doc
             .roles
             .get_mut(&role_id.to_string())
@@ -4418,6 +4476,11 @@ impl ConversationInner {
         user: DID,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManageRoles) {
+            return Err(Error::Unauthorized);
+        }
+
         community_doc
             .roles
             .get_mut(&role_id.to_string())
@@ -4435,6 +4498,11 @@ impl ConversationInner {
         channel_type: CommunityChannelType,
     ) -> Result<CommunityChannel, Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManageChannels) {
+            return Err(Error::Unauthorized);
+        }
+
         if community_doc.channels.len() >= MAX_COMMUNITY_CHANNELS {
             return Err(Error::CommunityChannelLimitReached);
         }
@@ -4452,6 +4520,11 @@ impl ConversationInner {
         channel_id: Uuid,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManageChannels) {
+            return Err(Error::Unauthorized);
+        }
+
         community_doc.channels.swap_remove(&channel_id.to_string());
         self.set_community_document(community_doc).await?;
         Ok(())
@@ -4461,7 +4534,12 @@ impl ConversationInner {
         community_id: Uuid,
         channel_id: Uuid,
     ) -> Result<CommunityChannel, Error> {
-        let community_doc = self.get_community_document(community_id).await?;
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_channel_permission(own_did, &CommunityChannelPermission::ViewChannel, channel_id) {
+            return Err(Error::Unauthorized);
+        }
+
         let channel_doc = community_doc
             .channels
             .get(&channel_id.to_string())
@@ -4475,6 +4553,11 @@ impl ConversationInner {
         name: &str,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::EditName) {
+            return Err(Error::Unauthorized);
+        }
+
         community_doc.name = name.to_owned();
         self.set_community_document(community_doc).await?;
         Ok(())
@@ -4485,6 +4568,11 @@ impl ConversationInner {
         description: Option<String>,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::EditDescription) {
+            return Err(Error::Unauthorized);
+        }
+
         community_doc.description = description;
         self.set_community_document(community_doc).await?;
         Ok(())
@@ -4496,6 +4584,11 @@ impl ConversationInner {
         role_id: RoleId,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManagePermissions) {
+            return Err(Error::Unauthorized);
+        }
+
         match community_doc.permissions.get_mut(&permission) {
             Some(authorized_roles) => {
                 authorized_roles.insert(role_id);
@@ -4516,6 +4609,11 @@ impl ConversationInner {
         role_id: RoleId,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManagePermissions) {
+            return Err(Error::Unauthorized);
+        }
+
         if let Some(authorized_roles) = community_doc.permissions.get_mut(&permission) {
             authorized_roles.swap_remove(&role_id);
         }
@@ -4528,6 +4626,11 @@ impl ConversationInner {
         permission: CommunityPermission,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManagePermissions) {
+            return Err(Error::Unauthorized);
+        }
+
         if community_doc.permissions.contains_key(&permission) {
             community_doc.permissions.swap_remove(&permission);
             self.set_community_document(community_doc).await?;
@@ -4540,6 +4643,11 @@ impl ConversationInner {
         permission: CommunityPermission,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManagePermissions) {
+            return Err(Error::Unauthorized);
+        }
+
         community_doc
             .permissions
             .insert(permission, IndexSet::new());
@@ -4552,6 +4660,11 @@ impl ConversationInner {
         member: DID,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManageMembers) {
+            return Err(Error::Unauthorized);
+        }
+
         community_doc.members.swap_remove(&member);
         self.set_community_document(community_doc).await?;
         Ok(())
@@ -4564,6 +4677,11 @@ impl ConversationInner {
         name: &str,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_channel_permission(own_did, &CommunityChannelPermission::EditName, channel_id) {
+            return Err(Error::Unauthorized);
+        }
+
         let channel_doc = community_doc
             .channels
             .get_mut(&channel_id.to_string())
@@ -4579,6 +4697,11 @@ impl ConversationInner {
         description: Option<String>,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_channel_permission(own_did, &CommunityChannelPermission::EditDescription, channel_id) {
+            return Err(Error::Unauthorized);
+        }
+
         let channel_doc = community_doc
             .channels
             .get_mut(&channel_id.to_string())
@@ -4595,6 +4718,11 @@ impl ConversationInner {
         role_id: RoleId,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManagePermissions) {
+            return Err(Error::Unauthorized);
+        }
+
         let channel_doc = community_doc
             .channels
             .get_mut(&channel_id.to_string())
@@ -4620,6 +4748,11 @@ impl ConversationInner {
         role_id: RoleId,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManagePermissions) {
+            return Err(Error::Unauthorized);
+        }
+
         let channel_doc = community_doc
             .channels
             .get_mut(&channel_id.to_string())
@@ -4637,6 +4770,11 @@ impl ConversationInner {
         permission: CommunityChannelPermission,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManagePermissions) {
+            return Err(Error::Unauthorized);
+        }
+
         let channel_doc = community_doc
             .channels
             .get_mut(&channel_id.to_string())
@@ -4654,6 +4792,11 @@ impl ConversationInner {
         permission: CommunityChannelPermission,
     ) -> Result<(), Error> {
         let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManagePermissions) {
+            return Err(Error::Unauthorized);
+        }
+
         let channel_doc = community_doc
             .channels
             .get_mut(&channel_id.to_string())
@@ -4664,18 +4807,30 @@ impl ConversationInner {
     }
     pub async fn send_community_channel_message(
         &mut self,
-        _community_id: Uuid,
-        _channel_id: Uuid,
+        community_id: Uuid,
+        channel_id: Uuid,
         _message: &str,
     ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_channel_permission(own_did, &CommunityChannelPermission::SendMessages, channel_id) {
+            return Err(Error::Unauthorized);
+        }
+
         Err(Error::Unimplemented)
     }
     pub async fn delete_community_channel_message(
         &mut self,
-        _community_id: Uuid,
-        _channel_id: Uuid,
+        community_id: Uuid,
+        channel_id: Uuid,
         _message_id: Uuid,
     ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_channel_permission(own_did, &CommunityChannelPermission::DeleteMessages, channel_id) {
+            return Err(Error::Unauthorized);
+        }
+
         Err(Error::Unimplemented)
     }
 }
