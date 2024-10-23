@@ -8,10 +8,10 @@ use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use futures::stream::BoxStream;
-use pollable_map::stream::StreamMap;
-use r3bl_terminal_async::{ReadlineEvent, SharedWriter, TerminalAsync};
 use rust_ipfs::Multiaddr;
+use rustyline_async::{Readline, SharedWriter};
 use strum::IntoEnumIterator;
+use tokio_stream::StreamMap;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
@@ -210,16 +210,11 @@ async fn main() -> anyhow::Result<()> {
         identity.short_id()
     );
 
-    let prompt = format!("{}#{} >>> ", identity.username(), identity.short_id());
-
-    let TerminalAsync {
-        readline: mut rl,
-        shared_writer: mut stdout,
-    } = TerminalAsync::try_new(&prompt)
-        .await
-        .unwrap()
-        .expect("terminal");
-
+    let (mut rl, mut stdout) = Readline::new(format!(
+        "{}#{} >>> ",
+        identity.username(),
+        identity.short_id()
+    ))?;
     rl.should_print_line_on(false, true);
 
     let mut topic = Uuid::nil();
@@ -411,6 +406,7 @@ async fn main() -> anyhow::Result<()> {
                                 writeln!(stdout, "Conversation {conversation_id} has been deleted")?;
                             }
                         },
+                        warp::raygun::RayGunEventKind::CommunityCreated { community_id } => todo!()
                     }
                 }
             }
@@ -421,7 +417,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             line = rl.readline().fuse() => match line {
-                Ok(ReadlineEvent::Line(line)) => {
+                Ok(rustyline_async::ReadlineEvent::Line(line)) => {
                     use Command::*;
                     rl.add_history_entry(line.clone());
                     let line = line.trim();
@@ -982,14 +978,14 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
                 },
-                Ok(ReadlineEvent::Eof) | Ok(ReadlineEvent::Interrupted) => break,
-                Ok(ReadlineEvent::Resized) => {}
+                Ok(rustyline_async::ReadlineEvent::Eof) | Ok(rustyline_async::ReadlineEvent::Interrupted) => break,
                 Err(e) => {
                     writeln!(stdout, "Error: {e}")?;
                 }
             },
         }
     }
+
     Ok(())
 }
 

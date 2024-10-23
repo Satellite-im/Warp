@@ -1,3 +1,4 @@
+pub mod community;
 pub mod conversation;
 pub mod discovery;
 pub mod document;
@@ -11,11 +12,13 @@ pub mod phonebook;
 pub mod queue;
 
 use chrono::{DateTime, Utc};
+use community::CommunityDocument;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use uuid::Uuid;
 
+use crate::store::community::CommunityInviteDocument;
 use ipfs::{libp2p::identity::KeyType, Keypair, PeerId, PublicKey};
 use warp::{
     crypto::{
@@ -29,8 +32,6 @@ use warp::{
     multipass::identity::IdentityStatus,
     raygun::{GroupPermissions, MessageEvent, PinState, ReactionState},
 };
-
-use conversation::{message::MessageDocument, ConversationDocument};
 
 pub const MAX_THUMBNAIL_SIZE: usize = 5_242_880;
 pub const MAX_IMAGE_SIZE: usize = 2_097_152;
@@ -50,6 +51,7 @@ pub const MAX_METADATA_ENTRIES: usize = 20;
 pub const MAX_THUMBNAIL_STREAM_SIZE: usize = 20 * 1024 * 1024;
 pub const MAX_CONVERSATION_ICON_SIZE: usize = 4 * 1024 * 1024;
 pub const MAX_CONVERSATION_BANNER_SIZE: usize = 8 * 1024 * 1024;
+pub const MAX_COMMUNITY_CHANNELS: usize = 20;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ConversationImageType {
@@ -78,6 +80,10 @@ pub(super) mod topics {
         }
         fn messaging(&self) -> String {
             format!("/id/{self}/messaging")
+        }
+
+        fn invites(&self) -> String {
+            format!("/id/{self}/messaging/invites")
         }
     }
 
@@ -152,7 +158,71 @@ pub(super) mod ds_key {
         }
     }
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn migrate_to_ds<P: AsRef<std::path::Path>>(
+    ipfs: &rust_ipfs::Ipfs,
+    path: P,
+) -> Result<(), Error> {
+    use ds_key::DataStoreKey;
+    use ipld_core::cid::Cid;
+
+    let path = path.as_ref();
+    let ds = ipfs.repo().data_store();
+
+    // root id
+    if let Some(cid) = tokio::fs::read(path.join(".id"))
+        .await
+        .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+        .ok()
+        .and_then(|cid_str| cid_str.parse::<Cid>().ok())
+    {
+        let key = ipfs.root();
+        let cid_str = cid.to_string();
+        ds.put(key.as_bytes(), cid_str.as_bytes()).await?;
+        _ = tokio::fs::remove_file(path.join(".id")).await;
+    }
+
+    // cache id
+    if let Some(cid) = tokio::fs::read(path.join(".cache_id_v0"))
+        .await
+        .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+        .ok()
+        .and_then(|cid_str| cid_str.parse::<Cid>().ok())
+    {
+        let key = ipfs.cache();
+        let cid_str = cid.to_string();
+        if ds.put(key.as_bytes(), cid_str.as_bytes()).await.is_ok() {
+            _ = tokio::fs::remove_file(path.join(".cache_id_v0")).await;
+        }
+    }
+
+    // request queue
+    if let Ok(data) = tokio::fs::read(path.join(".request_queue")).await {
+        let cid = ipfs.put_dag(&data).pin(true).await?;
+        let key = ipfs.request_queue();
+        let cid_str = cid.to_string();
+        if ds.put(key.as_bytes(), cid_str.as_bytes()).await.is_ok() {
+            _ = tokio::fs::remove_file(path.join(".request_queue")).await;
+        }
+    }
+
+    // message queue
+    if let Ok(data) = tokio::fs::read(path.join("messages").join(".messaging_queue")).await {
+        let cid = ipfs.put_dag(&data).pin(true).await?;
+        let key = ipfs.messaging_queue();
+        let cid_str = cid.to_string();
+        if ds.put(key.as_bytes(), cid_str.as_bytes()).await.is_ok() {
+            _ = tokio::fs::remove_file(path.join("messages").join(".messaging_queue")).await;
+        }
+    }
+
+    Ok(())
+}
+
 const SHUTTLE_TIMEOUT: Duration = Duration::from_secs(60);
+
+use self::conversation::{ConversationDocument, MessageDocument};
 
 pub trait PeerIdExt {
     fn to_public_key(&self) -> Result<PublicKey, anyhow::Error>;
@@ -281,6 +351,18 @@ pub enum ConversationEvents {
     DeleteConversation {
         conversation_id: Uuid,
     },
+    NewCommunityInvite {
+        conversation_id: Uuid,
+        community_document: CommunityDocument,
+        invite: CommunityInviteDocument,
+    },
+}
+
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum CommunityEvents {
+    NewCommunity { community: CommunityDocument },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
