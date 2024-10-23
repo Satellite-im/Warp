@@ -4246,7 +4246,7 @@ impl ConversationInner {
                 .from_ipfs(&self.ipfs)
                 .await?;
 
-            let peers = self.ipfs.pubsub_peers(Some(target.invites())).await?;
+            let peers = self.ipfs.pubsub_peers(Some(target.messaging())).await?;
 
             let peer_id = target.to_peer_id()?;
 
@@ -4254,7 +4254,7 @@ impl ConversationInner {
                 || (peers.contains(&peer_id)
                     && self
                         .ipfs
-                        .pubsub_publish(target.invites(), payload.to_bytes()?)
+                        .pubsub_publish(target.messaging(), payload.to_bytes()?)
                         .await
                         .is_err())
             {
@@ -4265,7 +4265,7 @@ impl ConversationInner {
                         community_id,
                         None,
                         peer_id,
-                        target.invites(),
+                        target.messaging(),
                         payload.message().to_vec(),
                     ),
                 )
