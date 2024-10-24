@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio_util::compat::TokioAsyncReadCompatExt;
-use tracing::{error, info, warn, Instrument, Span};
+use tracing::{Instrument, Span};
 use uuid::Uuid;
 
 use crate::config::{Bootstrap, DiscoveryType};
@@ -196,10 +196,10 @@ impl WarpIpfs {
                         break;
                     }
                 }
-                _ = inner.initialize_store(false).await;
+                let _ = inner.initialize_store(false).await;
             });
         } else {
-            _ = identity.initialize_store(false).await;
+            let _ = identity.initialize_store(false).await;
         }
 
         Warp::new(&identity, &identity, &identity)
@@ -209,17 +209,17 @@ impl WarpIpfs {
         let tesseract = self.tesseract.clone();
 
         if init && self.inner.components.read().is_some() {
-            warn!("Identity is already loaded");
+            tracing::warn!("Identity is already loaded");
             return Err(Error::IdentityExist);
         }
 
         let keypair = match (init, tesseract.exist("keypair")) {
             (true, false) => {
-                info!("Keypair doesnt exist. Generating keypair....");
+                tracing::info!("Keypair doesnt exist. Generating keypair....");
                 let kp = Keypair::generate_ed25519()
                     .try_into_ed25519()
                     .map_err(|e| {
-                        error!(error = %e, "Unreachable. Report this as a bug");
+                        tracing::error!(error = %e, "Unreachable. Report this as a bug");
                         Error::Other
                     })?;
                 let encoded_kp = bs58::encode(&kp.to_bytes()).into_string();
@@ -228,7 +228,7 @@ impl WarpIpfs {
                 Keypair::ed25519_from_bytes(bytes).map_err(|_| Error::PrivateKeyInvalid)?
             }
             (false, true) | (true, true) => {
-                info!("Fetching keypair from tesseract");
+                tracing::info!("Fetching keypair from tesseract");
                 let keypair = tesseract.retrieve("keypair")?;
                 let kp = Zeroizing::new(bs58::decode(keypair).into_vec()?);
                 let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
@@ -263,7 +263,7 @@ impl WarpIpfs {
 
         let did = peer_id.to_did().expect("Valid conversion");
 
-        info!(peer_id = %peer_id, did = %did);
+        tracing::info!(peer_id = %peer_id, did = %did);
 
         let span = tracing::trace_span!(parent: &Span::current(), "warp-ipfs", identity = %did);
 
@@ -278,7 +278,9 @@ impl WarpIpfs {
         };
 
         if empty_bootstrap && !self.inner.config.ipfs_setting().dht_client {
-            warn!("Bootstrap list is empty. Will not be able to perform a bootstrap for DHT");
+            tracing::warn!(
+                "Bootstrap list is empty. Will not be able to perform a bootstrap for DHT"
+            );
         }
 
         let (pb_tx, pb_rx) = channel(50);
@@ -304,7 +306,7 @@ impl WarpIpfs {
             phonebook: behaviour::phonebook::Behaviour::new(self.multipass_tx.clone(), pb_rx),
         };
 
-        info!("Starting ipfs");
+        tracing::info!("Starting ipfs");
         let mut uninitialized = UninitializedIpfs::new()
             .with_identify({
                 let mut idconfig = IdentifyConfiguration {
@@ -351,24 +353,24 @@ impl WarpIpfs {
         {
             // TODO: Determine if we want to store in temp directory if path isnt set for any reason
             // if let (path, true) = (self.inner.config.path(), self.inner.config.persist()) {
-            //     info!("Instance will be persistent");
+            //    tracing::info!("Instance will be persistent");
             //     let path = match path {
             //         Some(path) => path.clone(),
             //         None => std::env::temp_dir().join(did.to_string() + "_temp")
             //     };
-            //     info!("Path set: {}", path.display());
+            //    tracing::info!("Path set: {}", path.display());
             //     if !path.is_dir() {
-            //         warn!("Path doesnt exist... creating");
+            //        tracing::warn!("Path doesnt exist... creating");
             //         fs::create_dir_all(path).await?;
             //     }
             //     uninitialized = uninitialized.set_path(path);
             // }
             if let Some(path) = self.inner.config.path() {
-                info!("Instance will be persistent");
-                info!("Path set: {}", path.display());
+                tracing::info!("Instance will be persistent");
+                tracing::info!("Path set: {}", path.display());
 
                 if !path.is_dir() {
-                    warn!("Path doesnt exist... creating");
+                    tracing::warn!("Path doesnt exist... creating");
                     fs::create_dir_all(path).await?;
                 }
                 uninitialized = uninitialized.set_path(path);
@@ -436,21 +438,21 @@ impl WarpIpfs {
                 .cloned()
             {
                 if addr.is_relayed() {
-                    warn!("Relay circuits cannot be used as relays");
+                    tracing::warn!("Relay circuits cannot be used as relays");
                     continue;
                 }
 
                 let Some(peer_id) = addr.extract_peer_id() else {
-                    warn!("{addr} does not contain a peer id. Skipping");
+                    tracing::warn!("{addr} does not contain a peer id. Skipping");
                     continue;
                 };
 
                 if let Err(e) = ipfs.add_peer((peer_id, addr.clone())).await {
-                    warn!("Failed to add relay to address book: {e}");
+                    tracing::warn!("Failed to add relay to address book: {e}");
                 }
 
                 if let Err(e) = ipfs.add_relay(peer_id, addr).await {
-                    error!("Error adding relay: {e}");
+                    tracing::error!("Error adding relay: {e}");
                     continue;
                 }
 
@@ -458,7 +460,7 @@ impl WarpIpfs {
             }
 
             if relay_peers.is_empty() {
-                warn!("No relays available");
+                tracing::warn!("No relays available");
             }
 
             // Use the selected relays
@@ -475,11 +477,11 @@ impl WarpIpfs {
                         {
                             Ok(Ok(_)) => {}
                             Ok(Err(e)) => {
-                                error!("Failed to use {relay_peer} as a relay: {e}");
+                                tracing::error!("Failed to use {relay_peer} as a relay: {e}");
                                 continue;
                             }
                             Err(_) => {
-                                error!("Relay connection timed out");
+                                tracing::error!("Relay connection timed out");
                                 continue;
                             }
                         };
@@ -546,7 +548,7 @@ impl WarpIpfs {
                     async move {
                         loop {
                             if let Err(e) = ipfs.bootstrap().await {
-                                error!("Failed to bootstrap: {e}")
+                                tracing::error!("Failed to bootstrap: {e}")
                             }
 
                             futures_timer::Delay::new(Duration::from_secs(60 * 5)).await;
@@ -584,7 +586,7 @@ impl WarpIpfs {
                 };
 
                 if let Err(e) = ipfs.add_peer((peer_id, addr)).await {
-                    error!("Error adding peer to address book {e}");
+                    tracing::error!("Error adding peer to address book {e}");
                     continue;
                 }
 
@@ -599,7 +601,7 @@ impl WarpIpfs {
 
         let phonebook = PhoneBook::new(discovery.clone(), pb_tx);
 
-        info!("Initializing identity profile");
+        tracing::info!("Initializing identity profile");
         let identity_store = IdentityStore::new(
             &ipfs,
             &self.inner.config,
@@ -611,7 +613,7 @@ impl WarpIpfs {
         )
         .await?;
 
-        info!("Identity initialized");
+        tracing::info!("Identity initialized");
 
         let root = identity_store.root_document();
 
@@ -634,7 +636,7 @@ impl WarpIpfs {
         )
         .await;
 
-        info!("Messaging store initialized");
+        tracing::info!("Messaging store initialized");
 
         *self.inner.components.write() = Some(Components {
             ipfs,
@@ -645,7 +647,7 @@ impl WarpIpfs {
 
         // Announce identity out to mesh if identity has been created at that time
         if let Ok(store) = self.identity_store(true).await {
-            _ = store
+            let _ = store
                 .announce_identity_to_mesh()
                 .instrument(span.clone())
                 .await;
@@ -675,7 +677,7 @@ impl WarpIpfs {
         Ok(store)
     }
 
-    pub(crate) fn messaging_store(&self) -> std::result::Result<MessageStore, Error> {
+    pub(crate) fn messaging_store(&self) -> Result<MessageStore, Error> {
         self.inner
             .components
             .read()
@@ -684,7 +686,7 @@ impl WarpIpfs {
             .ok_or(Error::RayGunExtensionUnavailable)
     }
 
-    pub(crate) fn file_store(&self) -> std::result::Result<FileStore, Error> {
+    pub(crate) fn file_store(&self) -> Result<FileStore, Error> {
         self.inner
             .components
             .read()
@@ -693,7 +695,7 @@ impl WarpIpfs {
             .ok_or(Error::ConstellationExtensionUnavailable)
     }
 
-    pub(crate) fn direct_identity_store(&self) -> std::result::Result<IdentityStore, Error> {
+    pub(crate) fn direct_identity_store(&self) -> Result<IdentityStore, Error> {
         let store = self
             .inner
             .components
@@ -743,13 +745,13 @@ impl MultiPass for WarpIpfs {
     ) -> Result<IdentityProfile, Error> {
         let _g = self.inner.identity_guard.lock().await;
 
-        info!(
+        tracing::info!(
             "create_identity with username: {username:?} and containing passphrase: {}",
             passphrase.is_some()
         );
 
         if self.inner.components.read().is_some() {
-            info!("Store is initialized with existing identity");
+            tracing::info!("Store is initialized with existing identity");
             return Err(Error::IdentityExist);
         }
 
@@ -768,7 +770,7 @@ impl MultiPass for WarpIpfs {
 
         let (phrase, can_include) = match passphrase {
             Some(phrase) => {
-                info!("Passphrase was supplied");
+                tracing::info!("Passphrase was supplied");
                 (phrase.to_string(), false)
             }
             None => (
@@ -779,7 +781,7 @@ impl MultiPass for WarpIpfs {
 
         let tesseract = self.tesseract.clone();
         if !tesseract.exist("keypair") {
-            warn!("Loading keypair generated from mnemonic phrase into tesseract");
+            tracing::warn!("Loading keypair generated from mnemonic phrase into tesseract");
             warp::crypto::keypair::mnemonic_into_tesseract(
                 &tesseract,
                 &phrase,
@@ -789,15 +791,15 @@ impl MultiPass for WarpIpfs {
             )?;
         }
 
-        info!("Initializing stores");
+        tracing::info!("Initializing stores");
         self.initialize_store(true).await?;
-        info!("Stores initialized. Creating identity");
+        tracing::info!("Stores initialized. Creating identity");
         let identity = self
             .identity_store(false)
             .await?
             .create_identity(username)
             .await?;
-        info!("Identity with {} has been created", identity.did_key());
+        tracing::info!("Identity with {} has been created", identity.did_key());
         let profile = IdentityProfile::new(identity, can_include.then_some(phrase));
         Ok(profile)
     }
@@ -832,7 +834,6 @@ impl LocalIdentity for WarpIpfs {
     async fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
         let mut store = self.identity_store(true).await?;
         let mut identity = store.own_identity_document().await?;
-        #[allow(unused_variables)] // due to stub; TODO: Remove
         let ipfs = self.ipfs()?;
 
         let mut old_cid = None;
@@ -860,7 +861,7 @@ impl LocalIdentity for WarpIpfs {
                 let document = identity.metadata.profile_picture.take();
                 if let Some(cid) = document {
                     if let Err(e) = store.delete_photo(cid).await {
-                        error!("Error deleting picture: {e}");
+                        tracing::error!("Error deleting picture: {e}");
                     }
                 }
                 return store.identity_update(identity).await;
@@ -869,7 +870,7 @@ impl LocalIdentity for WarpIpfs {
                 let document = identity.metadata.profile_banner.take();
                 if let Some(cid) = document {
                     if let Err(e) = store.delete_photo(cid).await {
-                        error!("Error deleting picture: {e}");
+                        tracing::error!("Error deleting picture: {e}");
                     }
                 }
                 return store.identity_update(identity).await;
@@ -1130,7 +1131,7 @@ impl LocalIdentity for WarpIpfs {
 
         if let Some(cid) = old_cid {
             if let Err(e) = store.delete_photo(cid).await {
-                error!("Error deleting picture: {e}");
+                tracing::error!("Error deleting picture: {e}");
             }
         }
 
@@ -1163,8 +1164,8 @@ impl MultiPassImportExport for WarpIpfs {
                 let keypair = warp::crypto::keypair::did_from_mnemonic(&passphrase, None)?;
 
                 let bytes = Zeroizing::new(keypair.private_key_bytes());
-                let internal_keypair = rust_ipfs::Keypair::ed25519_from_bytes(bytes)
-                    .map_err(|_| Error::PrivateKeyInvalid)?;
+                let internal_keypair =
+                    Keypair::ed25519_from_bytes(bytes).map_err(|_| Error::PrivateKeyInvalid)?;
 
                 let bytes = fs::read(path).await?;
 
@@ -1186,7 +1187,7 @@ impl MultiPassImportExport for WarpIpfs {
 
                 let mut store = self.identity_store(false).await?;
 
-                return store.import_identity(exported_document).await;
+                store.import_identity(exported_document).await
             }
             IdentityImportOption::Locate {
                 location: ImportLocation::Memory { buffer },
@@ -1195,8 +1196,8 @@ impl MultiPassImportExport for WarpIpfs {
                 let keypair = warp::crypto::keypair::did_from_mnemonic(&passphrase, None)?;
 
                 let bytes = Zeroizing::new(keypair.private_key_bytes());
-                let internal_keypair = rust_ipfs::Keypair::ed25519_from_bytes(bytes)
-                    .map_err(|_| Error::PrivateKeyInvalid)?;
+                let internal_keypair =
+                    Keypair::ed25519_from_bytes(bytes).map_err(|_| Error::PrivateKeyInvalid)?;
 
                 let bytes = std::mem::take(buffer);
 
@@ -1219,7 +1220,7 @@ impl MultiPassImportExport for WarpIpfs {
 
                 let mut store = self.identity_store(false).await?;
 
-                return store.import_identity(exported_document).await;
+                store.import_identity(exported_document).await
             }
             IdentityImportOption::Locate {
                 location: ImportLocation::Remote,
@@ -1227,8 +1228,8 @@ impl MultiPassImportExport for WarpIpfs {
             } => {
                 let keypair = warp::crypto::keypair::did_from_mnemonic(&passphrase, None)?;
                 let bytes = Zeroizing::new(keypair.private_key_bytes());
-                let internal_keypair = rust_ipfs::Keypair::ed25519_from_bytes(bytes)
-                    .map_err(|_| Error::PrivateKeyInvalid)?;
+                let internal_keypair =
+                    Keypair::ed25519_from_bytes(bytes).map_err(|_| Error::PrivateKeyInvalid)?;
 
                 warp::crypto::keypair::mnemonic_into_tesseract(
                     &self.tesseract,
@@ -1242,7 +1243,7 @@ impl MultiPassImportExport for WarpIpfs {
 
                 let mut store = self.identity_store(false).await?;
 
-                return store.import_identity_remote_resolve().await;
+                store.import_identity_remote_resolve().await
             }
         }
     }

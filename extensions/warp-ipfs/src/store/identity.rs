@@ -773,7 +773,7 @@ impl IdentityStore {
 
                     self.root_document.add_request(&req).await?;
 
-                    _ = self.export_root_document().await;
+                    let _ = self.export_root_document().await;
 
                     if self.identity_cache.get(&from).await.is_err() {
                         // Attempt to send identity request to peer if identity is not available locally.
@@ -808,7 +808,7 @@ impl IdentityStore {
 
                 self.root_document.remove_request(internal_request).await?;
 
-                _ = self.export_root_document().await;
+                let _ = self.export_root_document().await;
 
                 self.emit_event(MultiPassEventKind::OutgoingFriendRequestRejected {
                     did: data.sender,
@@ -831,7 +831,7 @@ impl IdentityStore {
 
                 self.root_document.remove_request(internal_request).await?;
 
-                _ = self.export_root_document().await;
+                let _ = self.export_root_document().await;
 
                 self.emit_event(MultiPassEventKind::IncomingFriendRequestClosed {
                     did: data.sender,
@@ -864,7 +864,7 @@ impl IdentityStore {
 
                 let completed = self.root_document.add_block_by(&sender).await.is_ok();
                 if completed {
-                    _ = self.export_root_document().await;
+                    let _ = self.export_root_document().await;
 
                     let _ = futures::join!(
                         self.push(&sender),
@@ -885,7 +885,7 @@ impl IdentityStore {
                 let completed = self.root_document.remove_block_by(&sender).await.is_ok();
 
                 if completed {
-                    _ = self.export_root_document().await;
+                    let _ = self.export_root_document().await;
 
                     let _ = futures::join!(
                         self.push(&sender),
@@ -926,7 +926,7 @@ impl IdentityStore {
             .filter_map(|entry| entry.peer_id().to_did().ok())
             .collect::<Vec<_>>();
         self.push_iter(list).await;
-        _ = self.announce_identity_to_mesh().await;
+        let _ = self.announce_identity_to_mesh().await;
     }
 
     pub async fn announce_identity_to_mesh(&self) -> Result<(), Error> {
@@ -1321,27 +1321,22 @@ impl IdentityStore {
                                     } else {
                                         let identity_meta_cid =
                                             identity.metadata.arb_data.expect("Cid is provided");
-                                        self.executor.dispatch({
+                                        self.executor.spawn({
                                             let ipfs = self.ipfs.clone();
                                             let store = self.clone();
                                             let did = in_did.clone();
                                             async move {
-                                                _ = async {
-                                                    let peer_id = did.to_peer_id()?;
-                                                    ipfs.get_dag(identity_meta_cid)
-                                                        .provider(peer_id)
-                                                        .await?;
-                                                    store
-                                                        .emit_event(
-                                                            MultiPassEventKind::IdentityUpdate {
-                                                                did,
-                                                            },
-                                                        )
-                                                        .await;
+                                                let peer_id = did.to_peer_id()?;
+                                                ipfs.get_dag(identity_meta_cid)
+                                                    .provider(peer_id)
+                                                    .await?;
+                                                store
+                                                    .emit_event(
+                                                        MultiPassEventKind::IdentityUpdate { did },
+                                                    )
+                                                    .await;
 
-                                                    Ok::<_, anyhow::Error>(())
-                                                }
-                                                .await;
+                                                Ok::<_, anyhow::Error>(())
                                             }
                                         });
                                     }
@@ -1376,12 +1371,11 @@ impl IdentityStore {
                                             .metadata
                                             .profile_picture
                                             .expect("Cid is provided");
-                                        self.executor.dispatch({
+                                        self.executor.spawn({
                                             let ipfs = self.ipfs.clone();
                                             let store = self.clone();
                                             let did = in_did.clone();
                                             async move {
-                                                _ = async {
                                                     let peer_id = vec![did.to_peer_id()?];
                                                     let _ = super::document::image_dag::get_image(
                                                         &ipfs,
@@ -1409,7 +1403,6 @@ impl IdentityStore {
                                                         .await;
 
                                                     Ok::<_, anyhow::Error>(())
-                                                }.await;
                                             }
                                         });
                                     }
@@ -1448,7 +1441,6 @@ impl IdentityStore {
                                             let did = in_did.clone();
                                             let store = self.clone();
                                             async move {
-                                                _ = async {
                                                     let peer_id = vec![did.to_peer_id()?];
 
                                                     let _ = super::document::image_dag::get_image(
@@ -1477,7 +1469,6 @@ impl IdentityStore {
                                                             .await;
 
                                                     Ok::<_, anyhow::Error>(())
-                                                }.await;
                                             }
                                         });
                                     }
@@ -1510,7 +1501,6 @@ impl IdentityStore {
                                             let did = in_did.clone();
                                             let store = self.clone();
                                             async move {
-                                                _ = async {
                                                         let peer_id = vec![did.to_peer_id()?];
                                                         let _ =
                                                             super::document::image_dag::get_image(
@@ -1539,7 +1529,6 @@ impl IdentityStore {
                                                         .await;
 
                                                         Ok::<_, anyhow::Error>(())
-                                                    }.await;
                                             }
                                         });
                                     }
@@ -1550,7 +1539,6 @@ impl IdentityStore {
 
                                             let did = in_did.clone();
                                             async move {
-                                                _ = async {
                                                         let peer_id = vec![did.to_peer_id()?];
                                                         let _ =
                                                             super::document::image_dag::get_image(
@@ -1579,7 +1567,6 @@ impl IdentityStore {
                                                         .await;
 
                                                         Ok::<_, anyhow::Error>(())
-                                                    }.await;
                                             }
                                         });
                                     }
@@ -1602,23 +1589,19 @@ impl IdentityStore {
                         let store = self.clone();
                         let did = in_did.clone();
                         async move {
-                            _ = async {
-                                let added_cid = super::document::image_dag::store_photo(
-                                    &store.ipfs,
-                                    futures::stream::iter(Ok::<_, std::io::Error>(Ok(data)))
-                                        .boxed(),
-                                    ty,
-                                    Some(MAX_IMAGE_SIZE),
-                                )
-                                .await?;
+                            let added_cid = super::document::image_dag::store_photo(
+                                &store.ipfs,
+                                futures::stream::iter(Ok::<_, std::io::Error>(Ok(data))).boxed(),
+                                ty,
+                                Some(MAX_IMAGE_SIZE),
+                            )
+                            .await?;
 
-                                debug_assert_eq!(added_cid, cid);
-                                store
-                                    .emit_event(MultiPassEventKind::IdentityUpdate { did })
-                                    .await;
-                                Ok::<_, Error>(())
-                            }
-                            .await;
+                            debug_assert_eq!(added_cid, cid);
+                            store
+                                .emit_event(MultiPassEventKind::IdentityUpdate { did })
+                                .await;
+                            Ok::<_, Error>(())
                         }
                     });
                 }
@@ -1689,7 +1672,7 @@ impl IdentityStore {
                 if let Err(_e) = phonebook.add_friend_list(&friends).await {
                     error!("Error adding friends in phonebook: {_e}");
                 }
-                _ = self.announce_identity_to_mesh().await;
+                let _ = self.announce_identity_to_mesh().await;
             }
         }
 
@@ -1768,7 +1751,7 @@ impl IdentityStore {
             tracing::warn!(%identity.did, "Unable to export root document: {e}");
         }
 
-        _ = self.announce_identity_to_mesh().await;
+        let _ = self.announce_identity_to_mesh().await;
 
         identity.resolve()
     }
@@ -1787,7 +1770,7 @@ impl IdentityStore {
                 if let Err(_e) = phonebook.add_friend_list(&friends).await {
                     error!("Error adding friends in phonebook: {_e}");
                 }
-                _ = self.announce_identity_to_mesh().await;
+                let _ = self.announce_identity_to_mesh().await;
             }
         }
 
@@ -2159,7 +2142,7 @@ impl IdentityStore {
                                     let ident = ident.clone();
                                     let did = ident.did.clone();
 
-                                    _ = store.identity_cache.insert(&ident).await;
+                                  let _ = store.identity_cache.insert(&ident).await;
 
                                     yield resolve_identity(&store, ident).await;
 
@@ -2505,7 +2488,7 @@ impl IdentityStore {
 
             self.root_document.remove_request(internal_request).await?;
 
-            _ = self.export_root_document().await;
+            let _ = self.export_root_document().await;
 
             return Ok(());
         }
@@ -2542,7 +2525,7 @@ impl IdentityStore {
 
         self.root_document.remove_request(internal_request).await?;
 
-        _ = self.export_root_document().await;
+        let _ = self.export_root_document().await;
 
         self.broadcast_request(pubkey, &payload, false, true).await
     }
@@ -2560,7 +2543,7 @@ impl IdentityStore {
 
         self.root_document.remove_request(internal_request).await?;
 
-        _ = self.export_root_document().await;
+        let _ = self.export_root_document().await;
 
         if let Some(entry) = self.queue.get(pubkey).await {
             if entry.event == Event::Request {
@@ -2613,7 +2596,7 @@ impl IdentityStore {
 
         self.root_document.add_block(pubkey).await?;
 
-        _ = self.export_root_document().await;
+        let _ = self.export_root_document().await;
 
         // Remove anything from queue related to the key
         self.queue.remove(pubkey).await;
@@ -2657,7 +2640,7 @@ impl IdentityStore {
 
         self.root_document.remove_block(pubkey).await?;
 
-        _ = self.export_root_document().await;
+        let _ = self.export_root_document().await;
 
         self.ipfs.unban_peer(peer_id).await?;
 
@@ -2695,7 +2678,7 @@ impl IdentityStore {
 
         self.root_document.add_friend(pubkey).await?;
 
-        _ = self.export_root_document().await;
+        let _ = self.export_root_document().await;
 
         let phonebook = self.phonebook();
         if let Err(_e) = phonebook.add_friend(pubkey).await {
@@ -2711,7 +2694,7 @@ impl IdentityStore {
         })
         .await;
 
-        _ = self.announce_identity_to_mesh().await;
+        let _ = self.announce_identity_to_mesh().await;
 
         Ok(())
     }
@@ -2723,7 +2706,7 @@ impl IdentityStore {
         }
 
         self.root_document.remove_friend(pubkey).await?;
-        _ = self.export_root_document().await;
+        let _ = self.export_root_document().await;
 
         let phonebook = self.phonebook();
 
@@ -2828,7 +2811,7 @@ impl IdentityStore {
             let list = self.list_all_raw_request().await?;
             if !list.contains(&outgoing_request) {
                 self.root_document.add_request(&outgoing_request).await?;
-                _ = self.export_root_document().await;
+                let _ = self.export_root_document().await;
             }
         }
 
