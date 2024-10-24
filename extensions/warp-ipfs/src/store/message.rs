@@ -4294,9 +4294,7 @@ impl ConversationInner {
         .await?;
 
         self.event
-            .emit(RayGunEventKind::CommunityUpdate {
-                community_id,
-            })
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
             .await;
 
         Ok(())
@@ -4382,9 +4380,7 @@ impl ConversationInner {
         .await?;
 
         self.event
-            .emit(RayGunEventKind::CommunityUpdate {
-                community_id,
-            })
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
             .await;
 
         self.event
@@ -4432,9 +4428,7 @@ impl ConversationInner {
         .await?;
 
         self.event
-            .emit(RayGunEventKind::CommunityUpdate {
-                community_id,
-            })
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
             .await;
         Ok(())
     }
@@ -4486,9 +4480,7 @@ impl ConversationInner {
         .await?;
 
         self.event
-            .emit(RayGunEventKind::CommunityUpdate {
-                community_id,
-            })
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
             .await;
         Ok(())
     }
@@ -4523,9 +4515,7 @@ impl ConversationInner {
         .await?;
 
         self.event
-            .emit(RayGunEventKind::CommunityUpdate {
-                community_id,
-            })
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
             .await;
         Ok(())
     }
@@ -4558,9 +4548,7 @@ impl ConversationInner {
         .await?;
 
         self.event
-            .emit(RayGunEventKind::CommunityUpdate {
-                community_id,
-            })
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
             .await;
         Ok(CommunityRole::from(role))
     }
@@ -4599,9 +4587,7 @@ impl ConversationInner {
         .await?;
 
         self.event
-            .emit(RayGunEventKind::CommunityUpdate {
-                community_id,
-            })
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
             .await;
         Ok(())
     }
@@ -4647,9 +4633,7 @@ impl ConversationInner {
         .await?;
 
         self.event
-            .emit(RayGunEventKind::CommunityUpdate {
-                community_id,
-            })
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
             .await;
         Ok(())
     }
@@ -4684,9 +4668,7 @@ impl ConversationInner {
         .await?;
 
         self.event
-            .emit(RayGunEventKind::CommunityUpdate {
-                community_id,
-            })
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
             .await;
         Ok(())
     }
@@ -4721,9 +4703,7 @@ impl ConversationInner {
         .await?;
 
         self.event
-            .emit(RayGunEventKind::CommunityUpdate {
-                community_id,
-            })
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
             .await;
 
         Ok(())
@@ -4762,9 +4742,7 @@ impl ConversationInner {
         .await?;
 
         self.event
-            .emit(RayGunEventKind::CommunityUpdate {
-                community_id,
-            })
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
             .await;
         Ok(CommunityChannel::from(channel_doc))
     }
@@ -4793,9 +4771,7 @@ impl ConversationInner {
         .await?;
 
         self.event
-            .emit(RayGunEventKind::CommunityUpdate {
-                community_id,
-            })
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
             .await;
 
         Ok(())
@@ -4847,9 +4823,7 @@ impl ConversationInner {
         .await?;
 
         self.event
-            .emit(RayGunEventKind::CommunityUpdate {
-                community_id,
-            })
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
             .await;
 
         Ok(())
@@ -4879,9 +4853,7 @@ impl ConversationInner {
         .await?;
 
         self.event
-            .emit(RayGunEventKind::CommunityUpdate {
-                community_id,
-            })
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
             .await;
 
         Ok(())
@@ -4921,9 +4893,7 @@ impl ConversationInner {
         .await?;
 
         self.event
-            .emit(RayGunEventKind::CommunityUpdate {
-                community_id,
-            })
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
             .await;
 
         Ok(())
@@ -4956,9 +4926,7 @@ impl ConversationInner {
         .await?;
 
         self.event
-            .emit(RayGunEventKind::CommunityUpdate {
-                community_id,
-            })
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
             .await;
 
         Ok(())
@@ -4987,13 +4955,10 @@ impl ConversationInner {
                 },
             )
             .await?;
-    
+
             self.event
-                .emit(RayGunEventKind::CommunityUpdate {
-                    community_id,
-                })
+                .emit(RayGunEventKind::CommunityUpdate { community_id })
                 .await;
-    
         }
         Ok(())
     }
@@ -5024,9 +4989,7 @@ impl ConversationInner {
         .await?;
 
         self.event
-            .emit(RayGunEventKind::CommunityUpdate {
-                community_id,
-            })
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
             .await;
 
         Ok(())
@@ -5059,9 +5022,7 @@ impl ConversationInner {
         .await?;
 
         self.event
-            .emit(RayGunEventKind::CommunityUpdate {
-                community_id,
-            })
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
             .await;
 
         Ok(())
@@ -5101,9 +5062,7 @@ impl ConversationInner {
         .await?;
 
         self.event
-            .emit(RayGunEventKind::CommunityUpdate {
-                community_id,
-            })
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
             .await;
 
         Ok(())
@@ -5142,9 +5101,7 @@ impl ConversationInner {
         .await?;
 
         self.event
-            .emit(RayGunEventKind::CommunityUpdate {
-                community_id,
-            })
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
             .await;
 
         Ok(())
@@ -5189,9 +5146,7 @@ impl ConversationInner {
         .await?;
 
         self.event
-            .emit(RayGunEventKind::CommunityUpdate {
-                community_id,
-            })
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
             .await;
 
         Ok(())
@@ -5229,9 +5184,7 @@ impl ConversationInner {
         .await?;
 
         self.event
-            .emit(RayGunEventKind::CommunityUpdate {
-                community_id,
-            })
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
             .await;
 
         Ok(())
@@ -5265,13 +5218,10 @@ impl ConversationInner {
                 },
             )
             .await?;
-    
+
             self.event
-                .emit(RayGunEventKind::CommunityUpdate {
-                    community_id,
-                })
+                .emit(RayGunEventKind::CommunityUpdate { community_id })
                 .await;
-    
         }
         Ok(())
     }
@@ -5305,9 +5255,7 @@ impl ConversationInner {
         .await?;
 
         self.event
-            .emit(RayGunEventKind::CommunityUpdate {
-                community_id,
-            })
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
             .await;
 
         Ok(())
@@ -5571,12 +5519,13 @@ async fn process_conversation(
                 })
                 .await;
         }
-        ConversationEvents::UpdateCommunity { community_id, community_document } => {
+        ConversationEvents::UpdateCommunity {
+            community_id,
+            community_document,
+        } => {
             this.set_community_document(community_document).await?;
             this.event
-                .emit(RayGunEventKind::CommunityUpdate {
-                    community_id,
-                })
+                .emit(RayGunEventKind::CommunityUpdate { community_id })
                 .await;
         }
     }
