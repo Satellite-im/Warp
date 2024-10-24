@@ -4159,10 +4159,18 @@ impl ConversationInner {
     }
     pub async fn broadcast_community_event(
         &mut self,
-        community_id: Uuid,
-        targets: IndexSet<DID>,
+        community: &CommunityDocument,
         event: ConversationEvents,
+        override_targets: IndexSet<DID>,
     ) -> Result<(), Error> {
+        let mut targets = if override_targets.len() > 0 {
+            override_targets
+        } else {
+            let mut members = community.members.clone();
+            members.insert(community.creator.clone());
+            members
+        };
+
         for target in &targets {
             if !self.discovery.contains(target).await {
                 self.discovery.insert(target).await?;
@@ -4190,11 +4198,11 @@ impl ConversationInner {
                         .await
                         .is_err())
             {
-                warn!(conversation_id = %community_id, "Unable to publish to topic. Queuing event");
+                warn!(community_id = %community.id, "Unable to publish to topic. Queuing event");
                 self.queue_event(
                     target.clone(),
                     Queue::direct(
-                        community_id,
+                        community.id,
                         None,
                         peer_id,
                         target.messaging(),
@@ -4284,12 +4292,12 @@ impl ConversationInner {
         self.set_community_document(community_doc.clone()).await?;
 
         self.broadcast_community_event(
-            community_id,
-            community_doc.members.clone(),
+            &community_doc,
             ConversationEvents::UpdateCommunity {
                 community_id,
                 community_document: community_doc.clone(),
             },
+            IndexSet::new()
         )
         .await?;
 
@@ -4358,24 +4366,24 @@ impl ConversationInner {
 
         if let Some(target) = target_user.as_ref() {
             self.broadcast_community_event(
-                community_id,
-                vec![target.clone()].into_iter().collect(),
+                &community_doc,
                 ConversationEvents::NewCommunityInvite {
                     community_id,
                     community_document: community_doc.clone(),
                     invite: invite_doc.clone(),
                 },
+                vec![target.clone()].into_iter().collect()
             )
             .await?;
         }
 
         self.broadcast_community_event(
-            community_id,
-            community_doc.members.clone(),
+            &community_doc,
             ConversationEvents::UpdateCommunity {
                 community_id,
                 community_document: community_doc.clone(),
             },
+            IndexSet::new()
         )
         .await?;
 
@@ -4418,12 +4426,12 @@ impl ConversationInner {
         self.set_community_document(&mut community_doc).await?;
 
         self.broadcast_community_event(
-            community_id,
-            community_doc.members.clone(),
+            &community_doc,
             ConversationEvents::UpdateCommunity {
                 community_id,
-                community_document: community_doc,
+                community_document: community_doc.clone(),
             },
+            IndexSet::new()
         )
         .await?;
 
@@ -4470,12 +4478,12 @@ impl ConversationInner {
         self.set_community_document(&mut community_doc).await?;
 
         self.broadcast_community_event(
-            community_id,
-            community_doc.members.clone(),
+            &community_doc,
             ConversationEvents::UpdateCommunity {
                 community_id,
-                community_document: community_doc,
+                community_document: community_doc.clone(),
             },
+            IndexSet::new()
         )
         .await?;
 
@@ -4505,12 +4513,12 @@ impl ConversationInner {
         self.set_community_document(&mut community_doc).await?;
 
         self.broadcast_community_event(
-            community_id,
-            community_doc.members.clone(),
+            &community_doc,
             ConversationEvents::UpdateCommunity {
                 community_id,
-                community_document: community_doc,
+                community_document: community_doc.clone(),
             },
+            IndexSet::new()
         )
         .await?;
 
@@ -4538,12 +4546,12 @@ impl ConversationInner {
         self.set_community_document(&mut community_doc).await?;
 
         self.broadcast_community_event(
-            community_id,
-            community_doc.members.clone(),
+            &community_doc,
             ConversationEvents::UpdateCommunity {
                 community_id,
-                community_document: community_doc,
+                community_document: community_doc.clone(),
             },
+            IndexSet::new()
         )
         .await?;
 
@@ -4577,12 +4585,12 @@ impl ConversationInner {
         self.set_community_document(&mut community_doc).await?;
 
         self.broadcast_community_event(
-            community_id,
-            community_doc.members.clone(),
+            &community_doc,
             ConversationEvents::UpdateCommunity {
                 community_id,
-                community_document: community_doc,
+                community_document: community_doc.clone(),
             },
+            IndexSet::new()
         )
         .await?;
 
@@ -4623,12 +4631,12 @@ impl ConversationInner {
         self.set_community_document(&mut community_doc).await?;
 
         self.broadcast_community_event(
-            community_id,
-            community_doc.members.clone(),
+            &community_doc,
             ConversationEvents::UpdateCommunity {
                 community_id,
-                community_document: community_doc,
+                community_document: community_doc.clone(),
             },
+            IndexSet::new()
         )
         .await?;
 
@@ -4658,12 +4666,12 @@ impl ConversationInner {
         self.set_community_document(&mut community_doc).await?;
 
         self.broadcast_community_event(
-            community_id,
-            community_doc.members.clone(),
+            &community_doc,
             ConversationEvents::UpdateCommunity {
                 community_id,
-                community_document: community_doc,
+                community_document: community_doc.clone(),
             },
+            IndexSet::new()
         )
         .await?;
 
@@ -4693,12 +4701,12 @@ impl ConversationInner {
         self.set_community_document(&mut community_doc).await?;
 
         self.broadcast_community_event(
-            community_id,
-            community_doc.members.clone(),
+            &community_doc,
             ConversationEvents::UpdateCommunity {
                 community_id,
-                community_document: community_doc,
+                community_document: community_doc.clone(),
             },
+            IndexSet::new()
         )
         .await?;
 
@@ -4732,12 +4740,12 @@ impl ConversationInner {
         self.set_community_document(&mut community_doc).await?;
 
         self.broadcast_community_event(
-            community_id,
-            community_doc.members.clone(),
+            &community_doc,
             ConversationEvents::UpdateCommunity {
                 community_id,
-                community_document: community_doc,
+                community_document: community_doc.clone(),
             },
+            IndexSet::new()
         )
         .await?;
 
@@ -4761,12 +4769,12 @@ impl ConversationInner {
         self.set_community_document(&mut community_doc).await?;
 
         self.broadcast_community_event(
-            community_id,
-            community_doc.members.clone(),
+            &community_doc,
             ConversationEvents::UpdateCommunity {
                 community_id,
-                community_document: community_doc,
+                community_document: community_doc.clone(),
             },
+            IndexSet::new()
         )
         .await?;
 
@@ -4813,12 +4821,12 @@ impl ConversationInner {
         self.set_community_document(&mut community_doc).await?;
 
         self.broadcast_community_event(
-            community_id,
-            community_doc.members.clone(),
+            &community_doc,
             ConversationEvents::UpdateCommunity {
                 community_id,
-                community_document: community_doc,
+                community_document: community_doc.clone(),
             },
+            IndexSet::new()
         )
         .await?;
 
@@ -4843,12 +4851,12 @@ impl ConversationInner {
         self.set_community_document(&mut community_doc).await?;
 
         self.broadcast_community_event(
-            community_id,
-            community_doc.members.clone(),
+            &community_doc,
             ConversationEvents::UpdateCommunity {
                 community_id,
-                community_document: community_doc,
+                community_document: community_doc.clone(),
             },
+            IndexSet::new()
         )
         .await?;
 
@@ -4883,12 +4891,12 @@ impl ConversationInner {
         self.set_community_document(&mut community_doc).await?;
 
         self.broadcast_community_event(
-            community_id,
-            community_doc.members.clone(),
+            &community_doc,
             ConversationEvents::UpdateCommunity {
                 community_id,
-                community_document: community_doc,
+                community_document: community_doc.clone(),
             },
+            IndexSet::new()
         )
         .await?;
 
@@ -4916,12 +4924,12 @@ impl ConversationInner {
         self.set_community_document(&mut community_doc).await?;
 
         self.broadcast_community_event(
-            community_id,
-            community_doc.members.clone(),
+            &community_doc,
             ConversationEvents::UpdateCommunity {
                 community_id,
-                community_document: community_doc,
+                community_document: community_doc.clone(),
             },
+            IndexSet::new()
         )
         .await?;
 
@@ -4947,12 +4955,12 @@ impl ConversationInner {
             self.set_community_document(&mut community_doc).await?;
 
             self.broadcast_community_event(
-                community_id,
-                community_doc.members.clone(),
+                &community_doc,
                 ConversationEvents::UpdateCommunity {
                     community_id,
-                    community_document: community_doc,
+                    community_document: community_doc.clone(),
                 },
+                IndexSet::new()
             )
             .await?;
 
@@ -4979,12 +4987,12 @@ impl ConversationInner {
         self.set_community_document(&mut community_doc).await?;
 
         self.broadcast_community_event(
-            community_id,
-            community_doc.members.clone(),
+            &community_doc,
             ConversationEvents::UpdateCommunity {
                 community_id,
-                community_document: community_doc,
+                community_document: community_doc.clone(),
             },
+            IndexSet::new()
         )
         .await?;
 
@@ -5012,12 +5020,12 @@ impl ConversationInner {
         self.set_community_document(&mut community_doc).await?;
 
         self.broadcast_community_event(
-            community_id,
-            community_doc.members.clone(),
+            &community_doc,
             ConversationEvents::UpdateCommunity {
                 community_id,
-                community_document: community_doc,
+                community_document: community_doc.clone(),
             },
+            IndexSet::new()
         )
         .await?;
 
@@ -5052,12 +5060,12 @@ impl ConversationInner {
         self.set_community_document(&mut community_doc).await?;
 
         self.broadcast_community_event(
-            community_id,
-            community_doc.members.clone(),
+            &community_doc,
             ConversationEvents::UpdateCommunity {
                 community_id,
-                community_document: community_doc,
+                community_document: community_doc.clone(),
             },
+            IndexSet::new()
         )
         .await?;
 
@@ -5091,12 +5099,12 @@ impl ConversationInner {
         self.set_community_document(&mut community_doc).await?;
 
         self.broadcast_community_event(
-            community_id,
-            community_doc.members.clone(),
+            &community_doc,
             ConversationEvents::UpdateCommunity {
                 community_id,
-                community_document: community_doc,
+                community_document: community_doc.clone(),
             },
+            IndexSet::new()
         )
         .await?;
 
@@ -5136,12 +5144,12 @@ impl ConversationInner {
         self.set_community_document(&mut community_doc).await?;
 
         self.broadcast_community_event(
-            community_id,
-            community_doc.members.clone(),
+            &community_doc,
             ConversationEvents::UpdateCommunity {
                 community_id,
-                community_document: community_doc,
+                community_document: community_doc.clone(),
             },
+            IndexSet::new()
         )
         .await?;
 
@@ -5174,12 +5182,12 @@ impl ConversationInner {
         self.set_community_document(&mut community_doc).await?;
 
         self.broadcast_community_event(
-            community_id,
-            community_doc.members.clone(),
+            &community_doc,
             ConversationEvents::UpdateCommunity {
                 community_id,
-                community_document: community_doc,
+                community_document: community_doc.clone(),
             },
+            IndexSet::new()
         )
         .await?;
 
@@ -5210,12 +5218,12 @@ impl ConversationInner {
             self.set_community_document(&mut community_doc).await?;
 
             self.broadcast_community_event(
-                community_id,
-                community_doc.members.clone(),
+                &community_doc,
                 ConversationEvents::UpdateCommunity {
                     community_id,
-                    community_document: community_doc,
+                    community_document: community_doc.clone(),
                 },
+                IndexSet::new()
             )
             .await?;
 
@@ -5245,12 +5253,12 @@ impl ConversationInner {
         self.set_community_document(&mut community_doc).await?;
 
         self.broadcast_community_event(
-            community_id,
-            community_doc.members.clone(),
+            &community_doc,
             ConversationEvents::UpdateCommunity {
                 community_id,
                 community_document: community_doc.clone(),
             },
+            IndexSet::new()
         )
         .await?;
 

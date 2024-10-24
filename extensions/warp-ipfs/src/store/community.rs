@@ -163,7 +163,8 @@ impl CommunityDocument {
 }
 impl CommunityDocument {
     pub fn new(keypair: &Keypair, name: String) -> Result<Self, Error> {
-        let did = keypair.to_did()?;
+        let creator = keypair.to_did()?;
+
         let mut permissions = CommunityPermissions::new();
         permissions.insert(CommunityPermission::EditInfo, IndexSet::new());
         permissions.insert(CommunityPermission::ManageRoles, IndexSet::new());
@@ -172,14 +173,17 @@ impl CommunityDocument {
         permissions.insert(CommunityPermission::ManageChannels, IndexSet::new());
         permissions.insert(CommunityPermission::ManageInvites, IndexSet::new());
 
+        let mut members = IndexSet::new();
+        members.insert(creator.clone());
+
         let mut document = Self {
             id: Uuid::new_v4(),
             name,
             description: None,
-            creator: did,
+            creator,
             created: Utc::now(),
             modified: Utc::now(),
-            members: IndexSet::new(),
+            members,
             channels: IndexMap::new(),
             roles: IndexMap::new(),
             permissions: permissions,
