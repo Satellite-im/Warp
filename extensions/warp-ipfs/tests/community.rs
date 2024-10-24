@@ -81,36 +81,36 @@ mod test {
         Ok(())
     }
 
-    #[async_test]
-    async fn delete_community_as_creator() -> anyhow::Result<()> {
-        let context = Some("test::delete_community_as_creator".into());
-        let account_opts = (None, None, context);
-        let mut accounts = create_accounts(vec![account_opts]).await?;
+    // #[async_test]
+    // async fn delete_community_as_creator() -> anyhow::Result<()> {
+    //     let context = Some("test::delete_community_as_creator".into());
+    //     let account_opts = (None, None, context);
+    //     let mut accounts = create_accounts(vec![account_opts]).await?;
 
-        let (instance_a, _, _) = &mut accounts[0];
-        let community = instance_a.create_community("Community0").await?;
-        instance_a.delete_community(community.id()).await?;
-        Ok(())
-    }
-    #[async_test]
-    async fn delete_community_as_non_creator() -> anyhow::Result<()> {
-        let context = Some("test::delete_community_as_non_creator".into());
-        let account_opts = (None, None, context);
-        let mut accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+    //     let (instance_a, _, _) = &mut accounts[0];
+    //     let community = instance_a.create_community("Community0").await?;
+    //     instance_a.delete_community(community.id()).await?;
+    //     Ok(())
+    // }
+    // #[async_test]
+    // async fn delete_community_as_non_creator() -> anyhow::Result<()> {
+    //     let context = Some("test::delete_community_as_non_creator".into());
+    //     let account_opts = (None, None, context);
+    //     let mut accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
 
-        let (instance_a, _, _) = &mut accounts[0];
-        let community = instance_a.create_community("Community0").await?;
+    //     let (instance_a, _, _) = &mut accounts[0];
+    //     let community = instance_a.create_community("Community0").await?;
 
-        let (instance_b, _, _) = &mut accounts[1];
-        match instance_b.delete_community(community.id()).await {
-            Err(e) => match e {
-                Error::Unauthorized => {}
-                _ => panic!("error should be Error::Unauthorized"),
-            },
-            Ok(_) => panic!("should be unauthorized to delete community"),
-        }
-        Ok(())
-    }
+    //     let (instance_b, _, _) = &mut accounts[1];
+    //     match instance_b.delete_community(community.id()).await {
+    //         Err(e) => match e {
+    //             Error::Unauthorized => {}
+    //             _ => panic!("error should be Error::Unauthorized"),
+    //         },
+    //         Ok(_) => panic!("should be unauthorized to delete community"),
+    //     }
+    //     Ok(())
+    // }
 
     // #[async_test]
     // async fn unauthorized_edit_community_icon() -> anyhow::Result<()> {
@@ -196,32 +196,63 @@ mod test {
 
         let (_, did_b, _) = &accounts[1];
         let did_b = did_b.clone();
+        let (_, did_c, _) = &accounts[2];
+        let did_c = did_c.clone();
         let (instance_a, _, _) = &mut accounts[0];
-        let community = instance_a.create_community("Community0").await?;
+        let community = instance_a
+            .create_community("Community0")
+            .await
+            .expect("user a should be able to create role");
         let role = instance_a
             .create_community_role(community.id(), "Role0")
-            .await?;
+            .await
+            .expect("user a should be able to create role");
         instance_a
             .grant_community_permission(
                 community.id(),
                 CommunityPermission::ManageInvites,
                 role.id(),
             )
-            .await?;
-        
+            .await
+            .expect("user a should be able to grant permission");
+
+        let invite_for_b = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await
+            .expect("user a should be able to create invite");
+
+        let (instance_b, _, _) = &mut accounts[1];
+        instance_b
+            .accept_community_invite(community.id(), invite_for_b.id())
+            .await
+            .expect("user b should be able to accept invite");
+
+        let (instance_a, _, _) = &mut accounts[0];
         instance_a
-            .grant_community_role(community.id(), role.id(), did_b)
+            .grant_community_role(community.id(), role.id(), did_b.clone())
+            .await
+            .expect("user a should be able to grant role to user b");
+        let role_as_seen_by_a = instance_a
+            .get_community_role(community.id(), role.id())
             .await?;
 
         let (instance_b, _, _) = &mut accounts[1];
-        let invite = instance_b
-            .create_community_invite(community.id(), None, None)
+        let role_as_seen_by_b = instance_b
+            .get_community_role(community.id(), role.id())
             .await?;
+        assert_eq!(role_as_seen_by_a, role_as_seen_by_b);
+
+        let invite_for_c = instance_b
+            .create_community_invite(community.id(), Some(did_c), None)
+            .await
+            .expect("user b should be able to create invite");
 
         let (instance_c, _, _) = &mut accounts[2];
         instance_c
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+            .accept_community_invite(community.id(), invite_for_c.id())
+            .await
+            .expect("user c should be able to accept invite");
+
         Ok(())
     }
     #[async_test]

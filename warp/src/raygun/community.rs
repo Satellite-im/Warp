@@ -230,10 +230,7 @@ pub enum CommunityChannelType {
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum CommunityPermission {
-    EditName,
-    EditDescription,
-    EditIcon,
-    EditBanner,
+    EditInfo,
     ManageRoles,
     ManagePermissions,
     ManageMembers,
@@ -244,8 +241,7 @@ pub enum CommunityPermission {
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum CommunityChannelPermission {
     ViewChannel,
-    EditName,
-    EditDescription,
+    EditInfo,
     SendMessages,
     DeleteMessages,
 }
@@ -259,6 +255,16 @@ pub trait RayGunCommunity: Sync + Send {
         Err(Error::Unimplemented)
     }
     async fn get_community(&self, _community_id: Uuid) -> Result<Community, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    async fn list_communities_joined(&self) -> Result<IndexSet<Uuid>, Error> {
+        Err(Error::Unimplemented)
+    }
+    async fn list_communities_invited_to(&self) -> Result<IndexSet<Uuid>, Error> {
+        Err(Error::Unimplemented)
+    }
+    async fn leave_community(&mut self, _community_id: Uuid) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
@@ -333,6 +339,13 @@ pub trait RayGunCommunity: Sync + Send {
         _community_id: Uuid,
         _role_id: RoleId,
     ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+    async fn get_community_role(
+        &mut self,
+        _community_id: Uuid,
+        _role_id: RoleId,
+    ) -> Result<CommunityRole, Error> {
         Err(Error::Unimplemented)
     }
     async fn edit_community_role_name(

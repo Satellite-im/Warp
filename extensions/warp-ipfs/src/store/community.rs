@@ -165,10 +165,7 @@ impl CommunityDocument {
     pub fn new(keypair: &Keypair, name: String) -> Result<Self, Error> {
         let did = keypair.to_did()?;
         let mut permissions = CommunityPermissions::new();
-        permissions.insert(CommunityPermission::EditName, IndexSet::new());
-        permissions.insert(CommunityPermission::EditDescription, IndexSet::new());
-        permissions.insert(CommunityPermission::EditIcon, IndexSet::new());
-        permissions.insert(CommunityPermission::EditBanner, IndexSet::new());
+        permissions.insert(CommunityPermission::EditInfo, IndexSet::new());
         permissions.insert(CommunityPermission::ManageRoles, IndexSet::new());
         permissions.insert(CommunityPermission::ManagePermissions, IndexSet::new());
         permissions.insert(CommunityPermission::ManageMembers, IndexSet::new());
@@ -310,8 +307,7 @@ impl CommunityChannelDocument {
         channel_type: CommunityChannelType,
     ) -> Self {
         let mut permissions = CommunityChannelPermissions::new();
-        permissions.insert(CommunityChannelPermission::EditName, IndexSet::new());
-        permissions.insert(CommunityChannelPermission::EditDescription, IndexSet::new());
+        permissions.insert(CommunityChannelPermission::EditInfo, IndexSet::new());
         permissions.insert(CommunityChannelPermission::DeleteMessages, IndexSet::new());
         Self {
             id: Uuid::new_v4(),

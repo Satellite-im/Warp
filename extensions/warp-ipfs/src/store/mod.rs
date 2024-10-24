@@ -351,10 +351,15 @@ pub enum ConversationEvents {
     DeleteConversation {
         conversation_id: Uuid,
     },
+    
     NewCommunityInvite {
-        conversation_id: Uuid,
+        community_id: Uuid,
         community_document: CommunityDocument,
         invite: CommunityInviteDocument,
+    },
+    UpdateCommunity {
+        community_id: Uuid,
+        community_document: CommunityDocument,
     },
 }
 

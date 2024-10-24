@@ -34,6 +34,7 @@ use crate::{Extension, SingleHandle};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use futures::stream::BoxStream;
+use indexmap::IndexSet;
 use std::any::Any;
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -580,6 +581,16 @@ where
         self.raygun.get_community(community_id).await
     }
 
+    async fn list_communities_joined(&self) -> Result<IndexSet<Uuid>, Error> {
+        self.raygun.list_communities_joined().await
+    }
+    async fn list_communities_invited_to(&self) -> Result<IndexSet<Uuid>, Error> {
+        self.raygun.list_communities_invited_to().await
+    }
+    async fn leave_community(&mut self, community_id: Uuid) -> Result<(), Error> {
+        self.raygun.leave_community(community_id).await
+    }
+
     async fn get_community_icon(&self, community_id: Uuid) -> Result<ConversationImage, Error> {
         self.raygun.get_community_icon(community_id).await
     }
@@ -668,6 +679,13 @@ where
         self.raygun
             .delete_community_role(community_id, role_id)
             .await
+    }
+    async fn get_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+    ) -> Result<CommunityRole, Error> {
+        self.raygun.get_community_role(community_id, role_id).await
     }
     async fn edit_community_role_name(
         &mut self,

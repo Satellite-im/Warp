@@ -5,6 +5,7 @@ use futures::future::BoxFuture;
 use futures::stream::{self, BoxStream};
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_timeout::TimeoutExt;
+use indexmap::IndexSet;
 use ipfs::p2p::{
     IdentifyConfiguration, KadConfig, KadInserts, MultiaddrExt, PubsubConfig, TransportConfig,
 };
@@ -1690,6 +1691,16 @@ impl RayGunCommunity for WarpIpfs {
         self.messaging_store()?.get_community(community_id).await
     }
 
+    async fn list_communities_joined(&self) -> Result<IndexSet<Uuid>, Error> {
+        self.messaging_store()?.list_communities_joined().await
+    }
+    async fn list_communities_invited_to(&self) -> Result<IndexSet<Uuid>, Error> {
+        self.messaging_store()?.list_communities_invited_to().await
+    }
+    async fn leave_community(&mut self, community_id: Uuid) -> Result<(), Error> {
+        self.messaging_store()?.leave_community(community_id).await
+    }
+
     async fn get_community_icon(&self, community_id: Uuid) -> Result<ConversationImage, Error> {
         self.messaging_store()?
             .get_community_icon(community_id)
@@ -1783,6 +1794,15 @@ impl RayGunCommunity for WarpIpfs {
     ) -> Result<(), Error> {
         self.messaging_store()?
             .delete_community_role(community_id, role_id)
+            .await
+    }
+    async fn get_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+    ) -> Result<CommunityRole, Error> {
+        self.messaging_store()?
+            .get_community_role(community_id, role_id)
             .await
     }
     async fn edit_community_role_name(
