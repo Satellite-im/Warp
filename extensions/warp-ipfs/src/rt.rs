@@ -196,7 +196,7 @@ async fn default_abortable_task() {
 
     let handle = executor.spawn_abortable(async {
         futures_timer::Delay::new(std::time::Duration::from_secs(5)).await;
-        _ = tx.send(());
+        let _ = tx.send(());
         unreachable!();
     });
 
@@ -231,7 +231,7 @@ fn custom_abortable_task() {
             let (tx, rx) = futures::channel::oneshot::channel();
             let fut = async {
                 let val = future.await;
-                _ = tx.send(val);
+                let _ = tx.send(val);
             };
 
             self.pool.spawn_ok(fut);

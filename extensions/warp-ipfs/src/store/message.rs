@@ -2,7 +2,6 @@ mod task;
 
 use futures_timer::Delay;
 use task::ConversationTaskCommand;
-use tracing::info;
 
 use bytes::Bytes;
 use std::borrow::BorrowMut;
@@ -27,7 +26,6 @@ use rust_ipfs::{Ipfs, PeerId};
 
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::{CancellationToken, DropGuard};
-use tracing::{error, warn};
 use uuid::Uuid;
 
 use super::{document::root::RootDocumentMap, ds_key::DataStoreKey, PeerIdExt};
@@ -83,7 +81,7 @@ impl MessageStore {
         message_command: mpsc::Sender<MessageCommand>,
     ) -> Self {
         let executor = LocalExecutor;
-        info!("Initializing MessageStore");
+        tracing::info!("Initializing MessageStore");
 
         let token = CancellationToken::new();
         let drop_guard = token.clone().drop_guard();
@@ -948,7 +946,7 @@ impl ConversationTask {
                     }
                 }
                 _ = &mut queue_timer => {
-                    _ = _process_queue(&mut *self.inner.write().await).await;
+                    let _ = _process_queue(&mut *self.inner.write().await).await;
                     queue_timer.reset(Duration::from_secs(5));
                 }
 
@@ -1126,7 +1124,7 @@ impl ConversationInner {
                     .await
                     .is_err())
         {
-            warn!(conversation_id = %convo_id, "Unable to publish to topic. Queuing event");
+            tracing::warn!(conversation_id = %convo_id, "Unable to publish to topic. Queuing event");
             self.queue_event(
                 did.clone(),
                 Queue::direct(peer_id, did.messaging(), payload.message().to_vec()),
@@ -1249,7 +1247,7 @@ impl ConversationInner {
                         .await
                         .is_err())
             {
-                warn!("Unable to publish to topic. Queuing event");
+                tracing::warn!("Unable to publish to topic. Queuing event");
                 self.queue_event(
                     did.clone(),
                     Queue::direct(peer_id, did.messaging(), payload.message().to_vec()),
@@ -1317,7 +1315,7 @@ impl ConversationInner {
         if let Ok(mut ks_map) = self.root.get_conversation_keystore_map().await {
             if ks_map.remove(&id.to_string()).is_some() {
                 if let Err(e) = self.set_keystore_map(ks_map).await {
-                    warn!(conversation_id = %id, "Failed to remove keystore: {e}");
+                    tracing::warn!(conversation_id = %id, "Failed to remove keystore: {e}");
                 }
             }
         }
@@ -1428,7 +1426,7 @@ impl ConversationInner {
 
         if let Some(old_cid) = old_cid {
             if old_cid != cid && self.ipfs.is_pinned(old_cid).await.unwrap_or_default() {
-                _ = self.ipfs.remove_pin(old_cid).recursive().await;
+                let _ = self.ipfs.remove_pin(old_cid).recursive().await;
             }
         }
     }
@@ -1466,7 +1464,7 @@ impl ConversationInner {
                     .await
                     .is_err())
         {
-            warn!(%conversation_id, "Unable to publish to topic");
+            tracing::warn!(%conversation_id, "Unable to publish to topic");
             self.queue_event(
                 did.clone(),
                 Queue::direct(peer_id, topic.clone(), payload.message().to_vec()),
@@ -1516,7 +1514,7 @@ impl ConversationInner {
                         .leave_group_conversation(creator, &recipients, conversation_id)
                         .await
                     {
-                        error!(%conversation_id, error = %e, "Error leaving conversation");
+                        tracing::error!(%conversation_id, error = %e, "Error leaving conversation");
                     }
                 }
             }
@@ -1554,7 +1552,7 @@ impl ConversationInner {
                                 .await
                                 .is_err())
                     {
-                        warn!(%conversation_id, "Unable to publish to topic. Queuing event");
+                        tracing::warn!(%conversation_id, "Unable to publish to topic. Queuing event");
                         //Note: If the error is related to peer not available then we should push this to queue but if
                         //      its due to the message limit being reached we should probably break up the message to fix into
                         //      "max_transmit_size" within rust-libp2p gossipsub
@@ -1657,7 +1655,7 @@ impl ConversationInner {
                     .await
                     .is_err())
         {
-            warn!(%conversation_id, "Unable to publish to topic. Queuing event");
+            tracing::warn!(%conversation_id, "Unable to publish to topic. Queuing event");
             self.queue_event(
                 did_key.clone(),
                 Queue::direct(peer_id, did_key.messaging(), payload.message().to_vec()),
@@ -1725,12 +1723,12 @@ async fn process_conversation(
             tracing::info!(%conversation_id, "New group conversation event received");
 
             if this.contains(conversation_id).await {
-                warn!(%conversation_id, "Conversation exist");
+                tracing::warn!(%conversation_id, "Conversation exist");
                 return Ok(());
             }
 
             if !conversation.recipients.contains(&did) {
-                warn!(%conversation_id, "was added to conversation but never was apart of the conversation.");
+                tracing::warn!(%conversation_id, "was added to conversation but never was apart of the conversation.");
                 return Ok(());
             }
 
@@ -1784,7 +1782,7 @@ async fn process_conversation(
                 .get(&conversation_id)
                 .ok_or(Error::InvalidConversation)?;
             let (tx, rx) = oneshot::channel();
-            _ = conversation_meta
+            let _ = conversation_meta
                 .command_tx
                 .clone()
                 .send(ConversationTaskCommand::AddExclusion {
@@ -1855,7 +1853,7 @@ async fn process_identity_events(
                 match conversation.conversation_type() {
                     ConversationType::Direct => {
                         if let Err(e) = this.delete_conversation(id, true).await {
-                            warn!(conversation_id = %id, error = %e, "Failed to delete conversation");
+                            tracing::warn!(conversation_id = %id, error = %e, "Failed to delete conversation");
                             continue;
                         }
                     }
@@ -1885,7 +1883,7 @@ async fn process_identity_events(
                         };
 
                         if let Err(e) = result {
-                            warn!(conversation_id = %id, error = %e, "Failed to remove {did} from conversation");
+                            tracing::warn!(conversation_id = %id, error = %e, "Failed to remove {did} from conversation");
                             continue;
                         }
 
@@ -1899,7 +1897,7 @@ async fn process_identity_events(
                                     response: tx,
                                 })
                                 .await;
-                            _ = rx.await;
+                            let _ = rx.await;
                         }
                     }
                 }
@@ -1927,7 +1925,7 @@ async fn process_identity_events(
                     .ok_or(Error::InvalidConversation)?;
 
                 let (tx, rx) = oneshot::channel();
-                _ = conversation_meta
+                let _ = conversation_meta
                     .command_tx
                     .clone()
                     .send(ConversationTaskCommand::AddRestricted {
@@ -1935,7 +1933,7 @@ async fn process_identity_events(
                         response: tx,
                     })
                     .await;
-                _ = rx.await;
+                let _ = rx.await;
             }
         }
         MultiPassEventKind::FriendRemoved { did } => {
@@ -1965,7 +1963,7 @@ async fn process_identity_events(
                             .ok_or(Error::InvalidConversation)?;
 
                         let (tx, rx) = oneshot::channel();
-                        _ = conversation_meta
+                        let _ = conversation_meta
                             .command_tx
                             .clone()
                             .send(ConversationTaskCommand::RemoveParticipant {
@@ -1980,7 +1978,7 @@ async fn process_identity_events(
                         };
 
                         if let Err(e) = result {
-                            warn!(conversation_id = %id, error = %e, "Failed to remove {did} from conversation");
+                            tracing::warn!(conversation_id = %id, error = %e, "Failed to remove {did} from conversation");
                             continue;
                         }
                     }
@@ -2066,7 +2064,7 @@ async fn _process_queue(this: &mut ConversationInner) {
             };
 
             if let Err(e) = this.ipfs.pubsub_publish(topic.clone(), bytes).await {
-                error!("Error publishing to topic: {e}");
+                tracing::error!("Error publishing to topic: {e}");
                 continue;
             }
 
