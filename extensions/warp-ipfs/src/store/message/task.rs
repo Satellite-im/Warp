@@ -21,7 +21,6 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 use tokio_stream::StreamMap;
-use tracing::{error, warn};
 use uuid::Uuid;
 use warp::constellation::directory::Directory;
 use warp::constellation::{ConstellationProgressStream, Progression};
@@ -383,7 +382,7 @@ impl ConversationTask {
                     this.process_command(command).await;
                 }
                 Some((message, response)) = this.attachment_rx.next() => {
-                    _ = response.send(this.store_direct_for_attachment(message).await);
+                    let _ = response.send(this.store_direct_for_attachment(message).await);
                 }
                 Some((_id, _)) = this.pending_ping_response.next() => {
                     //TODO: score against identity that didnt respond in time
@@ -459,15 +458,15 @@ impl ConversationTask {
                     break;
                 }
                 Ok(Ok(Err(e))) => {
-                    error!("unable to get mailbox to conversation {conversation_id} from {peer_id}: {e}");
+                    tracing::error!("unable to get mailbox to conversation {conversation_id} from {peer_id}: {e}");
                     break;
                 }
                 Ok(Err(_)) => {
-                    error!("Channel been unexpectedly closed for {peer_id}");
+                    tracing::error!("Channel been unexpectedly closed for {peer_id}");
                     continue;
                 }
                 Err(_) => {
-                    error!("Request timed out for {peer_id}");
+                    tracing::error!("Request timed out for {peer_id}");
                     continue;
                 }
             }
@@ -589,52 +588,52 @@ impl ConversationTask {
         match command {
             ConversationTaskCommand::SetDescription { desc, response } => {
                 let result = self.set_description(desc.as_deref()).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::FavoriteConversation { favorite, response } => {
                 let result = self.set_favorite_conversation(favorite).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::GetMessage {
                 message_id,
                 response,
             } => {
                 let result = self.get_message(message_id).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::GetMessages { options, response } => {
                 let result = self.get_messages(options).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::GetMessagesCount { response } => {
                 let result = self.messages_count().await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::GetMessageReference {
                 message_id,
                 response,
             } => {
                 let result = self.get_message_reference(message_id).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::GetMessageReferences { options, response } => {
                 let result = self.get_message_references(options).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::UpdateConversationName { name, response } => {
                 let result = self.update_conversation_name(&name).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::UpdateConversationPermissions {
                 permissions,
                 response,
             } => {
                 let result = self.update_conversation_permissions(permissions).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::AddParticipant { member, response } => {
                 let result = self.add_participant(&member).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::RemoveParticipant {
                 member,
@@ -642,18 +641,18 @@ impl ConversationTask {
                 response,
             } => {
                 let result = self.remove_participant(&member, broadcast).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::MessageStatus {
                 message_id,
                 response,
             } => {
                 let result = self.message_status(message_id).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::SendMessage { lines, response } => {
                 let result = self.send_message(lines).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::EditMessage {
                 message_id,
@@ -661,7 +660,7 @@ impl ConversationTask {
                 response,
             } => {
                 let result = self.edit_message(message_id, lines).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::ReplyMessage {
                 message_id,
@@ -669,14 +668,14 @@ impl ConversationTask {
                 response,
             } => {
                 let result = self.reply_message(message_id, lines).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::DeleteMessage {
                 message_id,
                 response,
             } => {
                 let result = self.delete_message(message_id, true).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::PinMessage {
                 message_id,
@@ -684,7 +683,7 @@ impl ConversationTask {
                 response,
             } => {
                 let result = self.pin_message(message_id, state).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::ReactMessage {
                 message_id,
@@ -693,7 +692,7 @@ impl ConversationTask {
                 response,
             } => {
                 let result = self.react(message_id, state, emoji).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::AttachMessage {
                 message_id,
@@ -702,7 +701,7 @@ impl ConversationTask {
                 response,
             } => {
                 let result = self.attach(message_id, locations, lines);
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::DownloadAttachment {
                 message_id,
@@ -711,7 +710,7 @@ impl ConversationTask {
                 response,
             } => {
                 let result = self.download(message_id, &file, path).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::DownloadAttachmentStream {
                 message_id,
@@ -719,55 +718,55 @@ impl ConversationTask {
                 response,
             } => {
                 let result = self.download_stream(message_id, &file).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::SendEvent { event, response } => {
                 let result = self.send_event(event).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::CancelEvent { event, response } => {
                 let result = self.cancel_event(event).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::UpdateIcon { location, response } => {
                 let result = self
                     .update_conversation_image(location, ConversationImageType::Icon)
                     .await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::UpdateBanner { location, response } => {
                 let result = self
                     .update_conversation_image(location, ConversationImageType::Banner)
                     .await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::RemoveIcon { response } => {
                 let result = self
                     .remove_conversation_image(ConversationImageType::Icon)
                     .await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::RemoveBanner { response } => {
                 let result = self
                     .remove_conversation_image(ConversationImageType::Banner)
                     .await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::GetIcon { response } => {
                 let result = self.conversation_image(ConversationImageType::Icon).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::GetBanner { response } => {
                 let result = self.conversation_image(ConversationImageType::Banner).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::ArchivedConversation { response } => {
                 let result = self.archived_conversation().await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::UnarchivedConversation { response } => {
                 let result = self.unarchived_conversation().await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::AddExclusion {
                 member,
@@ -775,19 +774,19 @@ impl ConversationTask {
                 response,
             } => {
                 let result = self.add_exclusion(member, signature).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::AddRestricted { member, response } => {
                 let result = self.add_restricted(&member).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::RemoveRestricted { member, response } => {
                 let result = self.remove_restricted(&member).await;
-                _ = response.send(result);
+                let _ = response.send(result);
             }
             ConversationTaskCommand::EventHandler { response } => {
                 let sender = self.event_broadcast.clone();
-                _ = response.send(sender);
+                let _ = response.send(sender);
             }
         }
     }
@@ -904,7 +903,7 @@ impl ConversationTask {
                     .await
                     .is_err())
         {
-            warn!(id=%&self.conversation_id, "Unable to publish to topic. Queuing event");
+            tracing::warn!(id=%&self.conversation_id, "Unable to publish to topic. Queuing event");
             self.queue_event(
                 did_key.clone(),
                 QueueItem::direct(
@@ -1193,7 +1192,7 @@ impl ConversationTask {
                     .await
                     .is_err())
         {
-            warn!(id = %self.conversation_id, "Unable to publish to topic");
+            tracing::warn!(id = %self.conversation_id, "Unable to publish to topic");
             self.queue_event(
                 did.clone(),
                 QueueItem::direct(None, peer_id, topic.clone(), payload.message().to_vec()),
@@ -1309,7 +1308,7 @@ impl ConversationTask {
         };
 
         if let Err(e) = self.event_broadcast.clone().send(event) {
-            error!(conversation_id=%self.conversation_id, error = %e, "Error broadcasting event");
+            tracing::error!(conversation_id=%self.conversation_id, error = %e, "Error broadcasting event");
         }
 
         let message_id = message.id;
@@ -1411,7 +1410,7 @@ impl ConversationTask {
 
         self.set_document().await?;
 
-        _ = tx.send(MessageEventKind::MessageEdited {
+        let _ = tx.send(MessageEventKind::MessageEdited {
             conversation_id: self.conversation_id,
             message_id,
         });
@@ -1509,7 +1508,7 @@ impl ConversationTask {
         };
 
         if let Err(e) = tx.send(event) {
-            error!(id=%self.conversation_id, error = %e, "Error broadcasting event");
+            tracing::error!(id=%self.conversation_id, error = %e, "Error broadcasting event");
         }
 
         let event = MessagingEvents::New { message };
@@ -1563,7 +1562,7 @@ impl ConversationTask {
             }
         }
 
-        _ = tx.send(MessageEventKind::MessageDeleted {
+        let _ = tx.send(MessageEventKind::MessageDeleted {
             conversation_id: self.conversation_id,
             message_id,
         });
@@ -1628,7 +1627,7 @@ impl ConversationTask {
 
         self.set_document().await?;
 
-        _ = tx.send(event);
+        let _ = tx.send(event);
 
         if !recipients.is_empty() {
             if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
@@ -1751,7 +1750,7 @@ impl ConversationTask {
 
                 self.set_document().await?;
 
-                _ = tx.send(MessageEventKind::MessageReactionRemoved {
+                let _ = tx.send(MessageEventKind::MessageReactionRemoved {
                     conversation_id: self.conversation_id,
                     message_id,
                     did_key: own_did.clone(),
@@ -1836,7 +1835,7 @@ impl ConversationTask {
                 .pubsub_publish(self.document.event_topic(), payload.to_bytes()?)
                 .await
             {
-                error!(id=%self.conversation_id, "Unable to send event: {e}");
+                tracing::error!(id=%self.conversation_id, "Unable to send event: {e}");
             }
         }
         Ok(())
@@ -2366,7 +2365,7 @@ impl ConversationTask {
             description: desc.map(ToString::to_string),
         };
 
-        _ = self.event_broadcast.send(ev);
+        let _ = self.event_broadcast.send(ev);
 
         let event = MessagingEvents::UpdateConversation {
             conversation: self.document.clone(),
@@ -2533,7 +2532,7 @@ impl ConversationTask {
                         let mut progress = match constellation.put_stream(&filename, size, stream).await {
                             Ok(stream) => stream,
                             Err(e) => {
-                                error!(%conversation_id, "Error uploading {filename}: {e}");
+                               tracing::error!(%conversation_id, "Error uploading {filename}: {e}");
                                 streams.insert(kind, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: e }, None) }).boxed());
                                 continue;
                             }
@@ -2621,7 +2620,7 @@ impl ConversationTask {
                             let mut progress = match constellation.put(&filename, &file_path).await {
                                 Ok(stream) => stream,
                                 Err(e) => {
-                                    error!(%conversation_id, "Error uploading {filename}: {e}");
+                                   tracing::error!(%conversation_id, "Error uploading {filename}: {e}");
                                     streams.insert(kind, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: e }, None) }).boxed());
                                     continue;
                                 }
@@ -2714,7 +2713,7 @@ impl ConversationTask {
         };
 
         if let Err(e) = self.event_broadcast.send(event) {
-            error!(%conversation_id, error = %e, "Error broadcasting event");
+            tracing::error!(%conversation_id, error = %e, "Error broadcasting event");
         }
 
         let event = MessagingEvents::New { message };
@@ -2863,7 +2862,7 @@ impl ConversationTask {
             let timer = Instant::now();
             let mut time = true;
             if let Err(_e) = self.ipfs.pubsub_publish(self.document.topic(), bytes).await {
-                error!(id = %self.conversation_id, "Error publishing: {_e}");
+                tracing::error!(id = %self.conversation_id, "Error publishing: {_e}");
                 time = false;
             }
             if time {
@@ -3130,7 +3129,7 @@ async fn message_event(
                 conversation_id,
                 message_id,
             }) {
-                error!(%conversation_id, error = %e, "Error broadcasting event");
+                tracing::error!(%conversation_id, error = %e, "Error broadcasting event");
             }
         }
         MessagingEvents::Delete {
@@ -3559,7 +3558,7 @@ async fn process_request_response_event(
                 }
 
                 if !this.document.recipients().contains(&sender) {
-                    warn!(%conversation_id, %sender, "apart of conversation");
+                    tracing::warn!(%conversation_id, %sender, "apart of conversation");
                     return Err(Error::IdentityDoesntExist);
                 }
 
@@ -3575,7 +3574,7 @@ async fn process_request_response_event(
                         key
                     }
                     Err(e) => {
-                        error!(%conversation_id, error = %e, "Error getting key from store");
+                        tracing::error!(%conversation_id, error = %e, "Error getting key from store");
                         return Err(e);
                     }
                 };
@@ -3613,7 +3612,7 @@ async fn process_request_response_event(
                             .await
                             .is_err())
                 {
-                    warn!(%conversation_id, "Unable to publish to topic. Queuing event");
+                    tracing::warn!(%conversation_id, "Unable to publish to topic. Queuing event");
                     // TODO
                     this.queue_event(
                         sender.clone(),
@@ -3879,7 +3878,7 @@ async fn process_queue(this: &mut ConversationTask) {
             };
 
             if let Err(e) = this.ipfs.pubsub_publish(topic.clone(), bytes).await {
-                error!("Error publishing to topic: {e}");
+                tracing::error!("Error publishing to topic: {e}");
                 continue;
             }
 

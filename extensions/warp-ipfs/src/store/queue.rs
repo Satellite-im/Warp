@@ -9,7 +9,6 @@ use rust_ipfs::{Ipfs, Keypair};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::RwLock;
 use tokio_util::sync::{CancellationToken, DropGuard};
-use tracing::error;
 use warp::{crypto::DID, error::Error};
 use web_time::Instant;
 
@@ -177,7 +176,7 @@ impl Queue {
         let bytes = match serde_json::to_vec(&queue_list) {
             Ok(bytes) => bytes,
             Err(e) => {
-                error!("Error serializing queue list into bytes: {e}");
+                tracing::error!("Error serializing queue list into bytes: {e}");
                 return;
             }
         };
@@ -185,7 +184,7 @@ impl Queue {
         let data = match ecdh_encrypt(&self.keypair, None, bytes) {
             Ok(d) => d,
             Err(e) => {
-                error!("Error encrypting queue: {e}");
+                tracing::error!("Error encrypting queue: {e}");
                 return;
             }
         };
@@ -217,7 +216,7 @@ impl Queue {
 
         if let Some(old_cid) = old_cid {
             if old_cid != cid && self.ipfs.is_pinned(old_cid).await.unwrap_or_default() {
-                _ = self.ipfs.remove_pin(old_cid).recursive().await;
+                let _ = self.ipfs.remove_pin(old_cid).recursive().await;
             }
         }
     }
@@ -256,83 +255,80 @@ impl QueueEntry {
         let fut = {
             let entry = entry.clone();
             async move {
-                _ = async {
-                    let mut retry = 10;
-                    loop {
-                        let entry = entry.clone();
-                        //TODO: Replace with future event to detect connection/disconnection from peer as well as pubsub subscribing event
-                        let (connection_result, peers_result) = futures::join!(
-                            connected_to_peer(&entry.ipfs, entry.recipient.clone()),
-                            entry.ipfs.pubsub_peers(Some(entry.recipient.inbox()))
+                let mut retry = 10;
+                loop {
+                    let entry = entry.clone();
+                    //TODO: Replace with future event to detect connection/disconnection from peer as well as pubsub subscribing event
+                    let (connection_result, peers_result) = futures::join!(
+                        connected_to_peer(&entry.ipfs, entry.recipient.clone()),
+                        entry.ipfs.pubsub_peers(Some(entry.recipient.inbox()))
+                    );
+
+                    if matches!(
+                        connection_result,
+                        Ok(crate::store::PeerConnectionType::Connected)
+                    ) && peers_result
+                        .map(|list| {
+                            list.iter()
+                                .filter_map(|peer_id| peer_id.to_did().ok())
+                                .any(|did| did.eq(&entry.recipient))
+                        })
+                        .unwrap_or_default()
+                    {
+                        tracing::info!(
+                            "{} is connected. Attempting to send request",
+                            entry.recipient.clone()
                         );
+                        let entry = entry.clone();
 
-                        if matches!(
-                            connection_result,
-                            Ok(crate::store::PeerConnectionType::Connected)
-                        ) && peers_result
-                            .map(|list| {
-                                list.iter()
-                                    .filter_map(|peer_id| peer_id.to_did().ok())
-                                    .any(|did| did.eq(&entry.recipient))
-                            })
-                            .unwrap_or_default()
-                        {
-                            tracing::info!(
-                                "{} is connected. Attempting to send request",
-                                entry.recipient.clone()
-                            );
-                            let entry = entry.clone();
+                        let recipient = entry.recipient.clone();
 
-                            let recipient = entry.recipient.clone();
+                        let res = async move {
+                            let kp = &entry.keypair;
+                            let payload_bytes = serde_json::to_vec(&entry.item)?;
 
-                            let res = async move {
-                                let kp = &entry.keypair;
-                                let payload_bytes = serde_json::to_vec(&entry.item)?;
+                            let bytes = ecdh_encrypt(kp, Some(&recipient), payload_bytes)?;
 
-                                let bytes = ecdh_encrypt(kp, Some(&recipient), payload_bytes)?;
+                            let message = PayloadBuilder::new(kp, bytes).build()?;
 
-                                let message = PayloadBuilder::new(kp, bytes).build()?;
+                            let message_bytes = message.to_bytes()?;
 
-                                let message_bytes = message.to_bytes()?;
+                            tracing::trace!("Payload size: {} bytes", message_bytes.len());
 
-                                tracing::trace!("Payload size: {} bytes", message_bytes.len());
+                            tracing::info!("Sending request to {}", recipient);
 
-                                tracing::info!("Sending request to {}", recipient);
+                            let time = Instant::now();
 
-                                let time = Instant::now();
+                            entry
+                                .ipfs
+                                .pubsub_publish(recipient.inbox(), message_bytes)
+                                .await?;
 
-                                entry
-                                    .ipfs
-                                    .pubsub_publish(recipient.inbox(), message_bytes)
-                                    .await?;
+                            let elapsed = time.elapsed();
 
-                                let elapsed = time.elapsed();
+                            tracing::info!("took {}ms to send", elapsed.as_millis());
 
-                                tracing::info!("took {}ms to send", elapsed.as_millis());
+                            Ok::<_, anyhow::Error>(())
+                        };
 
-                                Ok::<_, anyhow::Error>(())
-                            };
-
-                            match res.await {
-                                Ok(_) => {
-                                    let _ = tx.clone().unbounded_send(entry.recipient.clone()).ok();
-                                    break;
-                                }
-                                Err(e) => {
-                                    tracing::error!(
-                                        "Error sending request for {}: {e}. Retrying in {}s",
-                                        &entry.recipient,
-                                        retry
-                                    );
-                                    futures_timer::Delay::new(Duration::from_secs(retry)).await;
-                                    retry += 5;
-                                }
+                        match res.await {
+                            Ok(_) => {
+                                let _ = tx.clone().unbounded_send(entry.recipient.clone()).ok();
+                                break;
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    "Error sending request for {}: {e}. Retrying in {}s",
+                                    &entry.recipient,
+                                    retry
+                                );
+                                futures_timer::Delay::new(Duration::from_secs(retry)).await;
+                                retry += 5;
                             }
                         }
-                        futures_timer::Delay::new(Duration::from_secs(1)).await;
                     }
+                    futures_timer::Delay::new(Duration::from_secs(1)).await;
                 }
-                .await;
             }
         };
 

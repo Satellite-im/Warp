@@ -296,7 +296,7 @@ impl RootDocumentInner {
 
         root.request = Some(new_cid);
 
-        _ = self.set_root_document(root).await;
+        let _ = self.set_root_document(root).await;
     }
 
     async fn get_root_document(&self) -> Result<RootDocument, Error> {

@@ -414,14 +414,14 @@ impl FileTask {
                             path,
                             response,
                         } => {
-                            _ = response.send(self.put(&name, &path).await);
+                           let _ = response.send(self.put(&name, &path).await);
                         },
                         FileTaskCommand::PutBuffer {
                             name,
                             buffer,
                             response,
                         } => {
-                            _ = response.send(self.put_buffer(name, buffer));
+                            let _ = response.send(self.put_buffer(name, buffer));
                         },
                         FileTaskCommand::PutStream {
                             name,
@@ -429,7 +429,7 @@ impl FileTask {
                             stream,
                             response,
                         } => {
-                            _ = response.send(self.put_stream(&name, total_size, stream));
+                           let _ = response.send(self.put_stream(&name, total_size, stream));
                         },
                         #[cfg(not(target_arch = "wasm32"))]
                         FileTaskCommand::Get {
@@ -437,42 +437,42 @@ impl FileTask {
                             path,
                             response,
                         } => {
-                            _ = response.send(self.get(&name, &path));
+                            let _ = response.send(self.get(&name, &path));
                         },
                         FileTaskCommand::GetStream { name, response } => {
-                            _ = response.send(self.get_stream(&name));
+                            let _ = response.send(self.get_stream(&name));
                         },
                         FileTaskCommand::GetBuffer { name, response } => {
-                            _ = response.send(self.get_buffer(name));
+                            let _ = response.send(self.get_buffer(name));
                         },
                         FileTaskCommand::Remove {
                             name,
                             recursive,
                             response,
                         } => {
-                            _ = response.send(self.remove(&name, recursive).await);
+                            let _ = response.send(self.remove(&name, recursive).await);
                         },
                         FileTaskCommand::Rename {
                             current,
                             new,
                             response,
                         } => {
-                            _ = response.send(self.rename(&current, &new).await);
+                            let _ = response.send(self.rename(&current, &new).await);
                         },
                         FileTaskCommand::CreateDirectory {
                             name,
                             recursive,
                             response,
                         } => {
-                            _ = response.send(self.create_directory(&name, recursive).await);
+                            let _ = response.send(self.create_directory(&name, recursive).await);
                         },
                         FileTaskCommand::SyncRef { path, response } => {
-                            _ = response.send(self.sync_ref(&path));
+                            let _ = response.send(self.sync_ref(&path));
                         },
                     }
                 },
                 Some(_) = self.export_rx.next() => {
-                    _ = self.export().await;
+                    let _ = self.export().await;
                 }
                 Some(_) = self.signal_rx.next() => {
                     if let Err(_e) = self.export().await {
@@ -665,7 +665,7 @@ impl FileTask {
                 return;
             }
 
-            _ = export_tx.try_send(());
+            let _ = export_tx.try_send(());
 
             yield Progression::ProgressComplete {
                 name: name.to_string(),
@@ -821,7 +821,7 @@ impl FileTask {
 
             current_directory.add_item(file)?;
 
-            _ = export_tx.try_send(());
+            let _ = export_tx.try_send(());
 
             tx.emit(ConstellationEventKind::Uploaded {
                 filename: name.to_string(),
@@ -1041,7 +1041,7 @@ impl FileTask {
                 return;
             }
 
-            _ = export_tx.try_send(());
+            let _ = export_tx.try_send(());
 
             yield Progression::ProgressComplete {
                 name: name.to_string(),
@@ -1112,7 +1112,7 @@ impl FileTask {
 
         _remove(&self.ipfs, &directory, &item).await?;
 
-        _ = self.export().await;
+        let _ = self.export().await;
 
         self.constellation_tx
             .emit(ConstellationEventKind::Deleted {
@@ -1162,7 +1162,7 @@ impl FileTask {
 
         directory.add_directory(Directory::new(name))?;
 
-        _ = self.export().await;
+        let _ = self.export().await;
 
         Ok(())
     }
@@ -1201,7 +1201,7 @@ impl FileTask {
                 file.set_thumbnail_reference(&path.to_string());
             }
 
-            _ = export_tx.send(()).await;
+            let _ = export_tx.send(()).await;
 
             Ok(())
         }

@@ -266,7 +266,7 @@ impl RootDocument {
 
         document.resolve()?;
 
-        _ = futures::future::ready(self.friends.ok_or(Error::Other))
+        let _ = futures::future::ready(self.friends.ok_or(Error::Other))
             .and_then(|document| async move {
                 ipfs.get_dag(document)
                     .await
@@ -275,7 +275,7 @@ impl RootDocument {
             })
             .await;
 
-        _ = futures::future::ready(self.blocks.ok_or(Error::Other))
+        let _ = futures::future::ready(self.blocks.ok_or(Error::Other))
             .and_then(|document| async move {
                 ipfs.get_dag(document)
                     .await
@@ -284,7 +284,7 @@ impl RootDocument {
             })
             .await;
 
-        _ = futures::future::ready(self.block_by.ok_or(Error::Other))
+        let _ = futures::future::ready(self.block_by.ok_or(Error::Other))
             .and_then(|document| async move {
                 ipfs.get_dag(document)
                     .await
@@ -293,7 +293,7 @@ impl RootDocument {
             })
             .await;
 
-        _ = futures::future::ready(self.request.ok_or(Error::Other))
+        let _ = futures::future::ready(self.request.ok_or(Error::Other))
             .and_then(|document| async move {
                 ipfs.get_dag(document)
                     .await
@@ -302,7 +302,7 @@ impl RootDocument {
             })
             .await;
 
-        _ = futures::future::ready(self.conversations_keystore.ok_or(Error::Other))
+        let _ = futures::future::ready(self.conversations_keystore.ok_or(Error::Other))
             .and_then(|document| async move {
                 let map: BTreeMap<String, Cid> = ipfs.get_dag(document).deserialized().await?;
                 let mut resolved_map: BTreeMap<Uuid, _> = BTreeMap::new();
