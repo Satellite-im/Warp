@@ -1,5 +1,6 @@
 #[allow(unused_imports)]
 use futures::future::Abortable;
+use std::fmt::{Debug, Formatter};
 
 use futures::future::{AbortHandle, Aborted};
 use std::future::Future;
@@ -80,6 +81,12 @@ impl<T> Future for JoinHandle<T> {
 #[derive(Clone)]
 pub struct AbortableJoinHandle<T> {
     handle: Arc<InnerJoinHandle<T>>,
+}
+
+impl<T> Debug for AbortableJoinHandle<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AbortableJoinHandle").finish()
+    }
 }
 
 impl<T> From<JoinHandle<T>> for AbortableJoinHandle<T> {
