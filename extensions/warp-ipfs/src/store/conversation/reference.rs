@@ -1,9 +1,9 @@
 use crate::store::conversation::MessageDocument;
 use futures::stream::BoxStream;
-use futures::{stream, StreamExt};
+use futures::StreamExt;
 use indexmap::IndexMap;
 use ipld_core::cid::Cid;
-use rust_ipfs::{Ipfs, IpfsPath};
+use rust_ipfs::Ipfs;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use uuid::Uuid;
@@ -12,24 +12,16 @@ use warp::error::Error;
 //TODO: Implement a defragmentation for the references
 const REFERENCE_LENGTH: usize = 500;
 
-#[derive(Default, Debug, Serialize, Deserialize, Copy, Clone)]
+#[derive(Default, Debug, Serialize, Deserialize, Clone)]
 pub struct MessageReferenceList {
-    pub messages: Option<Cid>, // resolves to IndexMap<String, Option<Cid>>
-    pub next: Option<Cid>,     // resolves to MessageReferenceList
+    pub messages: IndexMap<String, Option<Cid>>,
+    pub next: Option<Cid>, // resolves to MessageReferenceList
 }
 
 impl MessageReferenceList {
     #[async_recursion::async_recursion]
     pub async fn insert(&mut self, ipfs: &Ipfs, message: &MessageDocument) -> Result<Cid, Error> {
-        let mut list_refs = match self.messages {
-            Some(cid) => {
-                ipfs.get_dag(cid)
-                    .timeout(Duration::from_secs(10))
-                    .deserialized::<IndexMap<String, Option<Cid>>>()
-                    .await?
-            }
-            None => IndexMap::new(),
-        };
+        let list_refs = &mut self.messages;
 
         //TODO: Might be worth to replace if it exist?
         if list_refs.contains_key(&message.id.to_string()) {
@@ -58,23 +50,12 @@ impl MessageReferenceList {
         let cid = ipfs.put_dag(message).await?;
         list_refs.insert(id, Some(cid));
 
-        let ref_cid = ipfs.put_dag(list_refs).await?;
-        self.messages.replace(ref_cid);
-
         Ok(cid)
     }
 
     #[async_recursion::async_recursion]
     pub async fn update(&mut self, ipfs: &Ipfs, message: &MessageDocument) -> Result<Cid, Error> {
-        let mut list_refs = match self.messages {
-            Some(cid) => {
-                ipfs.get_dag(cid)
-                    .timeout(Duration::from_secs(10))
-                    .deserialized::<IndexMap<String, Option<Cid>>>()
-                    .await?
-            }
-            None => IndexMap::new(),
-        };
+        let list_refs = &mut self.messages;
 
         let id = message.id.to_string();
 
@@ -104,32 +85,14 @@ impl MessageReferenceList {
         let cid = ipfs.put_dag(message).await?;
         msg_ref.replace(cid);
 
-        let ref_cid = ipfs.put_dag(list_refs).await?;
-        self.messages.replace(ref_cid);
-
         Ok(cid)
     }
 
     pub fn list(&self, ipfs: &Ipfs) -> BoxStream<'_, MessageDocument> {
-        let cid = match self.messages {
-            Some(cid) => cid,
-            None => return stream::empty().boxed(),
-        };
-
         let ipfs = ipfs.clone();
 
         let stream = async_stream::stream! {
-            let list = match ipfs
-                .get_dag(cid)
-                .timeout(Duration::from_secs(10))
-                .deserialized::<IndexMap<String, Option<Cid>>>()
-                .await
-            {
-                Ok(list) => list,
-                Err(_) => return
-            };
-
-            for message_cid in list.values() {
+            for message_cid in self.messages.values() {
                 let Some(cid) = message_cid else {
                     continue;
                 };
@@ -162,18 +125,25 @@ impl MessageReferenceList {
 
     #[async_recursion::async_recursion]
     pub async fn get(&self, ipfs: &Ipfs, message_id: Uuid) -> Result<MessageDocument, Error> {
-        let cid = self.messages.ok_or(Error::MessageNotFound)?;
+        if self.messages.is_empty() {
+            return Err(Error::MessageNotFound);
+        }
 
-        let path = IpfsPath::from(cid).sub_path(&message_id.to_string())?;
-
-        if let Ok(message_document) = ipfs
-            .get_dag(path)
-            .timeout(Duration::from_secs(10))
-            .deserialized()
-            .await
+        if let Some(cid) = self
+            .messages
+            .get(&message_id.to_string())
+            .copied()
+            .flatten()
         {
-            //We can ignore the error
-            return Ok(message_document);
+            if let Ok(message_document) = ipfs
+                .get_dag(cid)
+                .timeout(Duration::from_secs(10))
+                .deserialized()
+                .await
+            {
+                //We can ignore the error
+                return Ok(message_document);
+            }
         }
 
         let cid = self.next.ok_or(Error::MessageNotFound)?;
@@ -184,29 +154,27 @@ impl MessageReferenceList {
             .deserialized::<MessageReferenceList>()
             .await?;
 
-        return refs_list.get(ipfs, message_id).await;
+        refs_list.get(ipfs, message_id).await
     }
 
     #[async_recursion::async_recursion]
     pub async fn contains(&self, ipfs: &Ipfs, message_id: Uuid) -> bool {
-        let Some(cid) = self.messages else {
+        if self.messages.is_empty() {
             return false;
-        };
+        }
 
-        let Ok(list) = ipfs
-            .get_dag(cid)
-            .timeout(Duration::from_secs(10))
-            .deserialized::<IndexMap<String, Option<Cid>>>()
-            .await
-        else {
-            return false;
-        };
+        let list = &self.messages;
 
         let id = message_id.to_string();
 
+        // TODO: Maybe check the blockstore for the existence of the block itself?
         if list.contains_key(&id) && list.get(&id).map(Option::is_some).unwrap_or_default() {
             return true;
         }
+
+        let Some(cid) = self.next else {
+            return false;
+        };
 
         let Ok(refs_list) = ipfs
             .get_dag(cid)
@@ -222,18 +190,11 @@ impl MessageReferenceList {
 
     #[async_recursion::async_recursion]
     pub async fn count(&self, ipfs: &Ipfs) -> usize {
-        let Some(cid) = self.messages else {
+        if self.messages.is_empty() {
             return 0;
-        };
+        }
 
-        let Ok(list) = ipfs
-            .get_dag(cid)
-            .timeout(Duration::from_secs(10))
-            .deserialized::<IndexMap<String, Option<Cid>>>()
-            .await
-        else {
-            return 0;
-        };
+        let list = &self.messages;
 
         // Only account messages that have not been marked None in this reference
         let count = list.values().filter(|item| item.is_some()).count();
@@ -256,15 +217,13 @@ impl MessageReferenceList {
 
     #[async_recursion::async_recursion]
     pub async fn remove(&mut self, ipfs: &Ipfs, message_id: Uuid) -> Result<(), Error> {
-        let cid = self.messages.ok_or(Error::MessageNotFound)?;
+        if self.messages.is_empty() {
+            return Err(Error::MessageNotFound);
+        }
 
         let id = &message_id.to_string();
 
-        let mut list = ipfs
-            .get_dag(cid)
-            .local()
-            .deserialized::<IndexMap<String, Option<Cid>>>()
-            .await?;
+        let list = &mut self.messages;
 
         if let Some(item) = list.get_mut(id) {
             if item.is_none() {
@@ -272,10 +231,6 @@ impl MessageReferenceList {
             }
 
             item.take();
-
-            let cid = ipfs.put_dag(list).await?;
-            self.messages.replace(cid);
-
             return Ok(());
         }
 
