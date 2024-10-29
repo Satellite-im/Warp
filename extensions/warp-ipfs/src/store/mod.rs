@@ -1,3 +1,4 @@
+pub mod community;
 pub mod conversation;
 pub mod discovery;
 pub mod document;
@@ -11,11 +12,13 @@ pub mod phonebook;
 pub mod queue;
 
 use chrono::{DateTime, Utc};
+use community::CommunityDocument;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use uuid::Uuid;
 
+use crate::store::community::CommunityInviteDocument;
 use ipfs::{libp2p::identity::KeyType, Keypair, PeerId, PublicKey};
 use warp::{
     crypto::{
@@ -50,6 +53,7 @@ pub const MAX_METADATA_ENTRIES: usize = 20;
 pub const MAX_THUMBNAIL_STREAM_SIZE: usize = 20 * 1024 * 1024;
 pub const MAX_CONVERSATION_ICON_SIZE: usize = 4 * 1024 * 1024;
 pub const MAX_CONVERSATION_BANNER_SIZE: usize = 8 * 1024 * 1024;
+pub const MAX_COMMUNITY_CHANNELS: usize = 20;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ConversationImageType {
@@ -78,6 +82,10 @@ pub(super) mod topics {
         }
         fn messaging(&self) -> String {
             format!("/id/{self}/messaging")
+        }
+
+        fn invites(&self) -> String {
+            format!("/id/{self}/messaging/invites")
         }
     }
 
@@ -281,6 +289,23 @@ pub enum ConversationEvents {
     DeleteConversation {
         conversation_id: Uuid,
     },
+
+    NewCommunityInvite {
+        community_id: Uuid,
+        community_document: CommunityDocument,
+        invite: CommunityInviteDocument,
+    },
+    UpdateCommunity {
+        community_id: Uuid,
+        community_document: CommunityDocument,
+    },
+}
+
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum CommunityEvents {
+    NewCommunity { community: CommunityDocument },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

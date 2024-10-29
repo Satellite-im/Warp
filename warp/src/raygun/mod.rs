@@ -1,9 +1,11 @@
+pub mod community;
 pub mod group;
 
 use crate::constellation::file::{File, FileType};
 use crate::constellation::{ConstellationProgressStream, Progression};
 use crate::crypto::DID;
 use crate::error::Error;
+use crate::raygun::community::RayGunCommunity;
 use crate::{Extension, SingleHandle};
 
 use derive_more::Display;
@@ -29,6 +31,9 @@ pub enum RayGunEventKind {
     ConversationArchived { conversation_id: Uuid },
     ConversationUnarchived { conversation_id: Uuid },
     ConversationDeleted { conversation_id: Uuid },
+    CommunityCreated { community_id: Uuid },
+    CommunityInvite { community_id: Uuid, invite_id: Uuid },
+    CommunityUpdate { community_id: Uuid },
 }
 
 pub type RayGunEventStream = BoxStream<'static, RayGunEventKind>;
@@ -1207,6 +1212,7 @@ impl Eq for Location {}
 pub trait RayGun:
     RayGunStream
     + RayGunGroupConversation
+    + RayGunCommunity
     + RayGunAttachment
     + RayGunEvents
     + RayGunConversationInformation

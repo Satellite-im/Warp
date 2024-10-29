@@ -19,7 +19,7 @@ use futures::{
     stream::BoxStream,
     SinkExt, Stream, StreamExt, TryFutureExt,
 };
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use ipld_core::cid::Cid;
 
 use rust_ipfs::{Ipfs, PeerId};
@@ -48,6 +48,19 @@ use crate::{
 };
 
 use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
+
+use crate::store::{
+    CommunityEvents, MAX_COMMUNITY_CHANNELS,
+    community::{
+        CommunityChannelDocument, CommunityDocument, CommunityInviteDocument, CommunityRoleDocument,
+    }
+};
+use chrono::{DateTime, Utc};
+use warp::raygun::community::{
+    CommunityChannelPermission, CommunityPermission, CommunityRole, CommunityRoles, RoleId,
+    Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType,
+    CommunityInvite, CommunityPermissions,
+};
 use warp::raygun::{ConversationImage, GroupPermissionOpt};
 use warp::{
     constellation::ConstellationProgressStream,
@@ -91,6 +104,7 @@ impl MessageStore {
         let mut inner = ConversationInner {
             ipfs: ipfs.clone(),
             conversation_task: HashMap::new(),
+            community_task: HashMap::new(),
             identity: identity.clone(),
             root,
             discovery,
@@ -876,6 +890,357 @@ impl MessageStore {
     }
 }
 
+impl MessageStore {
+    pub async fn create_community(&mut self, name: &str) -> Result<Community, Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.create_community(name).await
+    }
+    pub async fn delete_community(&mut self, community_id: Uuid) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.delete_community(community_id).await
+    }
+    pub async fn get_community(&mut self, community_id: Uuid) -> Result<Community, Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.get_community(community_id).await
+    }
+
+    pub async fn list_communities_joined(&self) -> Result<IndexSet<Uuid>, Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.list_communities_joined().await
+    }
+    pub async fn list_communities_invited_to(&self) -> Result<IndexSet<Uuid>, Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.list_communities_invited_to().await
+    }
+    pub async fn leave_community(&mut self, community_id: Uuid) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.leave_community(community_id).await
+    }
+
+    pub async fn get_community_icon(&self, community_id: Uuid) -> Result<ConversationImage, Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.get_community_icon(community_id).await
+    }
+    pub async fn get_community_banner(
+        &self,
+        community_id: Uuid,
+    ) -> Result<ConversationImage, Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.get_community_banner(community_id).await
+    }
+    pub async fn edit_community_icon(
+        &mut self,
+        community_id: Uuid,
+        location: Location,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.edit_community_icon(community_id, location).await
+    }
+    pub async fn edit_community_banner(
+        &mut self,
+        community_id: Uuid,
+        location: Location,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.edit_community_banner(community_id, location).await
+    }
+
+    pub async fn create_community_invite(
+        &mut self,
+        community_id: Uuid,
+        target_user: Option<DID>,
+        expiry: Option<DateTime<Utc>>,
+    ) -> Result<CommunityInvite, Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .create_community_invite(community_id, target_user, expiry)
+            .await
+    }
+    pub async fn delete_community_invite(
+        &mut self,
+        community_id: Uuid,
+        invite_id: Uuid,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.delete_community_invite(community_id, invite_id).await
+    }
+    pub async fn get_community_invite(
+        &mut self,
+        community_id: Uuid,
+        invite_id: Uuid,
+    ) -> Result<CommunityInvite, Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.get_community_invite(community_id, invite_id).await
+    }
+    pub async fn accept_community_invite(
+        &mut self,
+        community_id: Uuid,
+        invite_id: Uuid,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.accept_community_invite(community_id, invite_id).await
+    }
+    pub async fn edit_community_invite(
+        &mut self,
+        community_id: Uuid,
+        invite_id: Uuid,
+        invite: CommunityInvite,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .edit_community_invite(community_id, invite_id, invite)
+            .await
+    }
+
+    pub async fn create_community_role(
+        &mut self,
+        community_id: Uuid,
+        name: &str,
+    ) -> Result<CommunityRole, Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.create_community_role(community_id, name).await
+    }
+    pub async fn delete_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.delete_community_role(community_id, role_id).await
+    }
+    pub async fn get_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+    ) -> Result<CommunityRole, Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.get_community_role(community_id, role_id).await
+    }
+    pub async fn edit_community_role_name(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+        new_name: String,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .edit_community_role_name(community_id, role_id, new_name)
+            .await
+    }
+    pub async fn grant_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+        user: DID,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .grant_community_role(community_id, role_id, user)
+            .await
+    }
+    pub async fn revoke_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+        user: DID,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .revoke_community_role(community_id, role_id, user)
+            .await
+    }
+
+    pub async fn create_community_channel(
+        &mut self,
+        community_id: Uuid,
+        channel_name: &str,
+        channel_type: CommunityChannelType,
+    ) -> Result<CommunityChannel, Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .create_community_channel(community_id, channel_name, channel_type)
+            .await
+    }
+    pub async fn delete_community_channel(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .delete_community_channel(community_id, channel_id)
+            .await
+    }
+    pub async fn get_community_channel(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+    ) -> Result<CommunityChannel, Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.get_community_channel(community_id, channel_id).await
+    }
+
+    pub async fn edit_community_name(
+        &mut self,
+        community_id: Uuid,
+        name: &str,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.edit_community_name(community_id, name).await
+    }
+    pub async fn edit_community_description(
+        &mut self,
+        community_id: Uuid,
+        description: Option<String>,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .edit_community_description(community_id, description)
+            .await
+    }
+    pub async fn grant_community_permission(
+        &mut self,
+        community_id: Uuid,
+        permission: CommunityPermission,
+        role_id: RoleId,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .grant_community_permission(community_id, permission, role_id)
+            .await
+    }
+    pub async fn revoke_community_permission(
+        &mut self,
+        community_id: Uuid,
+        permission: CommunityPermission,
+        role_id: RoleId,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .revoke_community_permission(community_id, permission, role_id)
+            .await
+    }
+    pub async fn grant_community_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        permission: CommunityPermission,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .grant_community_permission_for_all(community_id, permission)
+            .await
+    }
+    pub async fn revoke_community_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        permission: CommunityPermission,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .revoke_community_permission_for_all(community_id, permission)
+            .await
+    }
+    pub async fn remove_community_member(
+        &mut self,
+        community_id: Uuid,
+        member: DID,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.remove_community_member(community_id, member).await
+    }
+
+    pub async fn edit_community_channel_name(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        name: &str,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .edit_community_channel_name(community_id, channel_id, name)
+            .await
+    }
+    pub async fn edit_community_channel_description(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        description: Option<String>,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .edit_community_channel_description(community_id, channel_id, description)
+            .await
+    }
+    pub async fn grant_community_channel_permission(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+        role_id: RoleId,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .grant_community_channel_permission(community_id, channel_id, permission, role_id)
+            .await
+    }
+    pub async fn revoke_community_channel_permission(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+        role_id: RoleId,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .revoke_community_channel_permission(community_id, channel_id, permission, role_id)
+            .await
+    }
+    pub async fn grant_community_channel_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .grant_community_channel_permission_for_all(community_id, channel_id, permission)
+            .await
+    }
+    pub async fn revoke_community_channel_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .revoke_community_channel_permission_for_all(community_id, channel_id, permission)
+            .await
+    }
+    pub async fn send_community_channel_message(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        message: &str,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .send_community_channel_message(community_id, channel_id, message)
+            .await
+    }
+    pub async fn delete_community_channel_message(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner
+            .delete_community_channel_message(community_id, channel_id, message_id)
+            .await
+    }
+}
+
 struct ConversationTask {
     inner: Arc<tokio::sync::RwLock<ConversationInner>>,
     ipfs: Ipfs,
@@ -965,6 +1330,7 @@ struct ConversationInnerMeta {
 struct ConversationInner {
     ipfs: Ipfs,
     conversation_task: HashMap<Uuid, ConversationInnerMeta>,
+    community_task: HashMap<Uuid, DropGuard>,
     root: RootDocumentMap,
     file: FileStore,
     event: EventSubscription<RayGunEventKind>,
@@ -1341,6 +1707,12 @@ impl ConversationInner {
     pub async fn set_keystore_map(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
         self.root.set_conversation_keystore_map(map).await
     }
+    pub async fn set_community_keystore_map(
+        &mut self,
+        map: BTreeMap<String, Cid>,
+    ) -> Result<(), Error> {
+        self.root.set_community_keystore_map(map).await
+    }
 
     pub async fn set_document<B: BorrowMut<ConversationDocument>>(
         &mut self,
@@ -1671,6 +2043,1266 @@ impl ConversationInner {
 
         Ok(())
     }
+
+}
+impl ConversationInner {
+    async fn create_community_task(&mut self, community_id: Uuid) -> Result<(), Error> {
+        let community = self.get_community_document(community_id).await?;
+
+        let main_topic = community.topic();
+        let event_topic = community.event_topic();
+        let request_topic = community.exchange_topic(&self.identity.did_key());
+
+        let messaging_stream = self
+            .ipfs
+            .pubsub_subscribe(main_topic)
+            .await?
+            .map(move |msg| ConversationStreamData::Message(community_id, msg))
+            .boxed();
+
+        let event_stream = self
+            .ipfs
+            .pubsub_subscribe(event_topic)
+            .await?
+            .map(move |msg| ConversationStreamData::Event(community_id, msg))
+            .boxed();
+
+        let request_stream = self
+            .ipfs
+            .pubsub_subscribe(request_topic)
+            .await?
+            .map(move |msg| ConversationStreamData::RequestResponse(community_id, msg))
+            .boxed();
+
+        let mut stream =
+            futures::stream::select_all([messaging_stream, event_stream, request_stream]);
+
+        let (mut tx, rx) = mpsc::channel(256);
+
+        let token = CancellationToken::new();
+        let drop_guard = token.clone().drop_guard();
+
+        self.executor.dispatch(async move {
+            loop {
+                tokio::select! {
+                    _ = token.cancelled() => {
+                        break;
+                    }
+                    Some(stream_data) = stream.next() => {
+                        if let Err(e) = tx.send(stream_data).await {
+                            if e.is_disconnected() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        _ = self
+            .command_tx
+            .send(MessagingCommand::Receiver { ch: rx })
+            .await;
+        self.community_task.insert(community_id, drop_guard);
+
+        tracing::info!(%community_id, "started conversation");
+        Ok(())
+    }
+
+    async fn get_community_document(&self, id: Uuid) -> Result<CommunityDocument, Error> {
+        self.root.get_community_document(id).await
+    }
+
+    pub async fn set_community_document<B: BorrowMut<CommunityDocument>>(
+        &mut self,
+        mut document: B,
+    ) -> Result<(), Error> {
+        let document = document.borrow_mut();
+        let keypair = self.root.keypair();
+
+        let did = keypair.to_did()?;
+        if document.creator.eq(&did) {
+            document.sign(keypair)?;
+        }
+
+        document.verify()?;
+
+        self.root.set_community_document(document).await?;
+        self.identity.export_root_document().await?;
+        Ok(())
+    }
+    pub async fn set_community_keystore(
+        &mut self,
+        id: Uuid,
+        document: Keystore,
+    ) -> Result<(), Error> {
+        if !self.contains_community(id).await {
+            return Err(Error::InvalidCommunity);
+        }
+
+        let mut map = self.root.get_community_keystore_map().await?;
+
+        let id = id.to_string();
+        let cid = self.ipfs.put_dag(document).await?;
+
+        map.insert(id, cid);
+
+        self.set_keystore_map(map).await
+    }
+    pub async fn contains_community(&self, id: Uuid) -> bool {
+        self.list_community_stream()
+            .await
+            .any(|community| async move { community.id() == id })
+            .await
+    }
+    pub async fn list_community_stream(&self) -> impl Stream<Item = CommunityDocument> + Unpin {
+        self.root.list_community_document().await
+    }
+    pub async fn broadcast_community_event(
+        &mut self,
+        community: &CommunityDocument,
+        event: ConversationEvents,
+        override_targets: IndexSet<DID>,
+    ) -> Result<(), Error> {
+        let mut targets = if override_targets.len() > 0 {
+            override_targets
+        } else {
+            let mut members = community.members.clone();
+            members.insert(community.creator.clone());
+            members
+        };
+
+        for target in &targets {
+            if !self.discovery.contains(target).await {
+                self.discovery.insert(target).await?;
+            }
+
+            let bytes = ecdh_encrypt(
+                self.root.keypair(),
+                Some(target),
+                serde_json::to_vec(&event)?,
+            )?;
+
+            let payload = PayloadBuilder::new(self.root.keypair(), bytes)
+                .from_ipfs(&self.ipfs)
+                .await?;
+
+            let peers = self.ipfs.pubsub_peers(Some(target.messaging())).await?;
+
+            let peer_id = target.to_peer_id()?;
+
+            if !peers.contains(&peer_id)
+                || (peers.contains(&peer_id)
+                    && self
+                        .ipfs
+                        .pubsub_publish(target.messaging(), payload.to_bytes()?)
+                        .await
+                        .is_err())
+            {
+                tracing::warn!(community_id = %community.id, "Unable to publish to topic. Queuing event");
+                self.queue_event(
+                    target.clone(),
+                    Queue::direct(
+                        peer_id,
+                        target.messaging(),
+                        payload.message().to_vec(),
+                    ),
+                )
+                .await;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ConversationInner {
+    pub async fn create_community(&mut self, mut name: &str) -> Result<Community, Error> {
+        let own_did = &self.identity.did_key();
+
+        name = name.trim();
+        if name.len() < 1 || name.len() > 255 {
+            return Err(Error::InvalidLength {
+                context: "name".into(),
+                current: name.len(),
+                minimum: Some(1),
+                maximum: Some(255),
+            });
+        }
+
+        let community = CommunityDocument::new(self.root.keypair(), name.to_owned())?;
+
+        let community_id = community.id;
+
+        self.set_community_document(community).await?;
+
+        let mut keystore = Keystore::new();
+        keystore.insert(self.root.keypair(), own_did, warp::crypto::generate::<64>())?;
+
+        self.set_community_keystore(community_id, keystore).await?;
+
+        self.create_community_task(community_id).await?;
+
+        let community = self.get_community_document(community_id).await?;
+
+        let event = serde_json::to_vec(&CommunityEvents::NewCommunity {
+            community: community.clone(),
+        })?;
+
+        self.event
+            .emit(RayGunEventKind::CommunityCreated { community_id })
+            .await;
+
+        Ok(Community::from(community))
+    }
+    pub async fn delete_community(&mut self, community_id: Uuid) -> Result<(), Error> {
+        let document = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if &document.creator != own_did {
+            return Err(Error::Unauthorized);
+        }
+
+        Err(Error::Unimplemented)
+    }
+    pub async fn get_community(&mut self, community_id: Uuid) -> Result<Community, Error> {
+        let doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if own_did != &doc.creator
+            && !doc.has_valid_invite(own_did)
+            && !doc.members.contains(own_did)
+        {
+            return Err(Error::Unauthorized);
+        }
+        Ok(doc.into())
+    }
+
+    pub async fn list_communities_joined(&self) -> Result<IndexSet<Uuid>, Error> {
+        Err(Error::Unimplemented)
+    }
+    pub async fn list_communities_invited_to(&self) -> Result<IndexSet<Uuid>, Error> {
+        Err(Error::Unimplemented)
+    }
+    pub async fn leave_community(&mut self, community_id: Uuid) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        community_doc.members.swap_remove(own_did);
+        community_doc.roles.iter_mut().for_each(|(_, r)| {
+            r.members.swap_remove(own_did);
+        });
+        self.set_community_document(community_doc.clone()).await?;
+
+        self.broadcast_community_event(
+            &community_doc,
+            ConversationEvents::UpdateCommunity {
+                community_id,
+                community_document: community_doc.clone(),
+            },
+            IndexSet::new()
+        )
+        .await?;
+
+        self.event
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
+            .await;
+
+        Ok(())
+    }
+
+    pub async fn get_community_icon(
+        &self,
+        _community_id: Uuid,
+    ) -> Result<ConversationImage, Error> {
+        Err(Error::Unimplemented)
+    }
+    pub async fn get_community_banner(
+        &self,
+        _community_id: Uuid,
+    ) -> Result<ConversationImage, Error> {
+        Err(Error::Unimplemented)
+    }
+    pub async fn edit_community_icon(
+        &mut self,
+        community_id: Uuid,
+        _location: Location,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::EditInfo) {
+            return Err(Error::Unauthorized);
+        }
+        Err(Error::Unimplemented)
+    }
+    pub async fn edit_community_banner(
+        &mut self,
+        community_id: Uuid,
+        _location: Location,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::EditInfo) {
+            return Err(Error::Unauthorized);
+        }
+        Err(Error::Unimplemented)
+    }
+
+    pub async fn create_community_invite(
+        &mut self,
+        community_id: Uuid,
+        target_user: Option<DID>,
+        expiry: Option<DateTime<Utc>>,
+    ) -> Result<CommunityInvite, Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManageInvites) {
+            return Err(Error::Unauthorized);
+        }
+
+        let invite_doc = CommunityInviteDocument::new(target_user.clone(), expiry);
+        community_doc
+            .invites
+            .insert(invite_doc.id.to_string(), invite_doc.clone());
+
+        self.set_community_document(&mut community_doc).await?;
+
+        if let Some(target) = target_user.as_ref() {
+            self.broadcast_community_event(
+                &community_doc,
+                ConversationEvents::NewCommunityInvite {
+                    community_id,
+                    community_document: community_doc.clone(),
+                    invite: invite_doc.clone(),
+                },
+                vec![target.clone()].into_iter().collect()
+            )
+            .await?;
+        }
+
+        self.broadcast_community_event(
+            &community_doc,
+            ConversationEvents::UpdateCommunity {
+                community_id,
+                community_document: community_doc.clone(),
+            },
+            IndexSet::new()
+        )
+        .await?;
+
+        self.event
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
+            .await;
+
+        self.event
+            .emit(RayGunEventKind::CommunityInvite {
+                community_id,
+                invite_id: invite_doc.id,
+            })
+            .await;
+
+        Ok(CommunityInvite::from(invite_doc))
+    }
+    pub async fn delete_community_invite(
+        &mut self,
+        community_id: Uuid,
+        invite_id: Uuid,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+
+        let mut is_targeting_self = false;
+        if let Some(invite) = community_doc.invites.get(&invite_id.to_string()) {
+            if let Some(target) = &invite.target_user {
+                if target == own_did {
+                    is_targeting_self = true;
+                }
+            }
+        }
+        if !is_targeting_self
+            && !community_doc.has_permission(own_did, &CommunityPermission::ManageInvites)
+        {
+            return Err(Error::Unauthorized);
+        }
+
+        community_doc.invites.swap_remove(&invite_id.to_string());
+        self.set_community_document(&mut community_doc).await?;
+
+        self.broadcast_community_event(
+            &community_doc,
+            ConversationEvents::UpdateCommunity {
+                community_id,
+                community_document: community_doc.clone(),
+            },
+            IndexSet::new()
+        )
+        .await?;
+
+        self.event
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
+            .await;
+        Ok(())
+    }
+    pub async fn get_community_invite(
+        &mut self,
+        community_id: Uuid,
+        invite_id: Uuid,
+    ) -> Result<CommunityInvite, Error> {
+        let community_doc = self.get_community_document(community_id).await?;
+        match community_doc.invites.get(&invite_id.to_string()) {
+            Some(invite_doc) => Ok(CommunityInvite::from(invite_doc.clone())),
+            None => Err(Error::CommunityInviteDoesntExist),
+        }
+    }
+    pub async fn accept_community_invite(
+        &mut self,
+        community_id: Uuid,
+        invite_id: Uuid,
+    ) -> Result<(), Error> {
+        let own_did = &self.identity.did_key();
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let invite_doc = community_doc
+            .invites
+            .get(&invite_id.to_string())
+            .ok_or(Error::CommunityInviteDoesntExist)?;
+
+        if let Some(target_user) = &invite_doc.target_user {
+            if own_did != target_user {
+                return Err(Error::CommunityInviteIncorrectUser);
+            }
+        }
+        if let Some(expiry) = &invite_doc.expiry {
+            if expiry < &Utc::now() {
+                return Err(Error::CommunityInviteExpired);
+            }
+        }
+
+        community_doc.members.insert(own_did.clone());
+        self.set_community_document(&mut community_doc).await?;
+
+        self.broadcast_community_event(
+            &community_doc,
+            ConversationEvents::UpdateCommunity {
+                community_id,
+                community_document: community_doc.clone(),
+            },
+            IndexSet::new()
+        )
+        .await?;
+
+        self.event
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
+            .await;
+        Ok(())
+    }
+    pub async fn edit_community_invite(
+        &mut self,
+        community_id: Uuid,
+        invite_id: Uuid,
+        invite: CommunityInvite,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManageInvites) {
+            return Err(Error::Unauthorized);
+        }
+
+        let invite_doc = community_doc
+            .invites
+            .get_mut(&invite_id.to_string())
+            .ok_or(Error::CommunityInviteDoesntExist)?;
+        invite_doc.target_user = invite.target_user().cloned();
+        invite_doc.expiry = invite.expiry();
+        self.set_community_document(&mut community_doc).await?;
+
+        self.broadcast_community_event(
+            &community_doc,
+            ConversationEvents::UpdateCommunity {
+                community_id,
+                community_document: community_doc.clone(),
+            },
+            IndexSet::new()
+        )
+        .await?;
+
+        self.event
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
+            .await;
+        Ok(())
+    }
+
+    pub async fn create_community_role(
+        &mut self,
+        community_id: Uuid,
+        name: &str,
+    ) -> Result<CommunityRole, Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManageRoles) {
+            return Err(Error::Unauthorized);
+        }
+
+        let role = CommunityRoleDocument::new(name.to_owned());
+        community_doc
+            .roles
+            .insert(role.id.to_string(), role.clone());
+        self.set_community_document(&mut community_doc).await?;
+
+        self.broadcast_community_event(
+            &community_doc,
+            ConversationEvents::UpdateCommunity {
+                community_id,
+                community_document: community_doc.clone(),
+            },
+            IndexSet::new()
+        )
+        .await?;
+
+        self.event
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
+            .await;
+        Ok(CommunityRole::from(role))
+    }
+    pub async fn delete_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManageRoles) {
+            return Err(Error::Unauthorized);
+        }
+
+        community_doc.roles.swap_remove(&role_id.to_string());
+        let _ = community_doc
+            .permissions
+            .iter_mut()
+            .map(|(_, roles)| roles.swap_remove(&role_id));
+        let _ = community_doc.channels.iter_mut().map(|(_, channel_doc)| {
+            channel_doc
+                .permissions
+                .iter_mut()
+                .map(|(_, roles)| roles.swap_remove(&role_id))
+        });
+        self.set_community_document(&mut community_doc).await?;
+
+        self.broadcast_community_event(
+            &community_doc,
+            ConversationEvents::UpdateCommunity {
+                community_id,
+                community_document: community_doc.clone(),
+            },
+            IndexSet::new()
+        )
+        .await?;
+
+        self.event
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
+            .await;
+        Ok(())
+    }
+    pub async fn get_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+    ) -> Result<CommunityRole, Error> {
+        let community_doc = self.get_community_document(community_id).await?;
+        let role = community_doc
+            .roles
+            .get(&role_id.to_string())
+            .ok_or(Error::CommunityRoleDoesntExist)?;
+        Ok(CommunityRole::from(role.clone()))
+    }
+    pub async fn edit_community_role_name(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+        new_name: String,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManageRoles) {
+            return Err(Error::Unauthorized);
+        }
+
+        community_doc
+            .roles
+            .get_mut(&role_id.to_string())
+            .ok_or(Error::CommunityRoleDoesntExist)?
+            .name = new_name;
+        self.set_community_document(&mut community_doc).await?;
+
+        self.broadcast_community_event(
+            &community_doc,
+            ConversationEvents::UpdateCommunity {
+                community_id,
+                community_document: community_doc.clone(),
+            },
+            IndexSet::new()
+        )
+        .await?;
+
+        self.event
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
+            .await;
+        Ok(())
+    }
+    pub async fn grant_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+        user: DID,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManageRoles) {
+            return Err(Error::Unauthorized);
+        }
+
+        community_doc
+            .roles
+            .get_mut(&role_id.to_string())
+            .ok_or(Error::CommunityRoleDoesntExist)?
+            .members
+            .insert(user);
+        self.set_community_document(&mut community_doc).await?;
+
+        self.broadcast_community_event(
+            &community_doc,
+            ConversationEvents::UpdateCommunity {
+                community_id,
+                community_document: community_doc.clone(),
+            },
+            IndexSet::new()
+        )
+        .await?;
+
+        self.event
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
+            .await;
+        Ok(())
+    }
+    pub async fn revoke_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+        user: DID,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManageRoles) {
+            return Err(Error::Unauthorized);
+        }
+
+        community_doc
+            .roles
+            .get_mut(&role_id.to_string())
+            .ok_or(Error::CommunityRoleDoesntExist)?
+            .members
+            .swap_remove(&user);
+        self.set_community_document(&mut community_doc).await?;
+
+        self.broadcast_community_event(
+            &community_doc,
+            ConversationEvents::UpdateCommunity {
+                community_id,
+                community_document: community_doc.clone(),
+            },
+            IndexSet::new()
+        )
+        .await?;
+
+        self.event
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
+            .await;
+
+        Ok(())
+    }
+
+    pub async fn create_community_channel(
+        &mut self,
+        community_id: Uuid,
+        channel_name: &str,
+        channel_type: CommunityChannelType,
+    ) -> Result<CommunityChannel, Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManageChannels) {
+            return Err(Error::Unauthorized);
+        }
+
+        if community_doc.channels.len() >= MAX_COMMUNITY_CHANNELS {
+            return Err(Error::CommunityChannelLimitReached);
+        }
+        let channel_doc =
+            CommunityChannelDocument::new(channel_name.to_owned(), None, channel_type);
+        community_doc
+            .channels
+            .insert(channel_doc.id.to_string(), channel_doc.clone());
+        self.set_community_document(&mut community_doc).await?;
+
+        self.broadcast_community_event(
+            &community_doc,
+            ConversationEvents::UpdateCommunity {
+                community_id,
+                community_document: community_doc.clone(),
+            },
+            IndexSet::new()
+        )
+        .await?;
+
+        self.event
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
+            .await;
+        Ok(CommunityChannel::from(channel_doc))
+    }
+    pub async fn delete_community_channel(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManageChannels) {
+            return Err(Error::Unauthorized);
+        }
+
+        community_doc.channels.swap_remove(&channel_id.to_string());
+        self.set_community_document(&mut community_doc).await?;
+
+        self.broadcast_community_event(
+            &community_doc,
+            ConversationEvents::UpdateCommunity {
+                community_id,
+                community_document: community_doc.clone(),
+            },
+            IndexSet::new()
+        )
+        .await?;
+
+        self.event
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
+            .await;
+
+        Ok(())
+    }
+    pub async fn get_community_channel(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+    ) -> Result<CommunityChannel, Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_channel_permission(
+            own_did,
+            &CommunityChannelPermission::ViewChannel,
+            channel_id,
+        ) {
+            return Err(Error::Unauthorized);
+        }
+
+        let channel_doc = community_doc
+            .channels
+            .get(&channel_id.to_string())
+            .ok_or(Error::CommunityChannelDoesntExist)?;
+        Ok(CommunityChannel::from(channel_doc.clone()))
+    }
+
+    pub async fn edit_community_name(
+        &mut self,
+        community_id: Uuid,
+        name: &str,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::EditInfo) {
+            return Err(Error::Unauthorized);
+        }
+
+        community_doc.name = name.to_owned();
+        self.set_community_document(&mut community_doc).await?;
+
+        self.broadcast_community_event(
+            &community_doc,
+            ConversationEvents::UpdateCommunity {
+                community_id,
+                community_document: community_doc.clone(),
+            },
+            IndexSet::new()
+        )
+        .await?;
+
+        self.event
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
+            .await;
+
+        Ok(())
+    }
+    pub async fn edit_community_description(
+        &mut self,
+        community_id: Uuid,
+        description: Option<String>,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::EditInfo) {
+            return Err(Error::Unauthorized);
+        }
+
+        community_doc.description = description;
+        self.set_community_document(&mut community_doc).await?;
+
+        self.broadcast_community_event(
+            &community_doc,
+            ConversationEvents::UpdateCommunity {
+                community_id,
+                community_document: community_doc.clone(),
+            },
+            IndexSet::new()
+        )
+        .await?;
+
+        self.event
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
+            .await;
+
+        Ok(())
+    }
+    pub async fn grant_community_permission(
+        &mut self,
+        community_id: Uuid,
+        permission: CommunityPermission,
+        role_id: RoleId,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManagePermissions) {
+            return Err(Error::Unauthorized);
+        }
+
+        match community_doc.permissions.get_mut(&permission) {
+            Some(authorized_roles) => {
+                authorized_roles.insert(role_id);
+            }
+            None => {
+                let mut roles = IndexSet::new();
+                roles.insert(role_id);
+                community_doc.permissions.insert(permission, roles);
+            }
+        }
+        self.set_community_document(&mut community_doc).await?;
+
+        self.broadcast_community_event(
+            &community_doc,
+            ConversationEvents::UpdateCommunity {
+                community_id,
+                community_document: community_doc.clone(),
+            },
+            IndexSet::new()
+        )
+        .await?;
+
+        self.event
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
+            .await;
+
+        Ok(())
+    }
+    pub async fn revoke_community_permission(
+        &mut self,
+        community_id: Uuid,
+        permission: CommunityPermission,
+        role_id: RoleId,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManagePermissions) {
+            return Err(Error::Unauthorized);
+        }
+
+        if let Some(authorized_roles) = community_doc.permissions.get_mut(&permission) {
+            authorized_roles.swap_remove(&role_id);
+        }
+        self.set_community_document(&mut community_doc).await?;
+
+        self.broadcast_community_event(
+            &community_doc,
+            ConversationEvents::UpdateCommunity {
+                community_id,
+                community_document: community_doc.clone(),
+            },
+            IndexSet::new()
+        )
+        .await?;
+
+        self.event
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
+            .await;
+
+        Ok(())
+    }
+    pub async fn grant_community_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        permission: CommunityPermission,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManagePermissions) {
+            return Err(Error::Unauthorized);
+        }
+
+        if community_doc.permissions.contains_key(&permission) {
+            community_doc.permissions.swap_remove(&permission);
+            self.set_community_document(&mut community_doc).await?;
+
+            self.broadcast_community_event(
+                &community_doc,
+                ConversationEvents::UpdateCommunity {
+                    community_id,
+                    community_document: community_doc.clone(),
+                },
+                IndexSet::new()
+            )
+            .await?;
+
+            self.event
+                .emit(RayGunEventKind::CommunityUpdate { community_id })
+                .await;
+        }
+        Ok(())
+    }
+    pub async fn revoke_community_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        permission: CommunityPermission,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManagePermissions) {
+            return Err(Error::Unauthorized);
+        }
+
+        community_doc
+            .permissions
+            .insert(permission, IndexSet::new());
+        self.set_community_document(&mut community_doc).await?;
+
+        self.broadcast_community_event(
+            &community_doc,
+            ConversationEvents::UpdateCommunity {
+                community_id,
+                community_document: community_doc.clone(),
+            },
+            IndexSet::new()
+        )
+        .await?;
+
+        self.event
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
+            .await;
+
+        Ok(())
+    }
+    pub async fn remove_community_member(
+        &mut self,
+        community_id: Uuid,
+        member: DID,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManageMembers) {
+            return Err(Error::Unauthorized);
+        }
+
+        community_doc.members.swap_remove(&member);
+        community_doc.roles.iter_mut().for_each(|(_, r)| {
+            r.members.swap_remove(&member);
+        });
+        self.set_community_document(&mut community_doc).await?;
+
+        self.broadcast_community_event(
+            &community_doc,
+            ConversationEvents::UpdateCommunity {
+                community_id,
+                community_document: community_doc.clone(),
+            },
+            IndexSet::new()
+        )
+        .await?;
+
+        self.event
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
+            .await;
+
+        Ok(())
+    }
+
+    pub async fn edit_community_channel_name(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        name: &str,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_channel_permission(
+            own_did,
+            &CommunityChannelPermission::EditInfo,
+            channel_id,
+        ) {
+            return Err(Error::Unauthorized);
+        }
+
+        let channel_doc = community_doc
+            .channels
+            .get_mut(&channel_id.to_string())
+            .ok_or(Error::CommunityChannelDoesntExist)?;
+        channel_doc.name = name.to_owned();
+        self.set_community_document(&mut community_doc).await?;
+
+        self.broadcast_community_event(
+            &community_doc,
+            ConversationEvents::UpdateCommunity {
+                community_id,
+                community_document: community_doc.clone(),
+            },
+            IndexSet::new()
+        )
+        .await?;
+
+        self.event
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
+            .await;
+
+        Ok(())
+    }
+    pub async fn edit_community_channel_description(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        description: Option<String>,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_channel_permission(
+            own_did,
+            &CommunityChannelPermission::EditInfo,
+            channel_id,
+        ) {
+            return Err(Error::Unauthorized);
+        }
+
+        let channel_doc = community_doc
+            .channels
+            .get_mut(&channel_id.to_string())
+            .ok_or(Error::CommunityChannelDoesntExist)?;
+        channel_doc.description = description;
+        self.set_community_document(&mut community_doc).await?;
+
+        self.broadcast_community_event(
+            &community_doc,
+            ConversationEvents::UpdateCommunity {
+                community_id,
+                community_document: community_doc.clone(),
+            },
+            IndexSet::new()
+        )
+        .await?;
+
+        self.event
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
+            .await;
+
+        Ok(())
+    }
+    pub async fn grant_community_channel_permission(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+        role_id: RoleId,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManagePermissions) {
+            return Err(Error::Unauthorized);
+        }
+
+        let channel_doc = community_doc
+            .channels
+            .get_mut(&channel_id.to_string())
+            .ok_or(Error::CommunityChannelDoesntExist)?;
+        match channel_doc.permissions.get_mut(&permission) {
+            Some(authorized_roles) => {
+                authorized_roles.insert(role_id);
+            }
+            None => {
+                let mut roles = IndexSet::new();
+                roles.insert(role_id);
+                channel_doc.permissions.insert(permission, roles);
+            }
+        }
+        self.set_community_document(&mut community_doc).await?;
+
+        self.broadcast_community_event(
+            &community_doc,
+            ConversationEvents::UpdateCommunity {
+                community_id,
+                community_document: community_doc.clone(),
+            },
+            IndexSet::new()
+        )
+        .await?;
+
+        self.event
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
+            .await;
+
+        Ok(())
+    }
+    pub async fn revoke_community_channel_permission(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+        role_id: RoleId,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManagePermissions) {
+            return Err(Error::Unauthorized);
+        }
+
+        let channel_doc = community_doc
+            .channels
+            .get_mut(&channel_id.to_string())
+            .ok_or(Error::CommunityChannelDoesntExist)?;
+        if let Some(authorized_roles) = channel_doc.permissions.get_mut(&permission) {
+            authorized_roles.swap_remove(&role_id);
+        }
+        self.set_community_document(&mut community_doc).await?;
+
+        self.broadcast_community_event(
+            &community_doc,
+            ConversationEvents::UpdateCommunity {
+                community_id,
+                community_document: community_doc.clone(),
+            },
+            IndexSet::new()
+        )
+        .await?;
+
+        self.event
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
+            .await;
+
+        Ok(())
+    }
+    pub async fn grant_community_channel_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManagePermissions) {
+            return Err(Error::Unauthorized);
+        }
+
+        let channel_doc = community_doc
+            .channels
+            .get_mut(&channel_id.to_string())
+            .ok_or(Error::CommunityChannelDoesntExist)?;
+        if channel_doc.permissions.contains_key(&permission) {
+            channel_doc.permissions.swap_remove(&permission);
+            self.set_community_document(&mut community_doc).await?;
+
+            self.broadcast_community_event(
+                &community_doc,
+                ConversationEvents::UpdateCommunity {
+                    community_id,
+                    community_document: community_doc.clone(),
+                },
+                IndexSet::new()
+            )
+            .await?;
+
+            self.event
+                .emit(RayGunEventKind::CommunityUpdate { community_id })
+                .await;
+        }
+        Ok(())
+    }
+    pub async fn revoke_community_channel_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_permission(own_did, &CommunityPermission::ManagePermissions) {
+            return Err(Error::Unauthorized);
+        }
+
+        let channel_doc = community_doc
+            .channels
+            .get_mut(&channel_id.to_string())
+            .ok_or(Error::CommunityChannelDoesntExist)?;
+        channel_doc.permissions.insert(permission, IndexSet::new());
+        self.set_community_document(&mut community_doc).await?;
+
+        self.broadcast_community_event(
+            &community_doc,
+            ConversationEvents::UpdateCommunity {
+                community_id,
+                community_document: community_doc.clone(),
+            },
+            IndexSet::new()
+        )
+        .await?;
+
+        self.event
+            .emit(RayGunEventKind::CommunityUpdate { community_id })
+            .await;
+
+        Ok(())
+    }
+    pub async fn send_community_channel_message(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        _message: &str,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_channel_permission(
+            own_did,
+            &CommunityChannelPermission::SendMessages,
+            channel_id,
+        ) {
+            return Err(Error::Unauthorized);
+        }
+
+        Err(Error::Unimplemented)
+    }
+    pub async fn delete_community_channel_message(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        _message_id: Uuid,
+    ) -> Result<(), Error> {
+        let mut community_doc = self.get_community_document(community_id).await?;
+        let own_did = &self.identity.did_key();
+        if !community_doc.has_channel_permission(
+            own_did,
+            &CommunityChannelPermission::DeleteMessages,
+            channel_id,
+        ) {
+            return Err(Error::Unauthorized);
+        }
+
+        Err(Error::Unimplemented)
+    }
 }
 
 async fn process_conversation(
@@ -1819,6 +3451,35 @@ async fn process_conversation(
             };
 
             this.delete_conversation(conversation_id, false).await?;
+        }
+        ConversationEvents::NewCommunityInvite {
+            community_id,
+            invite,
+            community_document,
+        } => {
+            if this.contains_community(community_id).await {
+                return Err(anyhow::anyhow!("Already apart of {community_id}").into());
+            }
+
+            //TODO: Process and store invite and signal to subscription event about new invite
+
+            this.set_community_document(community_document).await?;
+
+            this.event
+                .emit(RayGunEventKind::CommunityInvite {
+                    community_id,
+                    invite_id: invite.id,
+                })
+                .await;
+        }
+        ConversationEvents::UpdateCommunity {
+            community_id,
+            community_document,
+        } => {
+            this.set_community_document(community_document).await?;
+            this.event
+                .emit(RayGunEventKind::CommunityUpdate { community_id })
+                .await;
         }
     }
     Ok(())
