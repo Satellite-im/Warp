@@ -179,6 +179,8 @@ pub enum Error {
     CommunityChannelLimitReached,
     #[error("Cant revoke inexistent permission")]
     CantRevokeInexistentPermission,
+    #[error("Permission already granted")]
+    PermissionAlreadyGranted,
     #[error("Unable to change group status")]
     CannotChangeGroupStatus,
     #[error("Group name exceed maximum limit")]

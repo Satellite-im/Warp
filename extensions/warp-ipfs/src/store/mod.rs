@@ -12,7 +12,7 @@ pub mod phonebook;
 pub mod queue;
 
 use chrono::{DateTime, Utc};
-use community::CommunityDocument;
+use community::{CommunityChannelDocument, CommunityDocument, CommunityRoleDocument};
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -30,7 +30,7 @@ use warp::{
     },
     error::Error,
     multipass::identity::IdentityStatus,
-    raygun::{GroupPermissions, MessageEvent, PinState, ReactionState},
+    raygun::{community::{CommunityChannelPermission, CommunityPermission, RoleId}, GroupPermissions, MessageEvent, PinState, ReactionState},
 };
 
 use conversation::{message::MessageDocument, ConversationDocument};
@@ -61,6 +61,7 @@ pub(crate) enum ConversationImageType {
     Banner,
 }
 pub const MAX_CONVERSATION_DESCRIPTION: usize = 256;
+pub const MAX_COMMUNITY_DESCRIPTION: usize = 256;
 pub const MAX_REACTIONS: usize = 30;
 
 pub(super) mod topics {
@@ -396,6 +397,55 @@ pub enum MessagingEvents {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum CommunityMessagingEvents {
+    New {
+        message: MessageDocument,
+    },
+    Edit {
+        community_id: Uuid,
+        community_channel_id: Uuid,
+        message_id: Uuid,
+        modified: DateTime<Utc>,
+        lines: Vec<String>,
+        nonce: Vec<u8>,
+        signature: Vec<u8>,
+    },
+    Delete {
+        community_id: Uuid,
+        community_channel_id: Uuid,
+        message_id: Uuid,
+    },
+    Pin {
+        community_id: Uuid,
+        community_channel_id: Uuid,
+        member: DID,
+        message_id: Uuid,
+        state: PinState,
+    },
+    React {
+        community_id: Uuid,
+        community_channel_id: Uuid,
+        reactor: DID,
+        message_id: Uuid,
+        state: ReactionState,
+        emoji: String,
+    },
+    UpdateCommunity {
+        community: CommunityDocument,
+        kind: CommunityUpdateKind,
+    },
+    Event {
+        community_id: Uuid,
+        community_channel_id: Uuid,
+        member: DID,
+        event: MessageEvent,
+        cancelled: bool,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum ConversationUpdateKind {
     AddParticipant { did: DID },
@@ -409,6 +459,68 @@ pub enum ConversationUpdateKind {
     RemovedIcon,
     RemovedBanner,
     ChangeDescription { description: Option<String> },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum CommunityUpdateKind {
+    LeaveCommunity,
+    CreateCommunityInvite { invite: CommunityInviteDocument },
+    DeleteCommunityInvite { invite_id: Uuid },
+    AcceptCommunityInvite { invite_id: Uuid },
+    EditCommunityInvite { invite_id: Uuid },
+    CreateCommunityRole { role: CommunityRoleDocument },
+    DeleteCommunityRole { role_id: RoleId },
+    EditCommunityRole { role_id: RoleId },
+    GrantCommunityRole { role_id: RoleId, user: DID },
+    RevokeCommunityRole { role_id: RoleId, user: DID },
+    CreateCommunityChannel { channel: CommunityChannelDocument },
+    DeleteCommunityChannel { channel_id: Uuid },
+    EditCommunityName { name: String },
+    EditCommunityDescription { description: Option<String> },
+    GrantCommunityPermission { 
+        permission: CommunityPermission,
+        role_id: RoleId,
+    },
+    RevokeCommunityPermission { 
+        permission: CommunityPermission,
+        role_id: RoleId,
+    },
+    GrantCommunityPermissionForAll { 
+        permission: CommunityPermission,
+    },
+    RevokeCommunityPermissionForAll { 
+        permission: CommunityPermission,
+    },
+    RemoveCommunityMember { 
+        member: DID,
+    },
+    EditCommunityChannelName {
+        channel_id: Uuid,
+        name: String,
+    },
+    EditCommunityChannelDescription {
+        channel_id: Uuid,
+        description: Option<String>,
+    },
+    GrantCommunityChannelPermission {
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+        role_id: RoleId,
+    },
+    RevokeCommunityChannelPermission {
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+        role_id: RoleId,
+    },
+    GrantCommunityChannelPermissionForAll {
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+    },
+    RevokeCommunityChannelPermissionForAll {
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+    },
 }
 
 // Note that this are temporary

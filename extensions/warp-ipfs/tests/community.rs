@@ -465,6 +465,36 @@ mod test {
         Ok(())
     }
     #[async_test]
+    async fn edit_community_description_as_creator() -> anyhow::Result<()> {
+        let context = Some("test::edit_community_description_as_creator".into());
+        let account_opts = (None, None, context);
+        let mut accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let (_, did_b, _) = &accounts[1];
+        let did_b = did_b.clone();
+
+        let (instance_a, _, _) = &mut accounts[0];
+        let community = instance_a.create_community("Community0").await?;
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_b), None)
+            .await?;
+
+        let (instance_b, _, _) = &mut accounts[1];
+        instance_b
+            .accept_community_invite(community.id(), invite.id())
+            .await?;
+
+        let (instance_a, _, _) = &mut accounts[0];
+        let new_description = "desc".to_string();
+        instance_a.edit_community_description(community.id(), Some(new_description.clone())).await?;
+        
+        let (instance_b, _, _) = &mut accounts[1];
+        let community = instance_b.get_community(community.id()).await?;
+
+        assert_eq!(community.description(), Some(new_description).as_deref());
+
+        Ok(())
+    }
+    #[async_test]
     async fn unauthorized_edit_community_roles() -> anyhow::Result<()> {
         let context = Some("test::unauthorized_edit_community_roles".into());
         let account_opts = (None, None, context);

@@ -1,9 +1,10 @@
-use super::{topics::ConversationTopic, PeerIdExt};
+use super::{conversation::message::MessageDocument, topics::ConversationTopic, PeerIdExt};
 use crate::store::DidExt;
 use chrono::{DateTime, Utc};
+use ipld_core::cid::Cid;
 use core::hash::Hash;
 use indexmap::{IndexMap, IndexSet};
-use rust_ipfs::Keypair;
+use rust_ipfs::{Ipfs, Keypair};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warp::{
@@ -160,6 +161,48 @@ impl CommunityDocument {
         }
         Ok(())
     }
+}
+impl CommunityDocument {
+    pub async fn insert_message_document(
+        &mut self,
+        ipfs: &Ipfs,
+        message_document: &MessageDocument,
+    ) -> Result<Cid, Error> {
+        // let mut list = self.message_reference_list(ipfs).await?;
+        // let cid = list.insert(ipfs, message_document).await?;
+        // self.set_message_reference_list(ipfs, list).await?;
+        // Ok(cid)
+        Err(Error::Unimplemented)
+    }
+
+    pub async fn update_message_document(
+        &mut self,
+        ipfs: &Ipfs,
+        message_document: &MessageDocument,
+    ) -> Result<Cid, Error> {
+        // let mut list = self.message_reference_list(ipfs).await?;
+        // let cid = list.update(ipfs, message_document).await?;
+        // self.set_message_reference_list(ipfs, list).await?;
+        // Ok(cid)
+        Err(Error::Unimplemented)
+    }
+
+    pub async fn get_message_document(
+        &self,
+        ipfs: &Ipfs,
+        message_id: Uuid,
+    ) -> Result<MessageDocument, Error> {
+        // let refs = self.message_reference_list(ipfs).await?;
+        // refs.get(ipfs, message_id).await
+        Err(Error::Unimplemented)
+    }
+
+    pub async fn contains(&self, ipfs: &Ipfs, message_id: Uuid) -> Result<bool, Error> {
+        // let list = self.message_reference_list(ipfs).await?;
+        // Ok(list.contains(ipfs, message_id).await)
+        Err(Error::Unimplemented)
+    }
+
 }
 impl CommunityDocument {
     pub fn new(keypair: &Keypair, name: String) -> Result<Self, Error> {

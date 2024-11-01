@@ -220,6 +220,11 @@ impl RootDocumentMap {
         inner.get_conversation_keystore(id).await
     }
 
+    pub async fn get_community_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
+        let inner = &*self.inner.read().await;
+        inner.get_community_keystore(id).await
+    }
+
     pub async fn set_conversation_keystore_map(
         &self,
         document: BTreeMap<String, Cid>,
@@ -946,6 +951,23 @@ impl RootDocumentInner {
         let document = self.get_root_document().await?;
 
         let cid = match document.conversations_keystore {
+            Some(cid) => cid,
+            None => return Ok(Keystore::new()),
+        };
+
+        let path = IpfsPath::from(cid).sub_path(&id.to_string())?;
+        self.ipfs
+            .get_dag(path)
+            .local()
+            .deserialized()
+            .await
+            .map_err(Error::from)
+    }
+
+    async fn get_community_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
+        let document = self.get_root_document().await?;
+
+        let cid = match document.communities_keystore {
             Some(cid) => cid,
             None => return Ok(Keystore::new()),
         };

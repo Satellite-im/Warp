@@ -42,7 +42,7 @@ impl CommunityRole {
     }
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommunityInvite {
     id: Uuid,
     target_user: Option<DID>,
@@ -163,7 +163,7 @@ impl Community {
     }
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommunityChannel {
     id: Uuid,
     name: String,

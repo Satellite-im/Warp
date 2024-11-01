@@ -8,6 +8,7 @@ use crate::error::Error;
 use crate::raygun::community::RayGunCommunity;
 use crate::{Extension, SingleHandle};
 
+use community::{CommunityChannel, CommunityChannelPermission, CommunityInvite, CommunityPermission, CommunityRole, RoleId};
 use derive_more::Display;
 use futures::stream::BoxStream;
 
@@ -114,6 +115,130 @@ pub enum MessageEventKind {
         added: Vec<(DID, GroupPermission)>,
         removed: Vec<(DID, GroupPermission)>,
     },
+    CommunityEventReceived {
+        community_id: Uuid,
+        community_channel_id: Uuid,
+        did_key: DID,
+        event: MessageEvent,
+    },
+    CommunityEventCancelled {
+        community_id: Uuid,
+        community_channel_id: Uuid,
+        did_key: DID,
+        event: MessageEvent,
+    },
+    LeftCommunity {
+        community_id: Uuid,
+    },
+    CreatedCommunityInvite {
+        community_id: Uuid,
+        invite: CommunityInvite,
+    },
+    DeletedCommunityInvite {
+        community_id: Uuid,
+        invite_id: Uuid,
+    },
+    AcceptedCommunityInvite {
+        community_id: Uuid,
+        invite_id: Uuid,
+    },
+    EditedCommunityInvite {
+        community_id: Uuid,
+        invite_id: Uuid,
+    },
+    CreatedCommunityRole {
+        community_id: Uuid,
+        role: CommunityRole,
+    },
+    DeletedCommunityRole {
+        community_id: Uuid,
+        role_id: Uuid,
+    },
+    EditedCommunityRole {
+        community_id: Uuid,
+        role_id: Uuid,
+    },
+    GrantedCommunityRole {
+        community_id: Uuid,
+        role_id: Uuid,
+        user: DID,
+    },
+    RevokedCommunityRole {
+        community_id: Uuid,
+        role_id: Uuid,
+        user: DID,
+    },
+    CreatedCommunityChannel {
+        community_id: Uuid,
+        channel: CommunityChannel,
+    },
+    DeletedCommunityChannel {
+        community_id: Uuid,
+        channel_id: Uuid,
+    },
+    EditedCommunityName {
+        community_id: Uuid,
+        name: String,
+    },
+    EditedCommunityDescription {
+        community_id: Uuid,
+        description: Option<String>,
+    },
+    GrantedCommunityPermission {
+        community_id: Uuid,
+        permission: CommunityPermission,
+        role_id: RoleId,
+    },
+    RevokedCommunityPermission {
+        community_id: Uuid,
+        permission: CommunityPermission,
+        role_id: RoleId,
+    },
+    GrantedCommunityPermissionForAll {
+        community_id: Uuid,
+        permission: CommunityPermission,
+    },
+    RevokedCommunityPermissionForAll {
+        community_id: Uuid,
+        permission: CommunityPermission,
+    },
+    RemovedCommunityMember {
+        community_id: Uuid,
+        member: DID,
+    },
+    EditedCommunityChannelName {
+        community_id: Uuid,
+        channel_id: Uuid,
+        name: String,
+    },
+    EditedCommunityChannelDescription {
+        community_id: Uuid,
+        channel_id: Uuid,
+        description: Option<String>,
+    },
+    GrantedCommunityChannelPermission {
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+        role_id: RoleId,
+    },
+    RevokedCommunityChannelPermission {
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+        role_id: RoleId,
+    },
+    GrantedCommunityChannelPermissionForAll {
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+    },
+    RevokedCommunityChannelPermissionForAll {
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+    },
+
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

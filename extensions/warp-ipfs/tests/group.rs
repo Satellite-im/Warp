@@ -1615,7 +1615,7 @@ mod test {
                                 unarchived = true;
                             }
                             RayGunEventKind::ConversationDeleted { .. } => unreachable!(),
-                            RayGunEventKind::CommunityCreated { .. } => unreachable!(),
+                            _ => {}
                         }
                     }
                 }
