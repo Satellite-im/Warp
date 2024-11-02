@@ -25,7 +25,7 @@ pub struct GroupConversationDocument {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
-#[serde(untagged)]
+#[serde(tag = "type")]
 pub enum InnerDocument {
     Direct(DirectConversationDocument),
     Group(GroupConversationDocument),
