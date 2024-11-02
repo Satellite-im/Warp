@@ -793,11 +793,9 @@ impl ConversationTask {
     pub async fn set_document(&mut self) -> Result<(), Error> {
         let keypair = self.root.keypair();
         let did = keypair.to_did()?;
-        if matches!(self.document.conversation_type(), ConversationType::Group) {
-            if matches!(&self.document.inner, InnerDocument::Group(GroupConversationDocument { creator, ..}) if creator.eq(&did) )
-            {
-                self.document.sign(keypair)?;
-            }
+        if matches!(&self.document.inner, InnerDocument::Group(GroupConversationDocument { creator, ..}) if creator.eq(&did) )
+        {
+            self.document.sign(keypair)?;
         }
 
         self.document.verify()?;
@@ -813,11 +811,9 @@ impl ConversationTask {
     ) -> Result<(), Error> {
         let keypair = self.root.keypair();
         let did = keypair.to_did()?;
-        if matches!(document.conversation_type(), ConversationType::Group) {
-            if matches!(&document.inner, InnerDocument::Group(GroupConversationDocument { creator, ..}) if creator.eq(&did) )
-            {
-                document.sign(keypair)?;
-            }
+        if matches!(&document.inner, InnerDocument::Group(GroupConversationDocument { creator, ..}) if creator.eq(&did) )
+        {
+            document.sign(keypair)?;
         }
 
         document.verify()?;
@@ -953,7 +949,7 @@ impl ConversationTask {
                 removed,
             });
 
-        return self.publish(None, event, true).await;
+        self.publish(None, event, true).await
     }
 
     async fn set_favorite_conversation(&mut self, favorite: bool) -> Result<(), Error> {
@@ -3249,12 +3245,12 @@ async fn message_event(
                 .set_messages_cid(this.document.inner.messages_cid());
             conversation.favorite = this.document.favorite;
             conversation.archived = this.document.archived;
-            match (&mut conversation.inner, &this.document.inner) {
-                (
-                    InnerDocument::Group(ref mut document),
-                    InnerDocument::Group(ref document_right),
-                ) => document.excluded = document_right.excluded.clone(),
-                _ => {}
+            if let (
+                InnerDocument::Group(ref mut document),
+                InnerDocument::Group(ref document_right),
+            ) = (&mut conversation.inner, &this.document.inner)
+            {
+                document.excluded = document_right.excluded.clone();
             }
 
             match kind {
