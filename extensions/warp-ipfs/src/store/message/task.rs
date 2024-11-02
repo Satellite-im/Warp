@@ -41,6 +41,7 @@ use web_time::Instant;
 
 use crate::config;
 use crate::shuttle::message::client::MessageCommand;
+use crate::store::conversation::document::{GroupConversationDocument, InnerDocument};
 use crate::store::conversation::message::MessageDocument;
 use crate::store::discovery::Discovery;
 use crate::store::document::files::FileDocument;
@@ -791,10 +792,9 @@ impl ConversationTask {
 
     pub async fn set_document(&mut self) -> Result<(), Error> {
         let keypair = self.root.keypair();
-        if let Some(creator) = self.document.creator.as_ref() {
-            let did = keypair.to_did()?;
-            if creator.eq(&did)
-                && matches!(self.document.conversation_type(), ConversationType::Group)
+        let did = keypair.to_did()?;
+        if matches!(self.document.conversation_type(), ConversationType::Group) {
+            if matches!(&self.document.inner, InnerDocument::Group(GroupConversationDocument { creator, ..}) if creator.eq(&did) )
             {
                 self.document.sign(keypair)?;
             }
@@ -812,9 +812,10 @@ impl ConversationTask {
         mut document: ConversationDocument,
     ) -> Result<(), Error> {
         let keypair = self.root.keypair();
-        if let Some(creator) = document.creator.as_ref() {
-            let did = keypair.to_did()?;
-            if creator.eq(&did) && matches!(document.conversation_type(), ConversationType::Group) {
+        let did = keypair.to_did()?;
+        if matches!(document.conversation_type(), ConversationType::Group) {
+            if matches!(&document.inner, InnerDocument::Group(GroupConversationDocument { creator, ..}) if creator.eq(&did) )
+            {
                 document.sign(keypair)?;
             }
         }
@@ -910,36 +911,38 @@ impl ConversationTask {
         permissions: P,
     ) -> Result<(), Error> {
         let own_did = self.identity.did_key();
-        let Some(creator) = self.document.creator.as_ref() else {
-            return Err(Error::InvalidConversation);
-        };
-
-        if creator != &own_did {
-            return Err(Error::PublicKeyInvalid);
-        }
-
-        let permissions = match permissions.into() {
-            GroupPermissionOpt::Map(permissions) => permissions,
-            GroupPermissionOpt::Single((id, set)) => {
-                let permissions = self.document.permissions.clone();
-                {
-                    let permissions = self.document.permissions.entry(id).or_default();
-                    *permissions = set;
+        let (permissions, added, removed) = match self.document.inner {
+            InnerDocument::Direct(_) => return Err(Error::InvalidConversation),
+            InnerDocument::Group(ref mut document) => {
+                if document.creator != own_did {
+                    return Err(Error::PublicKeyInvalid);
                 }
-                permissions
+
+                let permissions = match permissions.into() {
+                    GroupPermissionOpt::Map(permissions) => permissions,
+                    GroupPermissionOpt::Single((id, set)) => {
+                        let permissions = document.permissions.clone();
+                        {
+                            let permissions = document.permissions.entry(id).or_default();
+                            *permissions = set;
+                        }
+                        permissions
+                    }
+                };
+
+                let (added, removed) = document.permissions.compare_with_new(&permissions);
+
+                document.permissions = permissions;
+
+                (document.permissions.clone(), added, removed)
             }
         };
 
-        let (added, removed) = self.document.permissions.compare_with_new(&permissions);
-
-        self.document.permissions = permissions;
         self.set_document().await?;
 
         let event = MessagingEvents::UpdateConversation {
             conversation: self.document.clone(),
-            kind: ConversationUpdateKind::ChangePermissions {
-                permissions: self.document.permissions.clone(),
-            },
+            kind: ConversationUpdateKind::ChangePermissions { permissions },
         };
 
         let _ = self
@@ -950,7 +953,7 @@ impl ConversationTask {
                 removed,
             });
 
-        self.publish(None, event, true).await
+        return self.publish(None, event, true).await;
     }
 
     async fn set_favorite_conversation(&mut self, favorite: bool) -> Result<(), Error> {
@@ -1792,69 +1795,64 @@ impl ConversationTask {
     }
 
     pub async fn add_participant(&mut self, did_key: &DID) -> Result<(), Error> {
-        if let ConversationType::Direct = self.document.conversation_type() {
-            return Err(Error::InvalidConversation);
+        match self.document.inner {
+            InnerDocument::Direct(_) => Err(Error::InvalidConversation),
+            InnerDocument::Group(ref mut document) => {
+                let own_did = &self.identity.did_key();
+
+                if !document
+                    .permissions
+                    .has_permission(own_did, GroupPermission::AddParticipants)
+                    && document.creator.ne(own_did)
+                {
+                    return Err(Error::PublicKeyInvalid);
+                }
+
+                if document.creator.eq(did_key) {
+                    return Err(Error::PublicKeyInvalid);
+                }
+
+                if self.root.is_blocked(did_key).await? {
+                    return Err(Error::PublicKeyIsBlocked);
+                }
+
+                if document.restrict.contains(did_key) {
+                    return Err(Error::PublicKeyIsBlocked);
+                }
+
+                if document.participants.contains(did_key) {
+                    return Err(Error::IdentityExist);
+                }
+
+                document.participants.push(did_key.clone());
+
+                self.set_document().await?;
+
+                let event = MessagingEvents::UpdateConversation {
+                    conversation: self.document.clone(),
+                    kind: ConversationUpdateKind::AddParticipant {
+                        did: did_key.clone(),
+                    },
+                };
+
+                let tx = self.event_broadcast.clone();
+                let _ = tx.send(MessageEventKind::RecipientAdded {
+                    conversation_id: self.conversation_id,
+                    recipient: did_key.clone(),
+                });
+
+                self.publish(None, event, true).await?;
+
+                let new_event = ConversationEvents::NewGroupConversation {
+                    conversation: self.document.clone(),
+                };
+
+                self.send_single_conversation_event(did_key, new_event)
+                    .await?;
+                if let Err(_e) = self.request_key(did_key).await {}
+                Ok(())
+            }
         }
-        assert_eq!(self.document.conversation_type(), ConversationType::Group);
-
-        let Some(creator) = self.document.creator.clone() else {
-            return Err(Error::InvalidConversation);
-        };
-
-        let own_did = &self.identity.did_key();
-
-        if !self
-            .document
-            .permissions
-            .has_permission(own_did, GroupPermission::AddParticipants)
-            && creator.ne(own_did)
-        {
-            return Err(Error::PublicKeyInvalid);
-        }
-
-        if creator.eq(did_key) {
-            return Err(Error::PublicKeyInvalid);
-        }
-
-        if self.root.is_blocked(did_key).await? {
-            return Err(Error::PublicKeyIsBlocked);
-        }
-
-        if self.document.restrict.contains(did_key) {
-            return Err(Error::PublicKeyIsBlocked);
-        }
-
-        if self.document.recipients.contains(did_key) {
-            return Err(Error::IdentityExist);
-        }
-
-        self.document.recipients.push(did_key.clone());
-
-        self.set_document().await?;
-
-        let event = MessagingEvents::UpdateConversation {
-            conversation: self.document.clone(),
-            kind: ConversationUpdateKind::AddParticipant {
-                did: did_key.clone(),
-            },
-        };
-
-        let tx = self.event_broadcast.clone();
-        let _ = tx.send(MessageEventKind::RecipientAdded {
-            conversation_id: self.conversation_id,
-            recipient: did_key.clone(),
-        });
-
-        self.publish(None, event, true).await?;
-
-        let new_event = ConversationEvents::NewGroupConversation {
-            conversation: self.document.clone(),
-        };
-
-        self.send_single_conversation_event(did_key, new_event)
-            .await?;
-        if let Err(_e) = self.request_key(did_key).await {}
-        Ok(())
     }
 
     pub async fn remove_participant(
@@ -1862,137 +1860,126 @@ impl ConversationTask {
         did_key: &DID,
         broadcast: bool,
     ) -> Result<(), Error> {
-        if matches!(self.document.conversation_type(), ConversationType::Direct) {
-            return Err(Error::InvalidConversation);
+        match self.document.inner {
+            InnerDocument::Direct(_) => Err(Error::InvalidConversation),
+            InnerDocument::Group(ref mut document) => {
+                let own_did = &self.identity.did_key();
+
+                if document.creator.ne(own_did) {
+                    return Err(Error::PublicKeyInvalid);
+                }
+
+                if document.creator.eq(did_key) {
+                    return Err(Error::PublicKeyInvalid);
+                }
+
+                if !document.participants.contains(did_key) {
+                    return Err(Error::IdentityDoesntExist);
+                }
+
+                document.participants.retain(|did| did.ne(did_key));
+                self.set_document().await?;
+
+                let event = MessagingEvents::UpdateConversation {
+                    conversation: self.document.clone(),
+                    kind: ConversationUpdateKind::RemoveParticipant {
+                        did: did_key.clone(),
+                    },
+                };
+
+                let tx = self.event_broadcast.clone();
+                let _ = tx.send(MessageEventKind::RecipientRemoved {
+                    conversation_id: self.conversation_id,
+                    recipient: did_key.clone(),
+                });
+
+                self.publish(None, event, true).await?;
+
+                if broadcast {
+                    let new_event = ConversationEvents::DeleteConversation {
+                        conversation_id: self.conversation_id,
+                    };
+
+                    self.send_single_conversation_event(did_key, new_event)
+                        .await?;
+                }
+
+                Ok(())
+            }
         }
-
-        let Some(creator) = self.document.creator.as_ref() else {
-            return Err(Error::InvalidConversation);
-        };
-
-        let own_did = &self.identity.did_key();
-
-        if creator.ne(own_did) {
-            return Err(Error::PublicKeyInvalid);
-        }
-
-        if creator.eq(did_key) {
-            return Err(Error::PublicKeyInvalid);
-        }
-
-        if !self.document.recipients.contains(did_key) {
-            return Err(Error::IdentityDoesntExist);
-        }
-
-        self.document.recipients.retain(|did| did.ne(did_key));
-        self.set_document().await?;
-
-        let event = MessagingEvents::UpdateConversation {
-            conversation: self.document.clone(),
-            kind: ConversationUpdateKind::RemoveParticipant {
-                did: did_key.clone(),
-            },
-        };
-
-        let tx = self.event_broadcast.clone();
-        let _ = tx.send(MessageEventKind::RecipientRemoved {
-            conversation_id: self.conversation_id,
-            recipient: did_key.clone(),
-        });
-
-        self.publish(None, event, true).await?;
-
-        if broadcast {
-            let new_event = ConversationEvents::DeleteConversation {
-                conversation_id: self.conversation_id,
-            };
-
-            self.send_single_conversation_event(did_key, new_event)
-                .await?;
-        }
-
-        Ok(())
     }
 
     pub async fn add_restricted(&mut self, did_key: &DID) -> Result<(), Error> {
-        if matches!(self.document.conversation_type(), ConversationType::Direct) {
-            return Err(Error::InvalidConversation);
+        match self.document.inner {
+            InnerDocument::Direct(_) => Err(Error::InvalidConversation),
+            InnerDocument::Group(ref mut document) => {
+                let own_did = &self.identity.did_key();
+
+                if document.creator.ne(own_did) {
+                    return Err(Error::PublicKeyInvalid);
+                }
+
+                if document.creator.eq(did_key) {
+                    return Err(Error::PublicKeyInvalid);
+                }
+
+                if !self.root.is_blocked(did_key).await? {
+                    return Err(Error::PublicKeyIsntBlocked);
+                }
+
+                debug_assert!(!document.participants.contains(did_key));
+                debug_assert!(!document.participants.contains(did_key));
+
+                document.restrict.push(did_key.clone());
+
+                self.set_document().await?;
+
+                let event = MessagingEvents::UpdateConversation {
+                    conversation: self.document.clone(),
+                    kind: ConversationUpdateKind::AddRestricted {
+                        did: did_key.clone(),
+                    },
+                };
+
+                self.publish(None, event, true).await
+            }
         }
-
-        let Some(creator) = self.document.creator.clone() else {
-            return Err(Error::InvalidConversation);
-        };
-
-        let own_did = &self.identity.did_key();
-
-        if creator.ne(own_did) {
-            return Err(Error::PublicKeyInvalid);
-        }
-
-        if creator.eq(did_key) {
-            return Err(Error::PublicKeyInvalid);
-        }
-
-        if !self.root.is_blocked(did_key).await? {
-            return Err(Error::PublicKeyIsntBlocked);
-        }
-
-        debug_assert!(!self.document.recipients.contains(did_key));
-        debug_assert!(!self.document.restrict.contains(did_key));
-
-        self.document.restrict.push(did_key.clone());
-
-        self.set_document().await?;
-
-        let event = MessagingEvents::UpdateConversation {
-            conversation: self.document.clone(),
-            kind: ConversationUpdateKind::AddRestricted {
-                did: did_key.clone(),
-            },
-        };
-
-        self.publish(None, event, true).await
     }
 
     pub async fn remove_restricted(&mut self, did_key: &DID) -> Result<(), Error> {
-        if matches!(self.document.conversation_type(), ConversationType::Direct) {
-            return Err(Error::InvalidConversation);
+        match self.document.inner {
+            InnerDocument::Direct(_) => Err(Error::InvalidConversation),
+            InnerDocument::Group(ref mut document) => {
+                let own_did = &self.identity.did_key();
+
+                if document.creator.ne(own_did) {
+                    return Err(Error::PublicKeyInvalid);
+                }
+
+                if document.creator.eq(did_key) {
+                    return Err(Error::PublicKeyInvalid);
+                }
+
+                if self.root.is_blocked(did_key).await? {
+                    return Err(Error::PublicKeyIsBlocked);
+                }
+
+                debug_assert!(document.restrict.contains(did_key));
+
+                document.restrict.retain(|restricted| restricted != did_key);
+
+                self.set_document().await?;
+
+                let event = MessagingEvents::UpdateConversation {
+                    conversation: self.document.clone(),
+                    kind: ConversationUpdateKind::RemoveRestricted {
+                        did: did_key.clone(),
+                    },
+                };
+
+                self.publish(None, event, true).await
+            }
         }
-
-        let Some(creator) = self.document.creator.clone() else {
-            return Err(Error::InvalidConversation);
-        };
-
-        let own_did = &self.identity.did_key();
-
-        if creator.ne(own_did) {
-            return Err(Error::PublicKeyInvalid);
-        }
-
-        if creator.eq(did_key) {
-            return Err(Error::PublicKeyInvalid);
-        }
-
-        if self.root.is_blocked(did_key).await? {
-            return Err(Error::PublicKeyIsBlocked);
-        }
-
-        debug_assert!(self.document.restrict.contains(did_key));
-
-        self.document
-            .restrict
-            .retain(|restricted| restricted != did_key);
-
-        self.set_document().await?;
-
-        let event = MessagingEvents::UpdateConversation {
-            conversation: self.document.clone(),
-            kind: ConversationUpdateKind::RemoveRestricted {
-                did: did_key.clone(),
-            },
-        };
-
-        self.publish(None, event, true).await
     }
 
     pub async fn update_conversation_name(&mut self, name: &str) -> Result<(), Error> {
@@ -2008,45 +1995,40 @@ impl ConversationTask {
             });
         }
 
-        if let ConversationType::Direct = self.document.conversation_type() {
-            return Err(Error::InvalidConversation);
+        match self.document.inner {
+            InnerDocument::Direct(_) => Err(Error::InvalidConversation),
+            InnerDocument::Group(ref mut document) => {
+                let own_did = &self.identity.did_key();
+
+                if !document
+                    .permissions
+                    .has_permission(own_did, GroupPermission::SetGroupName)
+                    && document.creator.ne(own_did)
+                {
+                    return Err(Error::PublicKeyInvalid);
+                }
+
+                self.document.name = (!name.is_empty()).then_some(name.to_string());
+
+                self.set_document().await?;
+
+                let new_name = self.document.name();
+
+                let event = MessagingEvents::UpdateConversation {
+                    conversation: self.document.clone(),
+                    kind: ConversationUpdateKind::ChangeName { name: new_name },
+                };
+
+                let _ = self
+                    .event_broadcast
+                    .send(MessageEventKind::ConversationNameUpdated {
+                        conversation_id: self.conversation_id,
+                        name: name.to_string(),
+                    });
+
+                self.publish(None, event, true).await
+            }
         }
-        assert_eq!(self.document.conversation_type(), ConversationType::Group);
-
-        let Some(creator) = self.document.creator.clone() else {
-            return Err(Error::InvalidConversation);
-        };
-
-        let own_did = &self.identity.did_key();
-
-        if !&self
-            .document
-            .permissions
-            .has_permission(own_did, GroupPermission::SetGroupName)
-            && creator.ne(own_did)
-        {
-            return Err(Error::PublicKeyInvalid);
-        }
-
-        self.document.name = (!name.is_empty()).then_some(name.to_string());
-
-        self.set_document().await?;
-
-        let new_name = self.document.name();
-
-        let event = MessagingEvents::UpdateConversation {
-            conversation: self.document.clone(),
-            kind: ConversationUpdateKind::ChangeName { name: new_name },
-        };
-
-        let _ = self
-            .event_broadcast
-            .send(MessageEventKind::ConversationNameUpdated {
-                conversation_id: self.conversation_id,
-                name: name.to_string(),
-            });
-
-        self.publish(None, event, true).await
     }
 
     pub async fn conversation_image(
@@ -2100,8 +2082,7 @@ impl ConversationTask {
 
         let own_did = self.identity.did_key();
 
-        if self.document.conversation_type() == ConversationType::Group
-            && !matches!(self.document.creator.as_ref(), Some(creator) if own_did.eq(creator))
+        if matches!(self.document.inner, InnerDocument::Group(ref document) if own_did.ne(&document.creator))
         {
             return Err(Error::InvalidConversation);
         }
@@ -2236,8 +2217,7 @@ impl ConversationTask {
     ) -> Result<(), Error> {
         let own_did = self.identity.did_key();
 
-        if self.document.conversation_type() == ConversationType::Group
-            && !matches!(self.document.creator.as_ref(), Some(creator) if own_did.eq(creator))
+        if matches!(self.document.inner, InnerDocument::Group(ref document) if own_did.ne(&document.creator))
         {
             return Err(Error::InvalidConversation);
         }
@@ -2283,11 +2263,8 @@ impl ConversationTask {
         let conversation_id = self.conversation_id;
         let own_did = &self.identity.did_key();
 
-        if self.document.conversation_type() == ConversationType::Group {
-            let Some(creator) = self.document.creator.as_ref() else {
-                return Err(Error::InvalidConversation);
-            };
-            if own_did != creator {
+        if let InnerDocument::Group(ref inner_document) = self.document.inner {
+            if own_did != &inner_document.creator {
                 return Err(Error::InvalidConversation); //TODO:
             }
         }
@@ -2872,64 +2849,65 @@ impl ConversationTask {
 
     async fn add_exclusion(&mut self, member: DID, signature: String) -> Result<(), Error> {
         let conversation_id = self.conversation_id;
-        if !matches!(self.document.conversation_type(), ConversationType::Group) {
-            return Err(anyhow::anyhow!("Can only leave from a group conversation").into());
-        }
+        match self.document.inner {
+            InnerDocument::Direct(_) => Err(Error::InvalidConversation),
+            InnerDocument::Group(ref mut document) => {
+                let own_did = self.identity.did_key();
 
-        let Some(creator) = self.document.creator.as_ref() else {
-            return Err(anyhow::anyhow!("Group conversation requires a creator").into());
-        };
-
-        let own_did = self.identity.did_key();
-
-        // Precaution
-        if member.eq(creator) {
-            return Err(anyhow::anyhow!("Cannot remove the creator of the group").into());
-        }
-
-        if !self.document.recipients.contains(&member) {
-            return Err(anyhow::anyhow!("{member} does not belong to {conversation_id}").into());
-        }
-
-        tracing::info!("{member} is leaving group conversation {conversation_id}");
-
-        if creator.eq(&own_did) {
-            self.remove_participant(&member, false).await?;
-        } else {
-            {
-                //Small validation context
-                let context = format!("exclude {}", member);
-                let signature = bs58::decode(&signature).into_vec()?;
-                verify_serde_sig(member.clone(), &context, &signature)?;
-            }
-
-            //Validate again since we have a permit
-            if !self.document.recipients.contains(&member) {
-                return Err(
-                    anyhow::anyhow!("{member} does not belong to {conversation_id}").into(),
-                );
-            }
-
-            let mut can_emit = false;
-
-            if let Entry::Vacant(entry) = self.document.excluded.entry(member.clone()) {
-                entry.insert(signature);
-                can_emit = true;
-            }
-            self.set_document().await?;
-            if can_emit {
-                if let Err(e) = self
-                    .event_broadcast
-                    .send(MessageEventKind::RecipientRemoved {
-                        conversation_id,
-                        recipient: member,
-                    })
-                {
-                    tracing::error!("Error broadcasting event: {e}");
+                // Precaution
+                if member.eq(&document.creator) {
+                    return Err(anyhow::anyhow!("Cannot remove the creator of the group").into());
                 }
+
+                if !document.participants.contains(&member) {
+                    return Err(
+                        anyhow::anyhow!("{member} does not belong to {conversation_id}").into(),
+                    );
+                }
+
+                tracing::info!("{member} is leaving group conversation {conversation_id}");
+
+                if document.creator.eq(&own_did) {
+                    self.remove_participant(&member, false).await?;
+                } else {
+                    {
+                        //Small validation context
+                        let context = format!("exclude {}", member);
+                        let signature = bs58::decode(&signature).into_vec()?;
+                        verify_serde_sig(member.clone(), &context, &signature)?;
+                    }
+
+                    //Validate again since we have a permit
+                    if !document.participants.contains(&member) {
+                        return Err(anyhow::anyhow!(
+                            "{member} does not belong to {conversation_id}"
+                        )
+                        .into());
+                    }
+
+                    let mut can_emit = false;
+
+                    if let Entry::Vacant(entry) = document.excluded.entry(member.clone()) {
+                        entry.insert(signature);
+                        can_emit = true;
+                    }
+                    self.set_document().await?;
+                    if can_emit {
+                        if let Err(e) =
+                            self.event_broadcast
+                                .send(MessageEventKind::RecipientRemoved {
+                                    conversation_id,
+                                    recipient: member,
+                                })
+                        {
+                            tracing::error!("Error broadcasting event: {e}");
+                        }
+                    }
+                }
+
+                Ok(())
             }
         }
-        Ok(())
     }
 }
 
@@ -3265,23 +3243,44 @@ async fn message_event(
             kind,
         } => {
             conversation.verify()?;
-            conversation.excluded = this.document.excluded.clone();
-            conversation.messages = this.document.messages;
+            // TODO: create function to merge metadata
+            conversation
+                .inner
+                .set_messages_cid(this.document.inner.messages_cid());
             conversation.favorite = this.document.favorite;
             conversation.archived = this.document.archived;
+            match (&mut conversation.inner, &this.document.inner) {
+                (
+                    InnerDocument::Group(ref mut document),
+                    InnerDocument::Group(ref document_right),
+                ) => document.excluded = document_right.excluded.clone(),
+                _ => {}
+            }
 
             match kind {
                 ConversationUpdateKind::AddParticipant { did } => {
-                    if !this.document.creator.as_ref().is_some_and(|c| c == sender)
-                        && !this
-                            .document
+                    let (external_inner, internal_inner) =
+                        match (&mut conversation.inner, &mut this.document.inner) {
+                            (
+                                InnerDocument::Group(ref mut document_left),
+                                InnerDocument::Group(ref mut document_right),
+                            ) => (document_left, document_right),
+                            _ => return Err(Error::InvalidConversation),
+                        };
+
+                    if external_inner.creator.ne(&internal_inner.creator) {
+                        return Err(Error::InvalidConversation);
+                    }
+
+                    if internal_inner.creator.ne(sender)
+                        && !internal_inner
                             .permissions
                             .has_permission(sender, GroupPermission::AddParticipants)
                     {
                         return Err(Error::Unauthorized);
                     }
 
-                    if this.document.recipients.contains(&did) {
+                    if this.document.recipients().contains(&did) {
                         return Ok(());
                     }
 
@@ -3303,20 +3302,34 @@ async fn message_event(
                     }
                 }
                 ConversationUpdateKind::RemoveParticipant { did } => {
-                    if !this.document.creator.as_ref().is_some_and(|c| c == sender) {
+                    let (external_inner, internal_inner) =
+                        match (&mut conversation.inner, &mut this.document.inner) {
+                            (
+                                InnerDocument::Group(ref mut document_left),
+                                InnerDocument::Group(ref mut document_right),
+                            ) => (document_left, document_right),
+                            _ => return Err(Error::InvalidConversation),
+                        };
+
+                    if external_inner.creator.ne(&internal_inner.creator) {
+                        return Err(Error::InvalidConversation);
+                    }
+
+                    if internal_inner.creator.ne(sender) {
                         return Err(Error::Unauthorized);
                     }
-                    if !this.document.recipients.contains(&did) {
+
+                    if !internal_inner.participants.contains(&did) {
                         return Err(Error::IdentityDoesntExist);
                     }
 
-                    this.document.permissions.shift_remove(&did);
+                    internal_inner.permissions.shift_remove(&did);
 
                     //Maybe remove participant from discovery?
 
-                    let can_emit = !this.document.excluded.contains_key(&did);
+                    let can_emit = !internal_inner.excluded.contains_key(&did);
 
-                    this.document.excluded.remove(&did);
+                    internal_inner.excluded.remove(&did);
 
                     this.replace_document(conversation).await?;
 
@@ -3333,9 +3346,21 @@ async fn message_event(
                     }
                 }
                 ConversationUpdateKind::ChangeName { name: Some(name) } => {
-                    if !this.document.creator.as_ref().is_some_and(|c| c == sender)
-                        && !this
-                            .document
+                    let (external_inner, internal_inner) =
+                        match (&mut conversation.inner, &mut this.document.inner) {
+                            (
+                                InnerDocument::Group(ref mut document_left),
+                                InnerDocument::Group(ref mut document_right),
+                            ) => (document_left, document_right),
+                            _ => return Err(Error::InvalidConversation),
+                        };
+
+                    if external_inner.creator.ne(&internal_inner.creator) {
+                        return Err(Error::InvalidConversation);
+                    }
+
+                    if internal_inner.creator.ne(sender)
+                        && !internal_inner
                             .permissions
                             .has_permission(sender, GroupPermission::SetGroupName)
                     {
@@ -3373,9 +3398,21 @@ async fn message_event(
                 }
 
                 ConversationUpdateKind::ChangeName { name: None } => {
-                    if !this.document.creator.as_ref().is_some_and(|c| c == sender)
-                        && !this
-                            .document
+                    let (external_inner, internal_inner) =
+                        match (&mut conversation.inner, &mut this.document.inner) {
+                            (
+                                InnerDocument::Group(ref mut document_left),
+                                InnerDocument::Group(ref mut document_right),
+                            ) => (document_left, document_right),
+                            _ => return Err(Error::InvalidConversation),
+                        };
+
+                    if external_inner.creator.ne(&internal_inner.creator) {
+                        return Err(Error::InvalidConversation);
+                    }
+
+                    if internal_inner.creator.ne(sender)
+                        && !internal_inner
                             .permissions
                             .has_permission(sender, GroupPermission::SetGroupName)
                     {
@@ -3396,20 +3433,48 @@ async fn message_event(
                 }
                 ConversationUpdateKind::AddRestricted { .. }
                 | ConversationUpdateKind::RemoveRestricted { .. } => {
-                    if !this.document.creator.as_ref().is_some_and(|c| c == sender) {
+                    let (external_inner, internal_inner) =
+                        match (&mut conversation.inner, &mut this.document.inner) {
+                            (
+                                InnerDocument::Group(ref mut document_left),
+                                InnerDocument::Group(ref mut document_right),
+                            ) => (document_left, document_right),
+                            _ => return Err(Error::InvalidConversation),
+                        };
+
+                    if external_inner.creator.ne(&internal_inner.creator) {
+                        return Err(Error::InvalidConversation);
+                    }
+
+                    if internal_inner.creator.ne(sender) {
                         return Err(Error::Unauthorized);
                     }
+
                     this.replace_document(conversation).await?;
                     //TODO: Maybe add a api event to emit for when blocked users are added/removed from the document
                     //      but for now, we can leave this as a silent update since the block list would be for internal handling for now
                 }
                 ConversationUpdateKind::ChangePermissions { permissions } => {
-                    if !this.document.creator.as_ref().is_some_and(|c| c == sender) {
+                    let (external_inner, internal_inner) =
+                        match (&mut conversation.inner, &mut this.document.inner) {
+                            (
+                                InnerDocument::Group(ref mut document_left),
+                                InnerDocument::Group(ref mut document_right),
+                            ) => (document_left, document_right),
+                            _ => return Err(Error::InvalidConversation),
+                        };
+
+                    if external_inner.creator.ne(&internal_inner.creator) {
+                        return Err(Error::InvalidConversation);
+                    }
+
+                    if internal_inner.creator.ne(sender) {
                         return Err(Error::Unauthorized);
                     }
 
-                    let (added, removed) = this.document.permissions.compare_with_new(&permissions);
-                    this.document.permissions = permissions;
+                    let (added, removed) =
+                        internal_inner.permissions.compare_with_new(&permissions);
+                    internal_inner.permissions = permissions;
                     this.replace_document(conversation).await?;
 
                     if let Err(e) = this.event_broadcast.send(

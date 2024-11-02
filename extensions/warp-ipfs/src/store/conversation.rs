@@ -1,9 +1,13 @@
+pub mod document;
 pub mod message;
 mod reference;
 
-use super::{keystore::Keystore, topics::ConversationTopic, verify_serde_sig, PeerIdExt};
+use super::{keystore::Keystore, topics::ConversationTopic, PeerIdExt};
 use crate::store::DidExt;
 
+use crate::store::conversation::document::{
+    DirectConversationDocument, GroupConversationDocument, InnerDocument,
+};
 use crate::store::conversation::message::MessageDocument;
 use crate::store::conversation::reference::MessageReferenceList;
 use chrono::{DateTime, Utc};
@@ -37,6 +41,41 @@ pub enum ConversationVersion {
     V0,
 }
 
+// #[derive(Debug, Clone, Serialize, Deserialize, Eq)]
+// pub struct ConversationDocument {
+//     pub id: Uuid,
+//     #[serde(default)]
+//     pub version: ConversationVersion,
+//     #[serde(skip_serializing_if = "Option::is_none")]
+//     pub name: Option<String>,
+//     #[serde(skip_serializing_if = "Option::is_none")]
+//     pub creator: Option<DID>,
+//     pub created: DateTime<Utc>,
+//     pub modified: DateTime<Utc>,
+//     pub permissions: GroupPermissions,
+//     pub conversation_type: ConversationType,
+//     pub recipients: Vec<DID>,
+//     #[serde(default)]
+//     pub favorite: bool,
+//     #[serde(default)]
+//     pub archived: bool,
+//     pub excluded: HashMap<DID, String>,
+//     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+//     pub restrict: Vec<DID>,
+//     #[serde(default)]
+//     pub deleted: bool,
+//     #[serde(skip_serializing_if = "Option::is_none")]
+//     pub messages: Option<Cid>,
+//     #[serde(skip_serializing_if = "Option::is_none")]
+//     pub icon: Option<Cid>,
+//     #[serde(skip_serializing_if = "Option::is_none")]
+//     pub banner: Option<Cid>,
+//     #[serde(skip_serializing_if = "Option::is_none")]
+//     pub description: Option<String>,
+//     #[serde(skip_serializing_if = "Option::is_none")]
+//     pub signature: Option<String>,
+// }
+
 #[derive(Debug, Clone, Serialize, Deserialize, Eq)]
 pub struct ConversationDocument {
     pub id: Uuid,
@@ -44,24 +83,14 @@ pub struct ConversationDocument {
     pub version: ConversationVersion,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub creator: Option<DID>,
     pub created: DateTime<Utc>,
     pub modified: DateTime<Utc>,
-    pub permissions: GroupPermissions,
-    pub conversation_type: ConversationType,
-    pub recipients: Vec<DID>,
     #[serde(default)]
     pub favorite: bool,
     #[serde(default)]
     pub archived: bool,
-    pub excluded: HashMap<DID, String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub restrict: Vec<DID>,
     #[serde(default)]
     pub deleted: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub messages: Option<Cid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<Cid>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -70,6 +99,8 @@ pub struct ConversationDocument {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
+
+    pub inner: InnerDocument,
 }
 
 impl Hash for ConversationDocument {
@@ -106,100 +137,21 @@ impl ConversationDocument {
     }
 
     pub fn recipients(&self) -> Vec<DID> {
-        let valid_keys = self
-            .excluded
-            .iter()
-            .filter_map(|(did, signature)| {
-                let context = format!("exclude {}", did);
-                let signature = bs58::decode(signature).into_vec().unwrap_or_default();
-                verify_serde_sig(did.clone(), &context, &signature)
-                    .map(|_| did)
-                    .ok()
-            })
-            .collect::<Vec<_>>();
-
-        self.recipients
-            .iter()
-            .filter(|recipient| !valid_keys.contains(recipient))
-            .cloned()
-            .collect()
+        self.inner.participants()
     }
 
     pub fn conversation_type(&self) -> ConversationType {
-        self.conversation_type
+        match self.inner {
+            InnerDocument::Group(_) => ConversationType::Group,
+            InnerDocument::Direct(_) => ConversationType::Direct,
+        }
     }
 }
 
 impl ConversationDocument {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        keypair: &Keypair,
-        name: Option<String>,
-        mut recipients: Vec<DID>,
-        restrict: Vec<DID>,
-        id: Option<Uuid>,
-        conversation_type: ConversationType,
-        permissions: GroupPermissions,
-        created: Option<DateTime<Utc>>,
-        modified: Option<DateTime<Utc>>,
-        creator: Option<DID>,
-        signature: Option<String>,
-    ) -> Result<Self, Error> {
-        let did = keypair.to_did()?;
-        let id = id.unwrap_or_else(Uuid::new_v4);
-
-        if !recipients.contains(&did) {
-            recipients.push(did.clone());
-        }
-
-        if recipients.is_empty() {
-            return Err(Error::CannotCreateConversation);
-        }
-
-        let messages = None;
-        let excluded = Default::default();
-
-        let created = created.unwrap_or(Utc::now());
-        let modified = modified.unwrap_or(created);
-
-        let mut document = Self {
-            id,
-            version: ConversationVersion::default(),
-            name,
-            recipients,
-            creator,
-            created,
-            modified,
-            favorite: false,
-            archived: false,
-            conversation_type,
-            permissions,
-            excluded,
-            messages,
-            signature,
-            restrict,
-            deleted: false,
-            icon: None,
-            banner: None,
-            description: None,
-        };
-
-        if document.signature.is_some() {
-            document.verify()?;
-        }
-
-        if let Some(creator) = document.creator.as_ref() {
-            if creator.eq(&did) {
-                document.sign(keypair)?;
-            }
-        }
-
-        Ok(document)
-    }
-
     pub fn new_direct(keypair: &Keypair, recipients: [DID; 2]) -> Result<Self, Error> {
         let did = keypair.to_did()?;
-        let conversation_id = Some(super::generate_shared_topic(
+        let conversation_id = super::generate_shared_topic(
             keypair,
             recipients
                 .iter()
@@ -208,21 +160,30 @@ impl ConversationDocument {
                 .first()
                 .ok_or(Error::Other)?,
             Some("direct-conversation"),
-        )?);
+        )?;
 
-        Self::new(
-            keypair,
-            None,
-            recipients.to_vec(),
-            vec![],
-            conversation_id,
-            ConversationType::Direct,
-            GroupPermissions::new(),
-            None,
-            None,
-            None,
-            None,
-        )
+        let inner = InnerDocument::Direct(DirectConversationDocument {
+            participants: recipients,
+            messages: None,
+        });
+
+        let document = Self {
+            id: conversation_id,
+            version: ConversationVersion::default(),
+            created: Utc::now(),
+            modified: Utc::now(),
+            favorite: false,
+            archived: false,
+            deleted: false,
+            icon: None,
+            banner: None,
+            description: None,
+            name: None,
+            inner,
+            signature: None,
+        };
+
+        Ok(document)
     }
 
     pub fn new_group(
@@ -232,80 +193,63 @@ impl ConversationDocument {
         restrict: &[DID],
         permissions: GroupPermissions,
     ) -> Result<Self, Error> {
-        let conversation_id = Some(Uuid::new_v4());
-        let creator = Some(keypair.to_did()?);
-        Self::new(
-            keypair,
-            name,
-            recipients.into_iter().collect(),
-            restrict.to_vec(),
-            conversation_id,
-            ConversationType::Group,
-            permissions,
-            None,
-            None,
+        let conversation_id = Uuid::new_v4();
+        let creator = keypair.to_did()?;
+
+        let mut participants = recipients.into_iter().collect::<Vec<_>>();
+
+        if !participants.contains(&creator) {
+            participants.push(creator.clone());
+        }
+
+        let inner = InnerDocument::Group(GroupConversationDocument {
             creator,
-            None,
-        )
+            participants,
+            messages: None,
+            permissions,
+            excluded: HashMap::default(),
+            restrict: restrict.to_vec(),
+        });
+
+        let mut document = Self {
+            id: conversation_id,
+            version: ConversationVersion::default(),
+            created: Utc::now(),
+            modified: Utc::now(),
+            favorite: false,
+            archived: false,
+            deleted: false,
+            icon: None,
+            banner: None,
+            description: None,
+            name,
+            inner,
+            signature: None,
+        };
+
+        document.sign(keypair)?;
+
+        Ok(document)
     }
 }
 
 impl ConversationDocument {
     pub fn sign(&mut self, keypair: &Keypair) -> Result<(), Error> {
-        if let ConversationType::Group = self.conversation_type() {
-            assert_eq!(self.conversation_type(), ConversationType::Group);
-            let Some(creator) = self.creator.clone() else {
-                return Err(Error::PublicKeyInvalid);
-            };
+        let conversation_id = self.id;
+        match self.inner {
+            InnerDocument::Direct(_) => {}
+            InnerDocument::Group(ref mut document) => {
+                if self.version != ConversationVersion::default() {
+                    self.version = ConversationVersion::default();
+                }
 
-            if self.version != ConversationVersion::default() {
-                self.version = ConversationVersion::default();
-            }
-
-            let construct = warp::crypto::hash::sha256_iter(
-                [
-                    Some(self.id().into_bytes().to_vec()),
-                    Some(creator.to_string().as_bytes().to_vec()),
-                    Some(Vec::from_iter(
-                        self.restrict
-                            .iter()
-                            .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
-                    )),
-                    self.icon.map(|s| s.hash().digest().to_vec()),
-                    self.banner.map(|s| s.hash().digest().to_vec()),
-                ]
-                .into_iter(),
-                None,
-            );
-
-            let signature = keypair.sign(&construct).expect("not RSA");
-            self.signature = Some(bs58::encode(signature).into_string());
-        }
-        Ok(())
-    }
-
-    pub fn verify(&self) -> Result<(), Error> {
-        if let ConversationType::Group = &self.conversation_type() {
-            assert_eq!(self.conversation_type(), ConversationType::Group);
-            let Some(creator) = &self.creator else {
-                return Err(Error::PublicKeyInvalid);
-            };
-
-            let creator_pk = creator.to_public_key()?;
-
-            let Some(signature) = &self.signature else {
-                return Err(Error::InvalidSignature);
-            };
-
-            let signature = bs58::decode(signature).into_vec()?;
-
-            let construct = match self.version {
-                ConversationVersion::V0 => warp::crypto::hash::sha256_iter(
+                let construct = warp::crypto::hash::sha256_iter(
                     [
-                        Some(self.id().into_bytes().to_vec()),
-                        Some(creator.to_string().as_bytes().to_vec()),
+                        Some(conversation_id.into_bytes().to_vec()),
+                        Some(document.creator.to_string().as_bytes().to_vec()),
                         Some(Vec::from_iter(
-                            self.restrict
+                            document
+                                .restrict
                                 .iter()
                                 .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
                         )),
@@ -314,18 +258,60 @@ impl ConversationDocument {
                     ]
                     .into_iter(),
                     None,
-                ),
-            };
+                );
 
-            if !creator_pk.verify(&construct, &signature) {
-                return Err(Error::InvalidSignature);
+                let signature = keypair.sign(&construct).expect("not RSA");
+                self.signature = Some(bs58::encode(signature).into_string());
+            }
+        }
+        Ok(())
+    }
+
+    pub fn verify(&self) -> Result<(), Error> {
+        match self.inner {
+            InnerDocument::Direct(_) => {}
+            InnerDocument::Group(ref document) => {
+                let creator_pk = document.creator.to_public_key()?;
+
+                let Some(signature) = &self.signature else {
+                    return Err(Error::InvalidSignature);
+                };
+
+                let signature = bs58::decode(signature).into_vec()?;
+
+                let construct = match self.version {
+                    ConversationVersion::V0 => warp::crypto::hash::sha256_iter(
+                        [
+                            Some(self.id().into_bytes().to_vec()),
+                            Some(document.creator.to_string().as_bytes().to_vec()),
+                            Some(Vec::from_iter(
+                                document
+                                    .restrict
+                                    .iter()
+                                    .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+                            )),
+                            self.icon.map(|s| s.hash().digest().to_vec()),
+                            self.banner.map(|s| s.hash().digest().to_vec()),
+                        ]
+                        .into_iter(),
+                        None,
+                    ),
+                };
+
+                if !creator_pk.verify(&construct, &signature) {
+                    return Err(Error::InvalidSignature);
+                }
             }
         }
         Ok(())
     }
 
     pub async fn message_reference_list(&self, ipfs: &Ipfs) -> Result<MessageReferenceList, Error> {
-        let refs = match self.messages {
+        let messages = match self.inner {
+            InnerDocument::Direct(ref document) => document.messages,
+            InnerDocument::Group(ref document) => document.messages,
+        };
+        let refs = match messages {
             Some(cid) => {
                 ipfs.get_dag(cid)
                     .timeout(Duration::from_secs(10))
@@ -350,7 +336,11 @@ impl ConversationDocument {
     ) -> Result<(), Error> {
         self.modified = Utc::now();
         let next_cid = ipfs.put_dag(list).await?;
-        self.messages.replace(next_cid);
+        let messages = match self.inner {
+            InnerDocument::Direct(ref mut document) => &mut document.messages,
+            InnerDocument::Group(ref mut document) => &mut document.messages,
+        };
+        messages.replace(next_cid);
         Ok(())
     }
 
@@ -654,15 +644,17 @@ impl From<&ConversationDocument> for Conversation {
         let mut conversation = Conversation::default();
         conversation.set_id(document.id);
         conversation.set_name(document.name.clone());
-        conversation.set_creator(document.creator.clone());
         conversation.set_recipients(document.recipients());
         conversation.set_created(document.created);
-        conversation.set_conversation_type(document.conversation_type);
-        conversation.set_permissions(document.permissions.clone());
+        conversation.set_conversation_type(document.conversation_type());
         conversation.set_modified(document.modified);
         conversation.set_favorite(document.favorite);
         conversation.set_description(document.description.clone());
         conversation.set_archived(document.archived);
+        if let InnerDocument::Group(ref document) = document.inner {
+            conversation.set_creator(Some(document.creator.clone()));
+            conversation.set_permissions(document.permissions.clone());
+        }
         conversation
     }
 }

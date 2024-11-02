@@ -48,6 +48,7 @@ use crate::{
 };
 
 use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
+use crate::store::conversation::document::{GroupConversationDocument, InnerDocument};
 use warp::raygun::{ConversationImage, GroupPermissionOpt};
 use warp::{
     constellation::ConstellationProgressStream,
@@ -1307,7 +1308,7 @@ impl ConversationInner {
             return Err(Error::InvalidConversation);
         }
 
-        conversation.messages.take();
+        conversation.inner.set_messages_cid(None);
         conversation.deleted = true;
 
         self.set_document(&mut conversation).await?;
@@ -1348,9 +1349,9 @@ impl ConversationInner {
     ) -> Result<(), Error> {
         let document = document.borrow_mut();
         let keypair = self.root.keypair();
-        if let Some(creator) = document.creator.as_ref() {
+        if let InnerDocument::Group(ref inner_document) = document.inner {
             let did = keypair.to_did()?;
-            if creator.eq(&did) && matches!(document.conversation_type(), ConversationType::Group) {
+            if inner_document.creator.eq(&did) {
                 document.sign(keypair)?;
             }
         }
@@ -1496,22 +1497,21 @@ impl ConversationInner {
 
             let mut can_broadcast = true;
 
-            if matches!(document_type.conversation_type(), ConversationType::Group) {
-                let creator = document_type
-                    .creator
-                    .as_ref()
-                    .ok_or(Error::InvalidConversation)?;
-
-                if creator.ne(own_did) {
+            if let InnerDocument::Group(ref inner_document) = document_type.inner {
+                if inner_document.creator.ne(own_did) {
                     can_broadcast = false;
                     let recipients = recipients
                         .iter()
                         .filter(|did| own_did.ne(did))
-                        .filter(|did| creator.ne(did))
+                        .filter(|did| inner_document.creator.ne(did))
                         .cloned()
                         .collect::<Vec<_>>();
                     if let Err(e) = self
-                        .leave_group_conversation(creator, &recipients, conversation_id)
+                        .leave_group_conversation(
+                            &inner_document.creator,
+                            &recipients,
+                            conversation_id,
+                        )
                         .await
                     {
                         tracing::error!(%conversation_id, error = %e, "Error leaving conversation");
@@ -1727,14 +1727,14 @@ async fn process_conversation(
                 return Ok(());
             }
 
-            if !conversation.recipients.contains(&did) {
+            if !conversation.recipients().contains(&did) {
                 tracing::warn!(%conversation_id, "was added to conversation but never was apart of the conversation.");
                 return Ok(());
             }
 
-            for recipient in conversation.recipients.iter() {
-                if !this.discovery.contains(recipient).await {
-                    let _ = this.discovery.insert(recipient).await;
+            for recipient in conversation.recipients() {
+                if !this.discovery.contains(&recipient).await {
+                    let _ = this.discovery.insert(&recipient).await;
                 }
             }
 
@@ -1748,7 +1748,7 @@ async fn process_conversation(
             conversation.verify()?;
 
             //TODO: Resolve message list
-            conversation.messages = None;
+            conversation.inner.set_messages_cid(None);
             conversation.archived = false;
             conversation.favorite = false;
 
@@ -1762,7 +1762,7 @@ async fn process_conversation(
 
             tracing::info!(%conversation_id, "{} conversation created", conversation_type);
 
-            for recipient in conversation.recipients.iter().filter(|d| did.ne(d)) {
+            for recipient in conversation.recipients().iter().filter(|d| did.ne(d)) {
                 if let Err(e) = this.request_key(conversation_id, recipient).await {
                     tracing::warn!(%conversation_id, error = %e, %recipient, "Failed to send exchange request");
                 }
@@ -1806,7 +1806,7 @@ async fn process_conversation(
                     if conversation.recipients().contains(&sender)
                         && matches!(conversation.conversation_type(), ConversationType::Direct)
                         || matches!(conversation.conversation_type(), ConversationType::Group)
-                            && matches!(&conversation.creator, Some(creator) if creator.eq(&sender)) =>
+                            && matches!(&conversation.inner, InnerDocument::Group(GroupConversationDocument { creator, .. }) if creator.eq(&sender)) =>
                 {
                     conversation
                 }
@@ -1850,15 +1850,15 @@ async fn process_identity_events(
 
             for conversation in list.iter().filter(|c| c.recipients().contains(&did)) {
                 let id = conversation.id();
-                match conversation.conversation_type() {
-                    ConversationType::Direct => {
+                match conversation.inner {
+                    InnerDocument::Direct(_) => {
                         if let Err(e) = this.delete_conversation(id, true).await {
                             tracing::warn!(conversation_id = %id, error = %e, "Failed to delete conversation");
                             continue;
                         }
                     }
-                    ConversationType::Group => {
-                        if conversation.creator != Some(own_did.clone()) {
+                    InnerDocument::Group(ref document) => {
+                        if document.creator.ne(&own_did) {
                             continue;
                         }
 
@@ -1906,19 +1906,16 @@ async fn process_identity_events(
         MultiPassEventKind::Unblocked { did } => {
             let list = this.list().await;
 
-            for conversation in list
+            for (id, _conversation) in list
                 .iter()
-                .filter(|c| {
-                    c.creator
-                        .as_ref()
-                        .map(|creator| own_did.eq(creator))
-                        .unwrap_or_default()
+                .filter_map(|c| match c.inner {
+                    InnerDocument::Group(ref document) if document.creator.eq(&own_did) => {
+                        Some((c.id, document))
+                    }
+                    _ => None,
                 })
-                .filter(|c| c.conversation_type() == ConversationType::Group)
-                .filter(|c| c.restrict.contains(&did))
+                .filter(|(_, c)| c.restrict.contains(&did))
             {
-                let id = conversation.id();
-
                 let conversation_meta = this
                     .conversation_task
                     .get(&id)
@@ -1945,15 +1942,15 @@ async fn process_identity_events(
 
             for conversation in list.iter().filter(|c| c.recipients().contains(&did)) {
                 let id = conversation.id();
-                match conversation.conversation_type() {
-                    ConversationType::Direct => {
+                match conversation.inner {
+                    InnerDocument::Direct(_) => {
                         if let Err(e) = this.delete_conversation(id, true).await {
                             tracing::warn!(conversation_id = %id, error = %e, "Failed to delete conversation");
                             continue;
                         }
                     }
-                    ConversationType::Group => {
-                        if conversation.creator != Some(own_did.clone()) {
+                    InnerDocument::Group(ref document) => {
+                        if document.creator.ne(&own_did) {
                             continue;
                         }
 
