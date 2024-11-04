@@ -2853,13 +2853,7 @@ async fn process_conversation(
                 return Err(anyhow::anyhow!("Already apart of {community_id}").into());
             }
 
-            let mut recipients = community_document.members.clone();
-            recipients.insert(community_document.creator.clone());
-            for (id, invite) in &community_document.invites {
-                if let Some(target) = &invite.target_user {
-                    recipients.insert(target.clone());
-                }
-            }
+            let mut recipients = community_document.participants().clone();
 
             for recipient in &recipients {
                 if !this.discovery.contains(recipient).await {

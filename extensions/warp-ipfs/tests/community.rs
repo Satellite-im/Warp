@@ -240,7 +240,7 @@ mod test {
         let role_as_seen_by_b = instance_b
             .get_community_role(community.id(), role.id())
             .await?;
-
+        
         assert_eq!(role_as_seen_by_a, role_as_seen_by_b);
 
         let invite_for_c = instance_b

@@ -873,7 +873,7 @@ impl CommunityTask {
 
         let community = &self.document;
 
-        if !community.members.contains(did) {
+        if !community.participants().contains(did) {
             //TODO: user is not a recipient of the conversation
             return Err(Error::PublicKeyInvalid);
         }
@@ -1878,7 +1878,7 @@ impl CommunityTask {
             .insert_message_document(&self.ipfs, &message)
             .await?;
 
-        let recipients = self.document.members.clone();
+        let recipients = self.document.participants().clone();
 
         self.set_document().await?;
 
@@ -1936,13 +1936,7 @@ impl CommunityTask {
 
         let mut can_publish = false;
 
-        let mut recipients = self.document.members.clone();
-        recipients.insert(self.document.creator.clone());
-        for (id, invite) in &self.document.invites {
-            if let Some(target) = &invite.target_user {
-                recipients.insert(target.clone());
-            }
-        }
+        let mut recipients = self.document.participants().clone();
 
         for recipient in recipients
             .iter()
@@ -2393,7 +2387,7 @@ async fn process_request_response_event(
             kind,
         } => match kind {
             ConversationRequestKind::Key => {
-                if !this.document.members.contains(&sender) {
+                if !this.document.participants().contains(&sender) {
                     tracing::warn!(%conversation_id, %sender, "apart of conversation");
                     return Err(Error::IdentityDoesntExist);
                 }
@@ -2466,7 +2460,7 @@ async fn process_request_response_event(
             kind,
         } => match kind {
             ConversationResponseKind::Key { key } => {
-                if !this.document.members.contains(&sender) {
+                if !this.document.participants().contains(&sender) {
                     return Err(Error::IdentityDoesntExist);
                 }
                 let keystore = &mut this.keystore;

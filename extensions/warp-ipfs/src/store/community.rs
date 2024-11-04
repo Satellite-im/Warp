@@ -274,6 +274,16 @@ impl From<CommunityDocument> for Community {
     }
 }
 impl CommunityDocument {
+    pub fn participants(&self) -> IndexSet<DID> {
+        let mut participants = self.members.clone();
+        participants.insert(self.creator.clone());
+        for (id, invite) in &self.invites {
+            if let Some(target) = &invite.target_user {
+                participants.insert(target.clone());
+            }
+        }
+        return participants;
+    }
     pub fn has_valid_invite(&self, user: &DID) -> bool {
         for (_, invite) in &self.invites {
             let is_expired = match &invite.expiry {
