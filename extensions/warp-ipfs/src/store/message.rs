@@ -2538,13 +2538,16 @@ impl ConversationInner {
 
         map.insert(id, cid);
 
-        self.set_keystore_map(map).await
+        self.set_community_keystore_map(map).await
     }
     pub async fn contains_community(&self, id: Uuid) -> bool {
         self.list_community_stream()
             .await
             .any(|community| async move { community.id() == id })
             .await
+    }
+    pub async fn list_community(&self) -> Vec<CommunityDocument> {
+        self.list_community_stream().await.collect::<Vec<_>>().await
     }
     pub async fn list_community_stream(&self) -> impl Stream<Item = CommunityDocument> + Unpin {
         self.root.list_community_document().await
@@ -2667,10 +2670,27 @@ impl ConversationInner {
     }
 
     pub async fn list_communities_joined(&self) -> Result<IndexSet<Uuid>, Error> {
-        Err(Error::Unimplemented)
+        let own_did = &self.identity.did_key();
+        Ok(self.list_community().await.iter().filter_map(|c| {
+            if &c.creator == own_did || c.members.contains(own_did) {
+                Some(c.id)
+            } else {
+                None
+            }
+        }).collect())
     }
     pub async fn list_communities_invited_to(&self) -> Result<IndexSet<Uuid>, Error> {
-        Err(Error::Unimplemented)
+        let own_did = &self.identity.did_key();
+        Ok(self.list_community().await.iter().filter_map(|c| {
+            for (id, invite) in &c.invites {
+                if let Some(target) = &invite.target_user {
+                    if target == own_did {
+                        return Some(c.id);
+                    }
+                }
+            }
+            None
+        }).collect())
     }
 }
 
