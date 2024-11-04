@@ -1038,7 +1038,7 @@ impl ConversationTask {
                     Err(Error::PublicKeyDoesntExist) => {
                         // If we are not able to get the latest key from the store, this is because we are still awaiting on the response from the key exchange
                         // So what we should so instead is set aside the payload until we receive the key exchange then attempt to process it again
-                        _ = self.request_key(&sender).await;
+                        _ = self.ping(&sender).await;
 
                         // Note: We can set aside the data without the payload being owned directly due to the data already been verified
                         //       so we can own the data directly without worrying about the lifetime
@@ -3344,8 +3344,8 @@ async fn message_event(
 
                     this.replace_document(conversation).await?;
 
-                    if let Err(e) = this.request_key(&did).await {
-                        tracing::error!(%conversation_id, error = %e, "error requesting key");
+                    if let Err(e) = this.ping(&did).await {
+                        tracing::error!(%conversation_id, error = %e, "error pinging {did}");
                     }
 
                     if let Err(e) = this.event_broadcast.send(MessageEventKind::RecipientAdded {
@@ -3703,7 +3703,9 @@ async fn process_request_response_event(
                     return Ok(());
                 }
 
-                _ = this.request_key(&sender).await
+                if let Err(e) = this.request_key(&sender).await {
+                    tracing::error!(%conversation_id, "unable to send key exchange request to {sender}");
+                }
             }
             _ => {
                 tracing::info!(%conversation_id, "Unimplemented/Unsupported Event");
