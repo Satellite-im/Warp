@@ -1045,6 +1045,16 @@ impl CommunityTask {
             },
         }, true).await?;
 
+        //TODO: implement non targeted invites 
+        if let Some(did_key) = target_user {
+            self.send_single_community_event(&did_key.clone(), ConversationEvents::NewCommunityInvite {
+                community_id: self.community_id,
+                community_document: self.document.clone(),
+                invite: invite_doc.clone(),
+            }).await?;
+            if let Err(_e) = self.request_key(&did_key.clone()).await {}
+        }
+
         Ok(CommunityInvite::from(invite_doc))
     }
     pub async fn delete_community_invite(
@@ -1926,9 +1936,15 @@ impl CommunityTask {
 
         let mut can_publish = false;
 
-        for recipient in self
-            .document
-            .members.clone()
+        let mut recipients = self.document.members.clone();
+        recipients.insert(self.document.creator.clone());
+        for (id, invite) in &self.document.invites {
+            if let Some(target) = &invite.target_user {
+                recipients.insert(target.clone());
+            }
+        }
+
+        for recipient in recipients
             .iter()
             .filter(|did| own_did.ne(did))
         {

@@ -2826,13 +2826,43 @@ async fn process_conversation(
             invite,
             community_document,
         } => {
+            let keypair = this.root.keypair();
+            let did = this.identity.did_key();
+
             if this.contains_community(community_id).await {
                 return Err(anyhow::anyhow!("Already apart of {community_id}").into());
             }
 
+            let mut recipients = community_document.members.clone();
+            recipients.insert(community_document.creator.clone());
+            for (id, invite) in &community_document.invites {
+                if let Some(target) = &invite.target_user {
+                    recipients.insert(target.clone());
+                }
+            }
+
+            for recipient in &recipients {
+                if !this.discovery.contains(recipient).await {
+                    let _ = this.discovery.insert(recipient).await;
+                }
+            }
+
+            let mut keystore = Keystore::new();
+            keystore.insert(keypair, &did, warp::crypto::generate::<64>())?;
+
             //TODO: Process and store invite and signal to subscription event about new invite
 
             this.set_community_document(community_document).await?;
+
+            this.set_community_keystore(community_id, keystore).await?;
+
+            this.create_community_task(community_id).await?;
+
+            for recipient in recipients.iter().filter(|d| did.ne(d)) {
+                if let Err(e) = this.request_key(community_id, recipient).await {
+                    tracing::warn!(%community_id, error = %e, %recipient, "Failed to send exchange request");
+                }
+            }
 
             this.event
                 .emit(RayGunEventKind::CommunityInvite {
