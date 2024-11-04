@@ -5,22 +5,14 @@ use std::{
 
 use rust_ipfs::Keypair;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use warp::{
     crypto::{cipher::Cipher, zeroize::Zeroize, DID},
     error::Error,
 };
 
-#[derive(Debug, Default, Serialize, Deserialize, Clone, Eq)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct Keystore {
-    conversation_id: Uuid,
     recipient_key: HashMap<DID, BTreeSet<KeyEntry>>,
-}
-
-impl PartialEq for Keystore {
-    fn eq(&self, other: &Self) -> bool {
-        self.conversation_id.eq(&other.conversation_id)
-    }
 }
 
 #[allow(dead_code)]
