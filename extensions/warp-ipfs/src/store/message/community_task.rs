@@ -74,6 +74,7 @@ type AttachmentOneshot = (MessageDocument, oneshot::Sender<Result<(), Error>>);
 use super::DownloadStream;
 
 #[allow(dead_code)]
+#[derive(Debug)]
 pub enum CommunityTaskCommand {
     LeaveCommunity {
         response: oneshot::Sender<Result<(), Error>>,
@@ -225,6 +226,10 @@ pub enum CommunityTaskCommand {
         channel_id: Uuid,
         message_id: Uuid,
         response: oneshot::Sender<Result<(), Error>>,
+    },
+
+    EventHandler {
+        response: oneshot::Sender<tokio::sync::broadcast::Sender<MessageEventKind>>,
     },
 }
 
@@ -705,6 +710,10 @@ impl CommunityTask {
                 let result = self.delete_community_channel_message(channel_id, message_id).await;
                 let _ = response.send(result);
             },
+            CommunityTaskCommand::EventHandler { response } => {
+                let sender = self.event_broadcast.clone();
+                let _ = response.send(sender);
+            }
         }
     }
 }

@@ -1,10 +1,11 @@
 mod common;
 #[cfg(test)]
 mod test {
-    use chrono::{Duration, Utc};
-    use warp::raygun::community::{
+    use std::time::Duration;
+    use futures::StreamExt;
+    use warp::raygun::{community::{
         Community, CommunityInvite, CommunityPermission, RayGunCommunity,
-    };
+    }, MessageEventKind};
 
     #[cfg(target_arch = "wasm32")]
     use wasm_bindgen_test::wasm_bindgen_test as async_test;
@@ -50,7 +51,7 @@ mod test {
             .create_community_invite(
                 community.id(),
                 Some(did_b),
-                Some(Utc::now() + Duration::days(1)),
+                Some(chrono::Utc::now() + chrono::Duration::days(1)),
             )
             .await?;
 
@@ -232,6 +233,26 @@ mod test {
             .grant_community_role(community.id(), role.id(), did_b.clone())
             .await
             .expect("user a should be able to grant role to user b");
+
+
+        let (instance_b, _, _) = &mut accounts[1];
+        let mut conversation_b = instance_b.get_community_stream(community.id()).await?;
+        
+        crate::common::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(MessageEventKind::GrantedCommunityRole {
+                    community_id,
+                    role_id,
+                    user,
+                }) = conversation_b.next().await
+                {
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        let (instance_a, _, _) = &mut accounts[0];
         let role_as_seen_by_a = instance_a
             .get_community_role(community.id(), role.id())
             .await?;

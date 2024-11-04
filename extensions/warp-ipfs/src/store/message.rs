@@ -175,6 +175,22 @@ impl MessageStore {
         })
     }
 
+    pub async fn get_community_stream(
+        &self,
+        community_id: Uuid,
+    ) -> Result<impl Stream<Item = MessageEventKind>, Error> {
+        let mut rx = self.subscribe_community(community_id).await?.subscribe();
+        Ok(async_stream::stream! {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => yield event,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    Err(_) => {}
+                };
+            }
+        })
+    }
+
     pub async fn get(&self, id: Uuid) -> Result<ConversationDocument, Error> {
         let inner = &*self.inner.read().await;
         inner.get(id).await
@@ -216,6 +232,14 @@ impl MessageStore {
     ) -> Result<tokio::sync::broadcast::Sender<MessageEventKind>, Error> {
         let inner = &mut *self.inner.write().await;
         inner.subscribe(id).await
+    }
+
+    pub async fn subscribe_community(
+        &self,
+        id: Uuid,
+    ) -> Result<tokio::sync::broadcast::Sender<MessageEventKind>, Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.subscribe_community(id).await
     }
 
     pub async fn create_conversation(&self, did: &DID) -> Result<Conversation, Error> {
@@ -2172,6 +2196,26 @@ impl ConversationInner {
             .command_tx
             .clone()
             .send(ConversationTaskCommand::EventHandler { response: tx })
+            .await;
+        let tx = rx.await.map_err(anyhow::Error::from)?;
+
+        Ok(tx)
+    }
+
+    pub async fn subscribe_community(
+        &mut self,
+        id: Uuid,
+    ) -> Result<tokio::sync::broadcast::Sender<MessageEventKind>, Error> {
+        let meta = self
+            .community_task
+            .get_mut(&id)
+            .ok_or(Error::InvalidCommunity)?;
+
+        let (tx, rx) = oneshot::channel();
+        let _ = meta
+            .command_tx
+            .clone()
+            .send(CommunityTaskCommand::EventHandler { response: tx })
             .await;
         let tx = rx.await.map_err(anyhow::Error::from)?;
 

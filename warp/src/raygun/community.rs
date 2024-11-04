@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::crypto::DID;
 use crate::raygun::{Error, Location};
 
-use super::ConversationImage;
+use super::{ConversationImage, MessageEventStream};
 
 pub type RoleId = Uuid;
 pub type CommunityRoles = IndexMap<RoleId, CommunityRole>;
@@ -248,6 +248,14 @@ pub enum CommunityChannelPermission {
 
 #[async_trait::async_trait]
 pub trait RayGunCommunity: Sync + Send {
+
+    async fn get_community_stream(
+        &mut self,
+        community_id: Uuid,
+    ) -> Result<MessageEventStream, Error> {
+        Err(Error::Unimplemented)
+    }
+
     async fn create_community(&mut self, _name: &str) -> Result<Community, Error> {
         Err(Error::Unimplemented)
     }

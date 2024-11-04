@@ -1673,6 +1673,16 @@ impl RayGunAttachment for WarpIpfs {
 
 #[async_trait::async_trait]
 impl RayGunCommunity for WarpIpfs {
+
+    async fn get_community_stream(
+        &mut self,
+        community_id: Uuid,
+    ) -> Result<MessageEventStream, Error> {
+        let store = self.messaging_store()?;
+        let stream = store.get_community_stream(community_id).await?;
+        Ok(stream.boxed())
+    }
+
     async fn create_community(&mut self, name: &str) -> Result<Community, Error> {
         self.messaging_store()?.create_community(name).await
     }

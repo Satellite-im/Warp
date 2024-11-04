@@ -571,6 +571,11 @@ where
     M: MultiPass,
     R: RayGun,
 {
+    async fn get_community_stream(&mut self, community_id: Uuid,
+    ) -> Result<MessageEventStream, Error> {
+        self.raygun.get_community_stream(community_id).await
+    }
+
     async fn create_community(&mut self, name: &str) -> Result<Community, Error> {
         self.raygun.create_community(name).await
     }
