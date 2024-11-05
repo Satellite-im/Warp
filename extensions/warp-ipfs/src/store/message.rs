@@ -51,17 +51,11 @@ use crate::{
 
 use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
 
-use crate::store::{
-    community::{
-        CommunityChannelDocument, CommunityDocument, CommunityInviteDocument, CommunityRoleDocument,
-    },
-    CommunityEvents, MAX_COMMUNITY_CHANNELS,
-};
+use crate::store::{community::CommunityDocument, CommunityEvents};
 use chrono::{DateTime, Utc};
 use warp::raygun::community::{
-    Community, CommunityChannel, CommunityChannelPermission, CommunityChannelPermissions,
-    CommunityChannelType, CommunityInvite, CommunityPermission, CommunityPermissions,
-    CommunityRole, CommunityRoles, RoleId,
+    Community, CommunityChannel, CommunityChannelPermission, CommunityChannelType, CommunityInvite,
+    CommunityPermission, CommunityRole, RoleId,
 };
 use warp::raygun::{ConversationImage, GroupPermissionOpt};
 use warp::{
@@ -934,7 +928,7 @@ impl MessageStore {
         let inner = &mut *self.inner.write().await;
         inner.list_communities_joined().await
     }
-    pub async fn list_communities_invited_to(&self) -> Result<IndexSet<Uuid>, Error> {
+    pub async fn list_communities_invited_to(&self) -> Result<Vec<(Uuid, CommunityInvite)>, Error> {
         let inner = &mut *self.inner.write().await;
         inner.list_communities_invited_to().await
     }
@@ -2599,7 +2593,7 @@ impl ConversationInner {
         event: ConversationEvents,
         override_targets: IndexSet<DID>,
     ) -> Result<(), Error> {
-        let mut targets = if override_targets.len() > 0 {
+        let targets = if override_targets.len() > 0 {
             override_targets
         } else {
             let mut members = community.members.clone();
@@ -2721,7 +2715,7 @@ impl ConversationInner {
             })
             .collect())
     }
-    pub async fn list_communities_invited_to(&self) -> Result<IndexSet<Uuid>, Error> {
+    pub async fn list_communities_invited_to(&self) -> Result<Vec<(Uuid, CommunityInvite)>, Error> {
         let own_did = &self.identity.did_key();
         Ok(self
             .list_community()
@@ -2731,7 +2725,7 @@ impl ConversationInner {
                 for (id, invite) in &c.invites {
                     if let Some(target) = &invite.target_user {
                         if target == own_did {
-                            return Some(c.id);
+                            return Some((c.id, CommunityInvite::from(invite.clone())));
                         }
                     }
                 }
@@ -2900,7 +2894,7 @@ async fn process_conversation(
                 return Err(anyhow::anyhow!("Already apart of {community_id}").into());
             }
 
-            let mut recipients = community_document.participants().clone();
+            let recipients = community_document.participants().clone();
 
             for recipient in &recipients {
                 if !this.discovery.contains(recipient).await {

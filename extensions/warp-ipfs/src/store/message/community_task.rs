@@ -1,8 +1,7 @@
-use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use either::Either;
 use futures::channel::oneshot;
-use futures::stream::{self, BoxStream, FuturesUnordered};
+use futures::stream::FuturesUnordered;
 use futures::{FutureExt, SinkExt, StreamExt, TryFutureExt};
 use futures_timeout::TimeoutExt;
 use futures_timer::Delay;
@@ -10,16 +9,12 @@ use indexmap::{IndexMap, IndexSet};
 use ipld_core::cid::Cid;
 use rust_ipfs::p2p::MultiaddrExt;
 use rust_ipfs::{libp2p::gossipsub::Message, Ipfs};
-use rust_ipfs::{IpfsPath, PeerId, SubscriptionStream};
+use rust_ipfs::{PeerId, SubscriptionStream};
 use serde::{Deserialize, Serialize};
 use std::borrow::BorrowMut;
-use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
-use std::ffi::OsStr;
-use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
-use tokio_stream::StreamMap;
 use uuid::Uuid;
 use warp::constellation::directory::Directory;
 use warp::constellation::{ConstellationProgressStream, Progression};
@@ -29,17 +24,14 @@ use warp::raygun::community::{
     CommunityPermission, CommunityRole, RoleId,
 };
 use warp::raygun::{
-    community, AttachmentEventStream, AttachmentKind, ConversationImage, GroupPermissionOpt,
-    Location, LocationKind, MessageEvent, MessageOptions, MessageReference, MessageStatus,
-    MessageType, Messages, MessagesType, RayGunEventKind,
+    AttachmentEventStream, AttachmentKind, ConversationImage, Location, LocationKind, MessageEvent,
+    MessageOptions, MessageReference, MessageStatus, MessageType, Messages, MessagesType,
+    RayGunEventKind,
 };
 use warp::{
     crypto::{cipher::Cipher, generate},
     error::Error,
-    raygun::{
-        ConversationType, GroupPermission, ImplGroupPermissions, MessageEventKind, PinState,
-        ReactionState,
-    },
+    raygun::{MessageEventKind, PinState, ReactionState},
 };
 use web_time::Instant;
 
@@ -54,18 +46,15 @@ use crate::store::document::files::FileDocument;
 use crate::store::document::image_dag::ImageDag;
 use crate::store::ds_key::DataStoreKey;
 use crate::store::event_subscription::EventSubscription;
-use crate::store::message::CHAT_DIRECTORY;
 use crate::store::topics::PeerTopic;
 use crate::store::{
     ecdh_shared_key, verify_serde_sig, CommunityUpdateKind, ConversationEvents,
-    ConversationImageType, MAX_COMMUNITY_CHANNELS, MAX_COMMUNITY_DESCRIPTION,
-    MAX_CONVERSATION_BANNER_SIZE, MAX_CONVERSATION_ICON_SIZE, SHUTTLE_TIMEOUT,
+    MAX_COMMUNITY_CHANNELS, MAX_COMMUNITY_DESCRIPTION, SHUTTLE_TIMEOUT,
 };
 use crate::utils::{ByteCollection, ExtensionType};
 use crate::{
     // rt::LocalExecutor,
     store::{
-        conversation::ConversationDocument,
         document::root::RootDocumentMap,
         ecdh_decrypt, ecdh_encrypt,
         files::FileStore,
@@ -73,8 +62,8 @@ use crate::{
         keystore::Keystore,
         payload::{PayloadBuilder, PayloadMessage},
         CommunityMessagingEvents, ConversationRequestKind, ConversationRequestResponse,
-        ConversationResponseKind, ConversationUpdateKind, DidExt, PeerIdExt,
-        MAX_CONVERSATION_DESCRIPTION, MAX_MESSAGE_SIZE, MAX_REACTIONS, MIN_MESSAGE_SIZE,
+        ConversationResponseKind, DidExt, PeerIdExt, MAX_MESSAGE_SIZE, MAX_REACTIONS,
+        MIN_MESSAGE_SIZE,
     },
 };
 
@@ -1279,13 +1268,17 @@ impl CommunityTask {
             .send(MessageEventKind::AcceptedCommunityInvite {
                 community_id: self.community_id,
                 invite_id,
+                user: own_did.clone(),
             });
 
         self.publish(
             None,
             CommunityMessagingEvents::UpdateCommunity {
                 community: self.document.clone(),
-                kind: CommunityUpdateKind::AcceptCommunityInvite { invite_id },
+                kind: CommunityUpdateKind::AcceptCommunityInvite {
+                    invite_id,
+                    user: own_did.clone(),
+                },
             },
             true,
         )
@@ -2256,7 +2249,7 @@ impl CommunityTask {
 
         let mut can_publish = false;
 
-        let mut recipients = self.document.participants().clone();
+        let recipients = self.document.participants().clone();
 
         for recipient in recipients.iter().filter(|did| own_did.ne(did)) {
             let peer_id = recipient.to_peer_id()?;
@@ -2429,13 +2422,14 @@ async fn message_event(
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");
                     }
                 }
-                CommunityUpdateKind::AcceptCommunityInvite { invite_id } => {
+                CommunityUpdateKind::AcceptCommunityInvite { invite_id, user } => {
                     this.replace_document(community).await?;
                     if let Err(e) =
                         this.event_broadcast
                             .send(MessageEventKind::AcceptedCommunityInvite {
                                 community_id,
                                 invite_id,
+                                user,
                             })
                     {
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");

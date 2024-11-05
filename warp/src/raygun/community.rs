@@ -250,7 +250,7 @@ pub enum CommunityChannelPermission {
 pub trait RayGunCommunity: Sync + Send {
     async fn get_community_stream(
         &mut self,
-        community_id: Uuid,
+        _community_id: Uuid,
     ) -> Result<MessageEventStream, Error> {
         Err(Error::Unimplemented)
     }
@@ -268,7 +268,7 @@ pub trait RayGunCommunity: Sync + Send {
     async fn list_communities_joined(&self) -> Result<IndexSet<Uuid>, Error> {
         Err(Error::Unimplemented)
     }
-    async fn list_communities_invited_to(&self) -> Result<IndexSet<Uuid>, Error> {
+    async fn list_communities_invited_to(&self) -> Result<Vec<(Uuid, CommunityInvite)>, Error> {
         Err(Error::Unimplemented)
     }
     async fn leave_community(&mut self, _community_id: Uuid) -> Result<(), Error> {

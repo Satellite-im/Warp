@@ -144,6 +144,7 @@ pub enum MessageEventKind {
     AcceptedCommunityInvite {
         community_id: Uuid,
         invite_id: Uuid,
+        user: DID,
     },
     EditedCommunityInvite {
         community_id: Uuid,

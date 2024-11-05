@@ -476,6 +476,7 @@ pub enum CommunityUpdateKind {
     },
     AcceptCommunityInvite {
         invite_id: Uuid,
+        user: DID,
     },
     EditCommunityInvite {
         invite_id: Uuid,

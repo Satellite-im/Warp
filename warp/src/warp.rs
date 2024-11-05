@@ -16,12 +16,11 @@ use crate::multipass::{
     MultiPass, MultiPassEvent, MultiPassEventStream, MultiPassImportExport,
 };
 use crate::raygun::community::{
-    CommunityChannelPermission, CommunityPermission, CommunityRole, CommunityRoles, RoleId,
+    CommunityChannelPermission, CommunityPermission, CommunityRole, RoleId,
 };
 use crate::raygun::{
     community::{
-        Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType,
-        CommunityInvite, CommunityPermissions, RayGunCommunity,
+        Community, CommunityChannel, CommunityChannelType, CommunityInvite, RayGunCommunity,
     },
     AttachmentEventStream, Conversation, ConversationImage, EmbedState, GroupPermissionOpt,
     Location, Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference,
@@ -591,7 +590,7 @@ where
     async fn list_communities_joined(&self) -> Result<IndexSet<Uuid>, Error> {
         self.raygun.list_communities_joined().await
     }
-    async fn list_communities_invited_to(&self) -> Result<IndexSet<Uuid>, Error> {
+    async fn list_communities_invited_to(&self) -> Result<Vec<(Uuid, CommunityInvite)>, Error> {
         self.raygun.list_communities_invited_to().await
     }
     async fn leave_community(&mut self, community_id: Uuid) -> Result<(), Error> {

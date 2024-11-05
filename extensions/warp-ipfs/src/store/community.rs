@@ -13,7 +13,7 @@ use warp::{
     raygun::community::{
         Community, CommunityChannel, CommunityChannelPermission, CommunityChannelPermissions,
         CommunityChannelType, CommunityInvite, CommunityPermission, CommunityPermissions,
-        CommunityRole, CommunityRoles, RoleId,
+        CommunityRole, RoleId,
     },
 };
 
@@ -276,7 +276,7 @@ impl CommunityDocument {
     pub fn participants(&self) -> IndexSet<DID> {
         let mut participants = self.members.clone();
         participants.insert(self.creator.clone());
-        for (id, invite) in &self.invites {
+        for (_, invite) in &self.invites {
             if let Some(target) = &invite.target_user {
                 participants.insert(target.clone());
             }
