@@ -12,7 +12,6 @@ use rust_ipfs::p2p::MultiaddrExt;
 use rust_ipfs::{libp2p::gossipsub::Message, Ipfs};
 use rust_ipfs::{IpfsPath, PeerId, SubscriptionStream};
 use serde::{Deserialize, Serialize};
-use warp::raygun::community::{CommunityChannel, CommunityChannelPermission, CommunityChannelType, CommunityInvite, CommunityPermission, CommunityRole, RoleId};
 use std::borrow::BorrowMut;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
@@ -25,8 +24,14 @@ use uuid::Uuid;
 use warp::constellation::directory::Directory;
 use warp::constellation::{ConstellationProgressStream, Progression};
 use warp::crypto::DID;
+use warp::raygun::community::{
+    CommunityChannel, CommunityChannelPermission, CommunityChannelType, CommunityInvite,
+    CommunityPermission, CommunityRole, RoleId,
+};
 use warp::raygun::{
-    community, AttachmentEventStream, AttachmentKind, ConversationImage, GroupPermissionOpt, Location, LocationKind, MessageEvent, MessageOptions, MessageReference, MessageStatus, MessageType, Messages, MessagesType, RayGunEventKind
+    community, AttachmentEventStream, AttachmentKind, ConversationImage, GroupPermissionOpt,
+    Location, LocationKind, MessageEvent, MessageOptions, MessageReference, MessageStatus,
+    MessageType, Messages, MessagesType, RayGunEventKind,
 };
 use warp::{
     crypto::{cipher::Cipher, generate},
@@ -40,7 +45,9 @@ use web_time::Instant;
 
 use crate::config;
 use crate::shuttle::message::client::MessageCommand;
-use crate::store::community::{CommunityChannelDocument, CommunityDocument, CommunityInviteDocument, CommunityRoleDocument};
+use crate::store::community::{
+    CommunityChannelDocument, CommunityDocument, CommunityInviteDocument, CommunityRoleDocument,
+};
 use crate::store::conversation::message::MessageDocument;
 use crate::store::discovery::Discovery;
 use crate::store::document::files::FileDocument;
@@ -50,7 +57,9 @@ use crate::store::event_subscription::EventSubscription;
 use crate::store::message::CHAT_DIRECTORY;
 use crate::store::topics::PeerTopic;
 use crate::store::{
-    ecdh_shared_key, verify_serde_sig, CommunityUpdateKind, ConversationEvents, ConversationImageType, MAX_COMMUNITY_CHANNELS, MAX_COMMUNITY_DESCRIPTION, MAX_CONVERSATION_BANNER_SIZE, MAX_CONVERSATION_ICON_SIZE, SHUTTLE_TIMEOUT
+    ecdh_shared_key, verify_serde_sig, CommunityUpdateKind, ConversationEvents,
+    ConversationImageType, MAX_COMMUNITY_CHANNELS, MAX_COMMUNITY_DESCRIPTION,
+    MAX_CONVERSATION_BANNER_SIZE, MAX_CONVERSATION_ICON_SIZE, SHUTTLE_TIMEOUT,
 };
 use crate::utils::{ByteCollection, ExtensionType};
 use crate::{
@@ -63,9 +72,9 @@ use crate::{
         identity::IdentityStore,
         keystore::Keystore,
         payload::{PayloadBuilder, PayloadMessage},
-        ConversationRequestKind, ConversationRequestResponse, ConversationResponseKind,
-        ConversationUpdateKind, DidExt, CommunityMessagingEvents, PeerIdExt, MAX_CONVERSATION_DESCRIPTION,
-        MAX_MESSAGE_SIZE, MAX_REACTIONS, MIN_MESSAGE_SIZE,
+        CommunityMessagingEvents, ConversationRequestKind, ConversationRequestResponse,
+        ConversationResponseKind, ConversationUpdateKind, DidExt, PeerIdExt,
+        MAX_CONVERSATION_DESCRIPTION, MAX_MESSAGE_SIZE, MAX_REACTIONS, MIN_MESSAGE_SIZE,
     },
 };
 
@@ -446,7 +455,9 @@ impl CommunityTask {
                     break;
                 }
                 Ok(Ok(Err(e))) => {
-                    tracing::error!("unable to get mailbox to community {community_id} from {peer_id}: {e}");
+                    tracing::error!(
+                        "unable to get mailbox to community {community_id} from {peer_id}: {e}"
+                    );
                     break;
                 }
                 Ok(Err(_)) => {
@@ -577,139 +588,245 @@ impl CommunityTask {
             CommunityTaskCommand::LeaveCommunity { response } => {
                 let result = self.leave_community().await;
                 let _ = response.send(result);
-            },
+            }
             CommunityTaskCommand::GetCommunityIcon { response } => {
                 let result = self.get_community_icon().await;
                 let _ = response.send(result);
-            },
+            }
             CommunityTaskCommand::GetCommunityBanner { response } => {
                 let result = self.get_community_banner().await;
                 let _ = response.send(result);
-            },
+            }
             CommunityTaskCommand::EditCommunityIcon { response, location } => {
                 let result = self.edit_community_icon(location).await;
                 let _ = response.send(result);
-            },
+            }
             CommunityTaskCommand::EditCommunityBanner { response, location } => {
                 let result = self.edit_community_banner(location).await;
                 let _ = response.send(result);
-            },
-            CommunityTaskCommand::CreateCommunityInvite { response, target_user, expiry } => {
+            }
+            CommunityTaskCommand::CreateCommunityInvite {
+                response,
+                target_user,
+                expiry,
+            } => {
                 let result = self.create_community_invite(target_user, expiry).await;
                 let _ = response.send(result);
-            },
-            CommunityTaskCommand::DeleteCommunityInvite { response, invite_id } => {
+            }
+            CommunityTaskCommand::DeleteCommunityInvite {
+                response,
+                invite_id,
+            } => {
                 let result = self.delete_community_invite(invite_id).await;
                 let _ = response.send(result);
-            },
-            CommunityTaskCommand::GetCommunityInvite { response, invite_id } => {
+            }
+            CommunityTaskCommand::GetCommunityInvite {
+                response,
+                invite_id,
+            } => {
                 let result = self.get_community_invite(invite_id).await;
                 let _ = response.send(result);
-            },
-            CommunityTaskCommand::AcceptCommunityInvite { response, invite_id } => {
+            }
+            CommunityTaskCommand::AcceptCommunityInvite {
+                response,
+                invite_id,
+            } => {
                 let result = self.accept_community_invite(invite_id).await;
                 let _ = response.send(result);
-            },
-            CommunityTaskCommand::EditCommunityInvite { response, invite_id, invite } => {
+            }
+            CommunityTaskCommand::EditCommunityInvite {
+                response,
+                invite_id,
+                invite,
+            } => {
                 let result = self.edit_community_invite(invite_id, invite).await;
                 let _ = response.send(result);
-            },
+            }
             CommunityTaskCommand::CreateCommunityRole { response, name } => {
                 let result = self.create_community_role(name).await;
                 let _ = response.send(result);
-            },
+            }
             CommunityTaskCommand::DeleteCommunityRole { response, role_id } => {
                 let result = self.delete_community_role(role_id).await;
                 let _ = response.send(result);
-            },
+            }
             CommunityTaskCommand::GetCommunityRole { response, role_id } => {
                 let result = self.get_community_role(role_id).await;
                 let _ = response.send(result);
-            },
-            CommunityTaskCommand::EditCommunityRoleName { response, role_id, new_name } => {
+            }
+            CommunityTaskCommand::EditCommunityRoleName {
+                response,
+                role_id,
+                new_name,
+            } => {
                 let result = self.edit_community_role_name(role_id, new_name).await;
                 let _ = response.send(result);
-            },
-            CommunityTaskCommand::GrantCommunityRole { response, role_id, user } => {
+            }
+            CommunityTaskCommand::GrantCommunityRole {
+                response,
+                role_id,
+                user,
+            } => {
                 let result = self.grant_community_role(role_id, user).await;
                 let _ = response.send(result);
-            },
-            CommunityTaskCommand::RevokeCommunityRole { response, role_id, user } => {
+            }
+            CommunityTaskCommand::RevokeCommunityRole {
+                response,
+                role_id,
+                user,
+            } => {
                 let result = self.revoke_community_role(role_id, user).await;
                 let _ = response.send(result);
-            },
-            CommunityTaskCommand::CreateCommunityChannel { response, channel_name, channel_type } => {
-                let result = self.create_community_channel(channel_name, channel_type).await;
+            }
+            CommunityTaskCommand::CreateCommunityChannel {
+                response,
+                channel_name,
+                channel_type,
+            } => {
+                let result = self
+                    .create_community_channel(channel_name, channel_type)
+                    .await;
                 let _ = response.send(result);
-            },
-            CommunityTaskCommand::DeleteCommunityChannel { response, channel_id } => {
+            }
+            CommunityTaskCommand::DeleteCommunityChannel {
+                response,
+                channel_id,
+            } => {
                 let result = self.delete_community_channel(channel_id).await;
                 let _ = response.send(result);
-            },
-            CommunityTaskCommand::GetCommunityChannel { response, channel_id } => {
+            }
+            CommunityTaskCommand::GetCommunityChannel {
+                response,
+                channel_id,
+            } => {
                 let result = self.get_community_channel(channel_id).await;
                 let _ = response.send(result);
-            },
+            }
             CommunityTaskCommand::EditCommunityName { response, name } => {
                 let result = self.edit_community_name(name).await;
                 let _ = response.send(result);
-            },
-            CommunityTaskCommand::EditCommunityDescription { description, response } => {
+            }
+            CommunityTaskCommand::EditCommunityDescription {
+                description,
+                response,
+            } => {
                 let result = self.edit_community_description(description).await;
                 let _ = response.send(result);
             }
-            CommunityTaskCommand::GrantCommunityPermission { response, permission, role_id } => {
+            CommunityTaskCommand::GrantCommunityPermission {
+                response,
+                permission,
+                role_id,
+            } => {
                 let result = self.grant_community_permission(permission, role_id).await;
                 let _ = response.send(result);
-            },
-            CommunityTaskCommand::RevokeCommunityPermission { response, permission, role_id } => {
+            }
+            CommunityTaskCommand::RevokeCommunityPermission {
+                response,
+                permission,
+                role_id,
+            } => {
                 let result = self.revoke_community_permission(permission, role_id).await;
                 let _ = response.send(result);
-            },
-            CommunityTaskCommand::GrantCommunityPermissionForAll { response, permission } => {
+            }
+            CommunityTaskCommand::GrantCommunityPermissionForAll {
+                response,
+                permission,
+            } => {
                 let result = self.grant_community_permission_for_all(permission).await;
                 let _ = response.send(result);
-            },
-            CommunityTaskCommand::RevokeCommunityPermissionForAll { response, permission } => {
+            }
+            CommunityTaskCommand::RevokeCommunityPermissionForAll {
+                response,
+                permission,
+            } => {
                 let result = self.revoke_community_permission_for_all(permission).await;
                 let _ = response.send(result);
-            },
+            }
             CommunityTaskCommand::RemoveCommunityMember { response, member } => {
                 let result = self.remove_community_member(member).await;
                 let _ = response.send(result);
-            },
-            CommunityTaskCommand::EditCommunityChannelName { response, channel_id, name } => {
+            }
+            CommunityTaskCommand::EditCommunityChannelName {
+                response,
+                channel_id,
+                name,
+            } => {
                 let result = self.edit_community_channel_name(channel_id, name).await;
                 let _ = response.send(result);
-            },
-            CommunityTaskCommand::EditCommunityChannelDescription { response, channel_id, description } => {
-                let result = self.edit_community_channel_description(channel_id, description).await;
+            }
+            CommunityTaskCommand::EditCommunityChannelDescription {
+                response,
+                channel_id,
+                description,
+            } => {
+                let result = self
+                    .edit_community_channel_description(channel_id, description)
+                    .await;
                 let _ = response.send(result);
-            },
-            CommunityTaskCommand::GrantCommunityChannelPermission { response, channel_id, permission, role_id } => {
-                let result = self.grant_community_channel_permission(channel_id, permission, role_id).await;
+            }
+            CommunityTaskCommand::GrantCommunityChannelPermission {
+                response,
+                channel_id,
+                permission,
+                role_id,
+            } => {
+                let result = self
+                    .grant_community_channel_permission(channel_id, permission, role_id)
+                    .await;
                 let _ = response.send(result);
-            },
-            CommunityTaskCommand::RevokeCommunityChannelPermission { response, channel_id, permission, role_id } => {
-                let result = self.revoke_community_channel_permission(channel_id, permission, role_id).await;
+            }
+            CommunityTaskCommand::RevokeCommunityChannelPermission {
+                response,
+                channel_id,
+                permission,
+                role_id,
+            } => {
+                let result = self
+                    .revoke_community_channel_permission(channel_id, permission, role_id)
+                    .await;
                 let _ = response.send(result);
-            },
-            CommunityTaskCommand::GrantCommunityChannelPermissionForAll { response, channel_id, permission } => {
-                let result = self.grant_community_channel_permission_for_all(channel_id, permission).await;
+            }
+            CommunityTaskCommand::GrantCommunityChannelPermissionForAll {
+                response,
+                channel_id,
+                permission,
+            } => {
+                let result = self
+                    .grant_community_channel_permission_for_all(channel_id, permission)
+                    .await;
                 let _ = response.send(result);
-            },
-            CommunityTaskCommand::RevokeCommunityChannelPermissionForAll { response, channel_id, permission } => {
-                let result = self.revoke_community_channel_permission_for_all(channel_id, permission).await;
+            }
+            CommunityTaskCommand::RevokeCommunityChannelPermissionForAll {
+                response,
+                channel_id,
+                permission,
+            } => {
+                let result = self
+                    .revoke_community_channel_permission_for_all(channel_id, permission)
+                    .await;
                 let _ = response.send(result);
-            },
-            CommunityTaskCommand::SendCommunityChannelMessage { response, channel_id, message } => {
-                let result = self.send_community_channel_message(channel_id, message).await;
+            }
+            CommunityTaskCommand::SendCommunityChannelMessage {
+                response,
+                channel_id,
+                message,
+            } => {
+                let result = self
+                    .send_community_channel_message(channel_id, message)
+                    .await;
                 let _ = response.send(result);
-            },
-            CommunityTaskCommand::DeleteCommunityChannelMessage { response, channel_id, message_id } => {
-                let result = self.delete_community_channel_message(channel_id, message_id).await;
+            }
+            CommunityTaskCommand::DeleteCommunityChannelMessage {
+                response,
+                channel_id,
+                message_id,
+            } => {
+                let result = self
+                    .delete_community_channel_message(channel_id, message_id)
+                    .await;
                 let _ = response.send(result);
-            },
+            }
             CommunityTaskCommand::EventHandler { response } => {
                 let sender = self.event_broadcast.clone();
                 let _ = response.send(sender);
@@ -744,10 +861,7 @@ impl CommunityTask {
         Ok(())
     }
 
-    pub async fn replace_document(
-        &mut self,
-        mut document: CommunityDocument,
-    ) -> Result<(), Error> {
+    pub async fn replace_document(&mut self, mut document: CommunityDocument) -> Result<(), Error> {
         let keypair = self.root.keypair();
         let did = keypair.to_did()?;
         if self.document.creator.eq(&did) {
@@ -920,7 +1034,11 @@ impl CommunityTask {
         Ok(())
     }
 
-    pub async fn send_event(&self, community_channel_id: Uuid, event: MessageEvent) -> Result<(), Error> {
+    pub async fn send_event(
+        &self,
+        community_channel_id: Uuid,
+        event: MessageEvent,
+    ) -> Result<(), Error> {
         let community_id = self.community_id;
         let member = self.identity.did_key();
 
@@ -934,7 +1052,12 @@ impl CommunityTask {
         self.send_message_event(event).await
     }
 
-    pub async fn cancel_event(&self, community_channel_id: Uuid, event: MessageEvent) -> Result<(), Error> {        let community_id = self.community_id;
+    pub async fn cancel_event(
+        &self,
+        community_channel_id: Uuid,
+        event: MessageEvent,
+    ) -> Result<(), Error> {
+        let community_id = self.community_id;
         let community_id = self.community_id;
         let member = self.identity.did_key();
 
@@ -988,38 +1111,39 @@ impl CommunityTask {
             community_id: self.community_id,
         });
 
-        self.publish(None, CommunityMessagingEvents::UpdateCommunity {
-            community: self.document.clone(),
-            kind: CommunityUpdateKind::LeaveCommunity,
-        }, true).await
+        self.publish(
+            None,
+            CommunityMessagingEvents::UpdateCommunity {
+                community: self.document.clone(),
+                kind: CommunityUpdateKind::LeaveCommunity,
+            },
+            true,
+        )
+        .await
     }
 
-    pub async fn get_community_icon(
-        &self,
-    ) -> Result<ConversationImage, Error> {
+    pub async fn get_community_icon(&self) -> Result<ConversationImage, Error> {
         Err(Error::Unimplemented)
     }
-    pub async fn get_community_banner(
-        &self,
-    ) -> Result<ConversationImage, Error> {
+    pub async fn get_community_banner(&self) -> Result<ConversationImage, Error> {
         Err(Error::Unimplemented)
     }
-    pub async fn edit_community_icon(
-        &mut self,
-        _location: Location,
-    ) -> Result<(), Error> {
+    pub async fn edit_community_icon(&mut self, _location: Location) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
-        if !self.document.has_permission(own_did, &CommunityPermission::EditInfo) {
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::EditInfo)
+        {
             return Err(Error::Unauthorized);
         }
         Err(Error::Unimplemented)
     }
-    pub async fn edit_community_banner(
-        &mut self,
-        _location: Location,
-    ) -> Result<(), Error> {
+    pub async fn edit_community_banner(&mut self, _location: Location) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
-        if !self.document.has_permission(own_did, &CommunityPermission::EditInfo) {
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::EditInfo)
+        {
             return Err(Error::Unauthorized);
         }
         Err(Error::Unimplemented)
@@ -1031,7 +1155,10 @@ impl CommunityTask {
         expiry: Option<DateTime<Utc>>,
     ) -> Result<CommunityInvite, Error> {
         let own_did = &self.identity.did_key();
-        if !self.document.has_permission(own_did, &CommunityPermission::ManageInvites) {
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::ManageInvites)
+        {
             return Err(Error::Unauthorized);
         }
 
@@ -1042,34 +1169,42 @@ impl CommunityTask {
 
         self.set_document().await?;
 
-        let _ = self.event_broadcast.send(MessageEventKind::CreatedCommunityInvite {
-            community_id: self.community_id,
-            invite: CommunityInvite::from(invite_doc.clone())
-        });
-
-        self.publish(None, CommunityMessagingEvents::UpdateCommunity {
-            community: self.document.clone(),
-            kind: CommunityUpdateKind::CreateCommunityInvite {
-                invite: invite_doc.clone(),
-            },
-        }, true).await?;
-
-        //TODO: implement non targeted invites 
-        if let Some(did_key) = target_user {
-            self.send_single_community_event(&did_key.clone(), ConversationEvents::NewCommunityInvite {
+        let _ = self
+            .event_broadcast
+            .send(MessageEventKind::CreatedCommunityInvite {
                 community_id: self.community_id,
-                community_document: self.document.clone(),
-                invite: invite_doc.clone(),
-            }).await?;
+                invite: CommunityInvite::from(invite_doc.clone()),
+            });
+
+        self.publish(
+            None,
+            CommunityMessagingEvents::UpdateCommunity {
+                community: self.document.clone(),
+                kind: CommunityUpdateKind::CreateCommunityInvite {
+                    invite: invite_doc.clone(),
+                },
+            },
+            true,
+        )
+        .await?;
+
+        //TODO: implement non targeted invites
+        if let Some(did_key) = target_user {
+            self.send_single_community_event(
+                &did_key.clone(),
+                ConversationEvents::NewCommunityInvite {
+                    community_id: self.community_id,
+                    community_document: self.document.clone(),
+                    invite: invite_doc.clone(),
+                },
+            )
+            .await?;
             if let Err(_e) = self.request_key(&did_key.clone()).await {}
         }
 
         Ok(CommunityInvite::from(invite_doc))
     }
-    pub async fn delete_community_invite(
-        &mut self,
-        invite_id: Uuid,
-    ) -> Result<(), Error> {
+    pub async fn delete_community_invite(&mut self, invite_id: Uuid) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
 
         let mut is_targeting_self = false;
@@ -1081,7 +1216,9 @@ impl CommunityTask {
             }
         }
         if !is_targeting_self
-            && !self.document.has_permission(own_did, &CommunityPermission::ManageInvites)
+            && !self
+                .document
+                .has_permission(own_did, &CommunityPermission::ManageInvites)
         {
             return Err(Error::Unauthorized);
         }
@@ -1089,17 +1226,22 @@ impl CommunityTask {
         self.document.invites.swap_remove(&invite_id.to_string());
         self.set_document().await?;
 
-        let _ = self.event_broadcast.send(MessageEventKind::DeletedCommunityInvite {
-            community_id: self.community_id,
-            invite_id,
-        });
-
-        self.publish(None, CommunityMessagingEvents::UpdateCommunity {
-            community: self.document.clone(),
-            kind: CommunityUpdateKind::DeleteCommunityInvite {
+        let _ = self
+            .event_broadcast
+            .send(MessageEventKind::DeletedCommunityInvite {
+                community_id: self.community_id,
                 invite_id,
+            });
+
+        self.publish(
+            None,
+            CommunityMessagingEvents::UpdateCommunity {
+                community: self.document.clone(),
+                kind: CommunityUpdateKind::DeleteCommunityInvite { invite_id },
             },
-        }, true).await
+            true,
+        )
+        .await
     }
     pub async fn get_community_invite(
         &mut self,
@@ -1110,12 +1252,10 @@ impl CommunityTask {
             None => Err(Error::CommunityInviteDoesntExist),
         }
     }
-    pub async fn accept_community_invite(
-        &mut self,
-        invite_id: Uuid,
-    ) -> Result<(), Error> {
+    pub async fn accept_community_invite(&mut self, invite_id: Uuid) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
-        let invite_doc = self.document
+        let invite_doc = self
+            .document
             .invites
             .get(&invite_id.to_string())
             .ok_or(Error::CommunityInviteDoesntExist)?;
@@ -1134,17 +1274,22 @@ impl CommunityTask {
         self.document.members.insert(own_did.clone());
         self.set_document().await?;
 
-        let _ = self.event_broadcast.send(MessageEventKind::AcceptedCommunityInvite {
-            community_id: self.community_id,
-            invite_id,
-        });
-
-        self.publish(None, CommunityMessagingEvents::UpdateCommunity {
-            community: self.document.clone(),
-            kind: CommunityUpdateKind::AcceptCommunityInvite {
+        let _ = self
+            .event_broadcast
+            .send(MessageEventKind::AcceptedCommunityInvite {
+                community_id: self.community_id,
                 invite_id,
+            });
+
+        self.publish(
+            None,
+            CommunityMessagingEvents::UpdateCommunity {
+                community: self.document.clone(),
+                kind: CommunityUpdateKind::AcceptCommunityInvite { invite_id },
             },
-        }, true).await
+            true,
+        )
+        .await
     }
     pub async fn edit_community_invite(
         &mut self,
@@ -1152,11 +1297,15 @@ impl CommunityTask {
         invite: CommunityInvite,
     ) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
-        if !self.document.has_permission(own_did, &CommunityPermission::ManageInvites) {
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::ManageInvites)
+        {
             return Err(Error::Unauthorized);
         }
 
-        let invite_doc = self.document
+        let invite_doc = self
+            .document
             .invites
             .get_mut(&invite_id.to_string())
             .ok_or(Error::CommunityInviteDoesntExist)?;
@@ -1164,25 +1313,30 @@ impl CommunityTask {
         invite_doc.expiry = invite.expiry();
         self.set_document().await?;
 
-        let _ = self.event_broadcast.send(MessageEventKind::EditedCommunityInvite {
-            community_id: self.community_id,
-            invite_id,
-        });
-
-        self.publish(None, CommunityMessagingEvents::UpdateCommunity {
-            community: self.document.clone(),
-            kind: CommunityUpdateKind::EditCommunityInvite {
+        let _ = self
+            .event_broadcast
+            .send(MessageEventKind::EditedCommunityInvite {
+                community_id: self.community_id,
                 invite_id,
+            });
+
+        self.publish(
+            None,
+            CommunityMessagingEvents::UpdateCommunity {
+                community: self.document.clone(),
+                kind: CommunityUpdateKind::EditCommunityInvite { invite_id },
             },
-        }, true).await
+            true,
+        )
+        .await
     }
 
-    pub async fn create_community_role(
-        &mut self,
-        name: String,
-    ) -> Result<CommunityRole, Error> {
+    pub async fn create_community_role(&mut self, name: String) -> Result<CommunityRole, Error> {
         let own_did = &self.identity.did_key();
-        if !self.document.has_permission(own_did, &CommunityPermission::ManageRoles) {
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::ManageRoles)
+        {
             return Err(Error::Unauthorized);
         }
 
@@ -1192,31 +1346,37 @@ impl CommunityTask {
             .insert(role.id.to_string(), role.clone());
         self.set_document().await?;
 
-        let _ = self.event_broadcast.send(MessageEventKind::CreatedCommunityRole {
-            community_id: self.community_id,
-            role: CommunityRole::from(role.clone()),
-        });
+        let _ = self
+            .event_broadcast
+            .send(MessageEventKind::CreatedCommunityRole {
+                community_id: self.community_id,
+                role: CommunityRole::from(role.clone()),
+            });
 
-        self.publish(None, CommunityMessagingEvents::UpdateCommunity {
-            community: self.document.clone(),
-            kind: CommunityUpdateKind::CreateCommunityRole {
-                role: role.clone(),
+        self.publish(
+            None,
+            CommunityMessagingEvents::UpdateCommunity {
+                community: self.document.clone(),
+                kind: CommunityUpdateKind::CreateCommunityRole { role: role.clone() },
             },
-        }, true).await?;
-        
+            true,
+        )
+        .await?;
+
         Ok(CommunityRole::from(role))
     }
-    pub async fn delete_community_role(
-        &mut self,
-        role_id: RoleId,
-    ) -> Result<(), Error> {
+    pub async fn delete_community_role(&mut self, role_id: RoleId) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
-        if !self.document.has_permission(own_did, &CommunityPermission::ManageRoles) {
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::ManageRoles)
+        {
             return Err(Error::Unauthorized);
         }
 
         self.document.roles.swap_remove(&role_id.to_string());
-        let _ = self.document
+        let _ = self
+            .document
             .permissions
             .iter_mut()
             .map(|(_, roles)| roles.swap_remove(&role_id));
@@ -1228,23 +1388,26 @@ impl CommunityTask {
         });
         self.set_document().await?;
 
-        let _ = self.event_broadcast.send(MessageEventKind::DeletedCommunityRole {
-            community_id: self.community_id,
-            role_id,
-        });
-
-        self.publish(None, CommunityMessagingEvents::UpdateCommunity {
-            community: self.document.clone(),
-            kind: CommunityUpdateKind::DeleteCommunityRole {
+        let _ = self
+            .event_broadcast
+            .send(MessageEventKind::DeletedCommunityRole {
+                community_id: self.community_id,
                 role_id,
+            });
+
+        self.publish(
+            None,
+            CommunityMessagingEvents::UpdateCommunity {
+                community: self.document.clone(),
+                kind: CommunityUpdateKind::DeleteCommunityRole { role_id },
             },
-        }, true).await
+            true,
+        )
+        .await
     }
-    pub async fn get_community_role(
-        &mut self,
-        role_id: RoleId,
-    ) -> Result<CommunityRole, Error> {
-        let role = self.document
+    pub async fn get_community_role(&mut self, role_id: RoleId) -> Result<CommunityRole, Error> {
+        let role = self
+            .document
             .roles
             .get(&role_id.to_string())
             .ok_or(Error::CommunityRoleDoesntExist)?;
@@ -1256,7 +1419,10 @@ impl CommunityTask {
         new_name: String,
     ) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
-        if !self.document.has_permission(own_did, &CommunityPermission::ManageRoles) {
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::ManageRoles)
+        {
             return Err(Error::Unauthorized);
         }
 
@@ -1267,25 +1433,29 @@ impl CommunityTask {
             .name = new_name;
         self.set_document().await?;
 
-        let _ = self.event_broadcast.send(MessageEventKind::EditedCommunityRole {
-            community_id: self.community_id,
-            role_id,
-        });
-
-        self.publish(None, CommunityMessagingEvents::UpdateCommunity {
-            community: self.document.clone(),
-            kind: CommunityUpdateKind::EditCommunityRole {
+        let _ = self
+            .event_broadcast
+            .send(MessageEventKind::EditedCommunityRole {
+                community_id: self.community_id,
                 role_id,
+            });
+
+        self.publish(
+            None,
+            CommunityMessagingEvents::UpdateCommunity {
+                community: self.document.clone(),
+                kind: CommunityUpdateKind::EditCommunityRole { role_id },
             },
-        }, true).await
+            true,
+        )
+        .await
     }
-    pub async fn grant_community_role(
-        &mut self,
-        role_id: RoleId,
-        user: DID,
-    ) -> Result<(), Error> {
+    pub async fn grant_community_role(&mut self, role_id: RoleId, user: DID) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
-        if !self.document.has_permission(own_did, &CommunityPermission::ManageRoles) {
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::ManageRoles)
+        {
             return Err(Error::Unauthorized);
         }
 
@@ -1297,27 +1467,30 @@ impl CommunityTask {
             .insert(user.clone());
         self.set_document().await?;
 
-        let _ = self.event_broadcast.send(MessageEventKind::GrantedCommunityRole {
-            community_id: self.community_id,
-            role_id,
-            user: user.clone(),
-        });
-
-        self.publish(None, CommunityMessagingEvents::UpdateCommunity {
-            community: self.document.clone(),
-            kind: CommunityUpdateKind::GrantCommunityRole {
+        let _ = self
+            .event_broadcast
+            .send(MessageEventKind::GrantedCommunityRole {
+                community_id: self.community_id,
                 role_id,
-                user,
+                user: user.clone(),
+            });
+
+        self.publish(
+            None,
+            CommunityMessagingEvents::UpdateCommunity {
+                community: self.document.clone(),
+                kind: CommunityUpdateKind::GrantCommunityRole { role_id, user },
             },
-        }, true).await
+            true,
+        )
+        .await
     }
-    pub async fn revoke_community_role(
-        &mut self,
-        role_id: RoleId,
-        user: DID,
-    ) -> Result<(), Error> {
+    pub async fn revoke_community_role(&mut self, role_id: RoleId, user: DID) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
-        if !self.document.has_permission(own_did, &CommunityPermission::ManageRoles) {
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::ManageRoles)
+        {
             return Err(Error::Unauthorized);
         }
 
@@ -1329,19 +1502,23 @@ impl CommunityTask {
             .swap_remove(&user);
         self.set_document().await?;
 
-        let _ = self.event_broadcast.send(MessageEventKind::RevokedCommunityRole {
-            community_id: self.community_id,
-            role_id,
-            user: user.clone(),
-        });
-
-        self.publish(None, CommunityMessagingEvents::UpdateCommunity {
-            community: self.document.clone(),
-            kind: CommunityUpdateKind::RevokeCommunityRole {
+        let _ = self
+            .event_broadcast
+            .send(MessageEventKind::RevokedCommunityRole {
+                community_id: self.community_id,
                 role_id,
-                user,
+                user: user.clone(),
+            });
+
+        self.publish(
+            None,
+            CommunityMessagingEvents::UpdateCommunity {
+                community: self.document.clone(),
+                kind: CommunityUpdateKind::RevokeCommunityRole { role_id, user },
             },
-        }, true).await
+            true,
+        )
+        .await
     }
 
     pub async fn create_community_channel(
@@ -1350,7 +1527,10 @@ impl CommunityTask {
         channel_type: CommunityChannelType,
     ) -> Result<CommunityChannel, Error> {
         let own_did = &self.identity.did_key();
-        if !self.document.has_permission(own_did, &CommunityPermission::ManageChannels) {
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::ManageChannels)
+        {
             return Err(Error::Unauthorized);
         }
 
@@ -1364,43 +1544,55 @@ impl CommunityTask {
             .insert(channel_doc.id.to_string(), channel_doc.clone());
         self.set_document().await?;
 
-        let _ = self.event_broadcast.send(MessageEventKind::CreatedCommunityChannel {
-            community_id: self.community_id,
-            channel: CommunityChannel::from(channel_doc.clone())
-        });
+        let _ = self
+            .event_broadcast
+            .send(MessageEventKind::CreatedCommunityChannel {
+                community_id: self.community_id,
+                channel: CommunityChannel::from(channel_doc.clone()),
+            });
 
-        self.publish(None, CommunityMessagingEvents::UpdateCommunity {
-            community: self.document.clone(),
-            kind: CommunityUpdateKind::CreateCommunityChannel  {
-                channel: channel_doc.clone()
+        self.publish(
+            None,
+            CommunityMessagingEvents::UpdateCommunity {
+                community: self.document.clone(),
+                kind: CommunityUpdateKind::CreateCommunityChannel {
+                    channel: channel_doc.clone(),
+                },
             },
-        }, true).await?;
-        
+            true,
+        )
+        .await?;
+
         Ok(CommunityChannel::from(channel_doc))
     }
-    pub async fn delete_community_channel(
-        &mut self,
-        channel_id: Uuid,
-    ) -> Result<(), Error> {
+    pub async fn delete_community_channel(&mut self, channel_id: Uuid) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
-        if !self.document.has_permission(own_did, &CommunityPermission::ManageChannels) {
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::ManageChannels)
+        {
             return Err(Error::Unauthorized);
         }
 
         self.document.channels.swap_remove(&channel_id.to_string());
         self.set_document().await?;
 
-        let _ = self.event_broadcast.send(MessageEventKind::DeletedCommunityChannel {
-            community_id: self.community_id,
-            channel_id,
-        });
-
-        self.publish(None, CommunityMessagingEvents::UpdateCommunity {
-            community: self.document.clone(),
-            kind: CommunityUpdateKind::DeleteCommunityChannel  {
+        let _ = self
+            .event_broadcast
+            .send(MessageEventKind::DeletedCommunityChannel {
+                community_id: self.community_id,
                 channel_id,
+            });
+
+        self.publish(
+            None,
+            CommunityMessagingEvents::UpdateCommunity {
+                community: self.document.clone(),
+                kind: CommunityUpdateKind::DeleteCommunityChannel { channel_id },
             },
-        }, true).await
+            true,
+        )
+        .await
     }
     pub async fn get_community_channel(
         &mut self,
@@ -1415,36 +1607,44 @@ impl CommunityTask {
             return Err(Error::Unauthorized);
         }
 
-        let channel_doc = self.document
+        let channel_doc = self
+            .document
             .channels
             .get(&channel_id.to_string())
             .ok_or(Error::CommunityChannelDoesntExist)?;
         Ok(CommunityChannel::from(channel_doc.clone()))
     }
 
-    pub async fn edit_community_name(
-        &mut self,
-        name: String,
-    ) -> Result<(), Error> {
+    pub async fn edit_community_name(&mut self, name: String) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
-        if !self.document.has_permission(own_did, &CommunityPermission::EditInfo) {
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::EditInfo)
+        {
             return Err(Error::Unauthorized);
         }
 
         self.document.name = name.to_owned();
         self.set_document().await?;
 
-        let _ = self.event_broadcast.send(MessageEventKind::EditedCommunityName {
-            community_id: self.community_id,
-            name: name.to_string(),
-        });
-
-        self.publish(None, CommunityMessagingEvents::UpdateCommunity {
-            community: self.document.clone(),
-            kind: CommunityUpdateKind::EditCommunityName  {
+        let _ = self
+            .event_broadcast
+            .send(MessageEventKind::EditedCommunityName {
+                community_id: self.community_id,
                 name: name.to_string(),
+            });
+
+        self.publish(
+            None,
+            CommunityMessagingEvents::UpdateCommunity {
+                community: self.document.clone(),
+                kind: CommunityUpdateKind::EditCommunityName {
+                    name: name.to_string(),
+                },
             },
-        }, true).await
+            true,
+        )
+        .await
     }
     pub async fn edit_community_description(
         &mut self,
@@ -1452,7 +1652,10 @@ impl CommunityTask {
     ) -> Result<(), Error> {
         let community_id = self.community_id;
         let own_did = &self.identity.did_key();
-        if !self.document.has_permission(own_did, &CommunityPermission::EditInfo) {
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::EditInfo)
+        {
             return Err(Error::Unauthorized);
         }
 
@@ -1470,17 +1673,24 @@ impl CommunityTask {
         self.document.description = description.clone();
         self.set_document().await?;
 
-        let _ = self.event_broadcast.send(MessageEventKind::EditedCommunityDescription {
-            community_id: self.community_id,
-            description: self.document.description.clone(),
-        });
-
-        self.publish(None, CommunityMessagingEvents::UpdateCommunity {
-            community: self.document.clone(),
-            kind: CommunityUpdateKind::EditCommunityDescription {
+        let _ = self
+            .event_broadcast
+            .send(MessageEventKind::EditedCommunityDescription {
+                community_id: self.community_id,
                 description: self.document.description.clone(),
+            });
+
+        self.publish(
+            None,
+            CommunityMessagingEvents::UpdateCommunity {
+                community: self.document.clone(),
+                kind: CommunityUpdateKind::EditCommunityDescription {
+                    description: self.document.description.clone(),
+                },
             },
-        }, true).await
+            true,
+        )
+        .await
     }
 
     pub async fn grant_community_permission(
@@ -1489,7 +1699,10 @@ impl CommunityTask {
         role_id: RoleId,
     ) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
-        if !self.document.has_permission(own_did, &CommunityPermission::ManagePermissions) {
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::ManagePermissions)
+        {
             return Err(Error::Unauthorized);
         }
 
@@ -1505,19 +1718,26 @@ impl CommunityTask {
         }
         self.set_document().await?;
 
-        let _ = self.event_broadcast.send(MessageEventKind::GrantedCommunityPermission {
-            community_id: self.community_id,
-            permission,
-            role_id,
-        });
-
-        self.publish(None, CommunityMessagingEvents::UpdateCommunity {
-            community: self.document.clone(),
-            kind: CommunityUpdateKind::GrantCommunityPermission {
+        let _ = self
+            .event_broadcast
+            .send(MessageEventKind::GrantedCommunityPermission {
+                community_id: self.community_id,
                 permission,
                 role_id,
+            });
+
+        self.publish(
+            None,
+            CommunityMessagingEvents::UpdateCommunity {
+                community: self.document.clone(),
+                kind: CommunityUpdateKind::GrantCommunityPermission {
+                    permission,
+                    role_id,
+                },
             },
-        }, true).await
+            true,
+        )
+        .await
     }
     pub async fn revoke_community_permission(
         &mut self,
@@ -1525,7 +1745,10 @@ impl CommunityTask {
         role_id: RoleId,
     ) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
-        if !self.document.has_permission(own_did, &CommunityPermission::ManagePermissions) {
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::ManagePermissions)
+        {
             return Err(Error::Unauthorized);
         }
 
@@ -1533,27 +1756,37 @@ impl CommunityTask {
             authorized_roles.swap_remove(&role_id);
         }
         self.set_document().await?;
-        
-        let _ = self.event_broadcast.send(MessageEventKind::RevokedCommunityPermission {
-            community_id: self.community_id,
-            permission,
-            role_id,
-        });
 
-        self.publish(None, CommunityMessagingEvents::UpdateCommunity {
-            community: self.document.clone(),
-            kind: CommunityUpdateKind::RevokeCommunityPermission {
+        let _ = self
+            .event_broadcast
+            .send(MessageEventKind::RevokedCommunityPermission {
+                community_id: self.community_id,
                 permission,
                 role_id,
+            });
+
+        self.publish(
+            None,
+            CommunityMessagingEvents::UpdateCommunity {
+                community: self.document.clone(),
+                kind: CommunityUpdateKind::RevokeCommunityPermission {
+                    permission,
+                    role_id,
+                },
             },
-        }, true).await
+            true,
+        )
+        .await
     }
     pub async fn grant_community_permission_for_all(
         &mut self,
         permission: CommunityPermission,
     ) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
-        if !self.document.has_permission(own_did, &CommunityPermission::ManagePermissions) {
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::ManagePermissions)
+        {
             return Err(Error::Unauthorized);
         }
 
@@ -1561,27 +1794,35 @@ impl CommunityTask {
             self.document.permissions.swap_remove(&permission);
             self.set_document().await?;
         } else {
-            return Err(Error::PermissionAlreadyGranted)
+            return Err(Error::PermissionAlreadyGranted);
         }
 
-        let _ = self.event_broadcast.send(MessageEventKind::GrantedCommunityPermissionForAll {
-            community_id: self.community_id,
-            permission,
-        });
-
-        self.publish(None, CommunityMessagingEvents::UpdateCommunity {
-            community: self.document.clone(),
-            kind: CommunityUpdateKind::GrantCommunityPermissionForAll {
+        let _ = self
+            .event_broadcast
+            .send(MessageEventKind::GrantedCommunityPermissionForAll {
+                community_id: self.community_id,
                 permission,
+            });
+
+        self.publish(
+            None,
+            CommunityMessagingEvents::UpdateCommunity {
+                community: self.document.clone(),
+                kind: CommunityUpdateKind::GrantCommunityPermissionForAll { permission },
             },
-        }, true).await
+            true,
+        )
+        .await
     }
     pub async fn revoke_community_permission_for_all(
         &mut self,
         permission: CommunityPermission,
     ) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
-        if !self.document.has_permission(own_did, &CommunityPermission::ManagePermissions) {
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::ManagePermissions)
+        {
             return Err(Error::Unauthorized);
         }
 
@@ -1590,24 +1831,29 @@ impl CommunityTask {
             .insert(permission, IndexSet::new());
         self.set_document().await?;
 
-        let _ = self.event_broadcast.send(MessageEventKind::RevokedCommunityPermissionForAll {
-            community_id: self.community_id,
-            permission,
-        });
-
-        self.publish(None, CommunityMessagingEvents::UpdateCommunity {
-            community: self.document.clone(),
-            kind: CommunityUpdateKind::RevokeCommunityPermissionForAll {
+        let _ = self
+            .event_broadcast
+            .send(MessageEventKind::RevokedCommunityPermissionForAll {
+                community_id: self.community_id,
                 permission,
+            });
+
+        self.publish(
+            None,
+            CommunityMessagingEvents::UpdateCommunity {
+                community: self.document.clone(),
+                kind: CommunityUpdateKind::RevokeCommunityPermissionForAll { permission },
             },
-        }, true).await
+            true,
+        )
+        .await
     }
-    pub async fn remove_community_member(
-        &mut self,
-        member: DID,
-    ) -> Result<(), Error> {
+    pub async fn remove_community_member(&mut self, member: DID) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
-        if !self.document.has_permission(own_did, &CommunityPermission::ManageMembers) {
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::ManageMembers)
+        {
             return Err(Error::Unauthorized);
         }
 
@@ -1617,17 +1863,22 @@ impl CommunityTask {
         });
         self.set_document().await?;
 
-        let _ = self.event_broadcast.send(MessageEventKind::RemovedCommunityMember {
-            community_id: self.community_id,
-            member: member.clone(),
-        });
+        let _ = self
+            .event_broadcast
+            .send(MessageEventKind::RemovedCommunityMember {
+                community_id: self.community_id,
+                member: member.clone(),
+            });
 
-        self.publish(None, CommunityMessagingEvents::UpdateCommunity {
-            community: self.document.clone(),
-            kind: CommunityUpdateKind::RemoveCommunityMember {
-                member,
+        self.publish(
+            None,
+            CommunityMessagingEvents::UpdateCommunity {
+                community: self.document.clone(),
+                kind: CommunityUpdateKind::RemoveCommunityMember { member },
             },
-        }, true).await
+            true,
+        )
+        .await
     }
 
     pub async fn edit_community_channel_name(
@@ -1644,26 +1895,34 @@ impl CommunityTask {
             return Err(Error::Unauthorized);
         }
 
-        let channel_doc = self.document
+        let channel_doc = self
+            .document
             .channels
             .get_mut(&channel_id.to_string())
             .ok_or(Error::CommunityChannelDoesntExist)?;
         channel_doc.name = name.to_owned();
         self.set_document().await?;
 
-        let _ = self.event_broadcast.send(MessageEventKind::EditedCommunityChannelName {
-            community_id: self.community_id,
-            channel_id,
-            name: name.to_string(),
-        });
-
-        self.publish(None, CommunityMessagingEvents::UpdateCommunity {
-            community: self.document.clone(),
-            kind: CommunityUpdateKind::EditCommunityChannelName {
+        let _ = self
+            .event_broadcast
+            .send(MessageEventKind::EditedCommunityChannelName {
+                community_id: self.community_id,
                 channel_id,
                 name: name.to_string(),
+            });
+
+        self.publish(
+            None,
+            CommunityMessagingEvents::UpdateCommunity {
+                community: self.document.clone(),
+                kind: CommunityUpdateKind::EditCommunityChannelName {
+                    channel_id,
+                    name: name.to_string(),
+                },
             },
-        }, true).await
+            true,
+        )
+        .await
     }
     pub async fn edit_community_channel_description(
         &mut self,
@@ -1679,26 +1938,34 @@ impl CommunityTask {
             return Err(Error::Unauthorized);
         }
 
-        let channel_doc = self.document
+        let channel_doc = self
+            .document
             .channels
             .get_mut(&channel_id.to_string())
             .ok_or(Error::CommunityChannelDoesntExist)?;
         channel_doc.description = description.clone();
         self.set_document().await?;
 
-        let _ = self.event_broadcast.send(MessageEventKind::EditedCommunityChannelDescription {
-            community_id: self.community_id,
-            channel_id,
-            description: description.clone(),
-        });
-
-        self.publish(None, CommunityMessagingEvents::UpdateCommunity {
-            community: self.document.clone(),
-            kind: CommunityUpdateKind::EditCommunityChannelDescription {
+        let _ = self
+            .event_broadcast
+            .send(MessageEventKind::EditedCommunityChannelDescription {
+                community_id: self.community_id,
                 channel_id,
-                description,
+                description: description.clone(),
+            });
+
+        self.publish(
+            None,
+            CommunityMessagingEvents::UpdateCommunity {
+                community: self.document.clone(),
+                kind: CommunityUpdateKind::EditCommunityChannelDescription {
+                    channel_id,
+                    description,
+                },
             },
-        }, true).await
+            true,
+        )
+        .await
     }
     pub async fn grant_community_channel_permission(
         &mut self,
@@ -1707,11 +1974,15 @@ impl CommunityTask {
         role_id: RoleId,
     ) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
-        if !self.document.has_permission(own_did, &CommunityPermission::ManagePermissions) {
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::ManagePermissions)
+        {
             return Err(Error::Unauthorized);
         }
 
-        let channel_doc = self.document
+        let channel_doc = self
+            .document
             .channels
             .get_mut(&channel_id.to_string())
             .ok_or(Error::CommunityChannelDoesntExist)?;
@@ -1727,21 +1998,28 @@ impl CommunityTask {
         }
         self.set_document().await?;
 
-        let _ = self.event_broadcast.send(MessageEventKind::GrantedCommunityChannelPermission {
-            community_id: self.community_id,
-            channel_id,
-            permission,
-            role_id,
-        });
-
-        self.publish(None, CommunityMessagingEvents::UpdateCommunity {
-            community: self.document.clone(),
-            kind: CommunityUpdateKind::GrantCommunityChannelPermission {
+        let _ = self
+            .event_broadcast
+            .send(MessageEventKind::GrantedCommunityChannelPermission {
+                community_id: self.community_id,
                 channel_id,
                 permission,
                 role_id,
+            });
+
+        self.publish(
+            None,
+            CommunityMessagingEvents::UpdateCommunity {
+                community: self.document.clone(),
+                kind: CommunityUpdateKind::GrantCommunityChannelPermission {
+                    channel_id,
+                    permission,
+                    role_id,
+                },
             },
-        }, true).await
+            true,
+        )
+        .await
     }
     pub async fn revoke_community_channel_permission(
         &mut self,
@@ -1750,11 +2028,15 @@ impl CommunityTask {
         role_id: RoleId,
     ) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
-        if !self.document.has_permission(own_did, &CommunityPermission::ManagePermissions) {
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::ManagePermissions)
+        {
             return Err(Error::Unauthorized);
         }
 
-        let channel_doc = self.document
+        let channel_doc = self
+            .document
             .channels
             .get_mut(&channel_id.to_string())
             .ok_or(Error::CommunityChannelDoesntExist)?;
@@ -1763,21 +2045,28 @@ impl CommunityTask {
         }
         self.set_document().await?;
 
-        let _ = self.event_broadcast.send(MessageEventKind::RevokedCommunityChannelPermission {
-            community_id: self.community_id,
-            channel_id,
-            permission,
-            role_id,
-        });
-
-        self.publish(None, CommunityMessagingEvents::UpdateCommunity {
-            community: self.document.clone(),
-            kind: CommunityUpdateKind::RevokeCommunityChannelPermission {
+        let _ = self
+            .event_broadcast
+            .send(MessageEventKind::RevokedCommunityChannelPermission {
+                community_id: self.community_id,
                 channel_id,
                 permission,
                 role_id,
+            });
+
+        self.publish(
+            None,
+            CommunityMessagingEvents::UpdateCommunity {
+                community: self.document.clone(),
+                kind: CommunityUpdateKind::RevokeCommunityChannelPermission {
+                    channel_id,
+                    permission,
+                    role_id,
+                },
             },
-        }, true).await
+            true,
+        )
+        .await
     }
     pub async fn grant_community_channel_permission_for_all(
         &mut self,
@@ -1785,11 +2074,15 @@ impl CommunityTask {
         permission: CommunityChannelPermission,
     ) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
-        if !self.document.has_permission(own_did, &CommunityPermission::ManagePermissions) {
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::ManagePermissions)
+        {
             return Err(Error::Unauthorized);
         }
 
-        let channel_doc = self.document
+        let channel_doc = self
+            .document
             .channels
             .get_mut(&channel_id.to_string())
             .ok_or(Error::CommunityChannelDoesntExist)?;
@@ -1800,19 +2093,26 @@ impl CommunityTask {
             return Err(Error::PermissionAlreadyGranted);
         }
 
-        let _ = self.event_broadcast.send(MessageEventKind::GrantedCommunityChannelPermissionForAll {
-            community_id: self.community_id,
-            channel_id,
-            permission,
-        });
+        let _ =
+            self.event_broadcast
+                .send(MessageEventKind::GrantedCommunityChannelPermissionForAll {
+                    community_id: self.community_id,
+                    channel_id,
+                    permission,
+                });
 
-        self.publish(None, CommunityMessagingEvents::UpdateCommunity {
-            community: self.document.clone(),
-            kind: CommunityUpdateKind::GrantCommunityChannelPermissionForAll {
-                channel_id,
-                permission,
+        self.publish(
+            None,
+            CommunityMessagingEvents::UpdateCommunity {
+                community: self.document.clone(),
+                kind: CommunityUpdateKind::GrantCommunityChannelPermissionForAll {
+                    channel_id,
+                    permission,
+                },
             },
-        }, true).await
+            true,
+        )
+        .await
     }
     pub async fn revoke_community_channel_permission_for_all(
         &mut self,
@@ -1820,30 +2120,41 @@ impl CommunityTask {
         permission: CommunityChannelPermission,
     ) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
-        if !self.document.has_permission(own_did, &CommunityPermission::ManagePermissions) {
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::ManagePermissions)
+        {
             return Err(Error::Unauthorized);
         }
 
-        let channel_doc = self.document
+        let channel_doc = self
+            .document
             .channels
             .get_mut(&channel_id.to_string())
             .ok_or(Error::CommunityChannelDoesntExist)?;
         channel_doc.permissions.insert(permission, IndexSet::new());
         self.set_document().await?;
 
-        let _ = self.event_broadcast.send(MessageEventKind::RevokedCommunityChannelPermissionForAll {
-            community_id: self.community_id,
-            channel_id,
-            permission,
-        });
+        let _ =
+            self.event_broadcast
+                .send(MessageEventKind::RevokedCommunityChannelPermissionForAll {
+                    community_id: self.community_id,
+                    channel_id,
+                    permission,
+                });
 
-        self.publish(None, CommunityMessagingEvents::UpdateCommunity {
-            community: self.document.clone(),
-            kind: CommunityUpdateKind::RevokeCommunityChannelPermissionForAll {
-                channel_id,
-                permission,
+        self.publish(
+            None,
+            CommunityMessagingEvents::UpdateCommunity {
+                community: self.document.clone(),
+                kind: CommunityUpdateKind::RevokeCommunityChannelPermissionForAll {
+                    channel_id,
+                    permission,
+                },
             },
-        }, true).await
+            true,
+        )
+        .await
     }
     pub async fn send_community_channel_message(
         &mut self,
@@ -1947,10 +2258,7 @@ impl CommunityTask {
 
         let mut recipients = self.document.participants().clone();
 
-        for recipient in recipients
-            .iter()
-            .filter(|did| own_did.ne(did))
-        {
+        for recipient in recipients.iter().filter(|did| own_did.ne(did)) {
             let peer_id = recipient.to_peer_id()?;
 
             // We want to confirm that there is atleast one peer subscribed before attempting to send a message
@@ -2041,7 +2349,6 @@ impl CommunityTask {
             }
         }
     }
-
 }
 
 async fn message_event(
@@ -2058,158 +2365,191 @@ async fn message_event(
 
     match events {
         CommunityMessagingEvents::New { message } => todo!(),
-        CommunityMessagingEvents::Edit { community_id, community_channel_id, message_id, modified, lines, nonce, signature } => todo!(),
-        CommunityMessagingEvents::Delete { community_id, community_channel_id, message_id } => todo!(),
-        CommunityMessagingEvents::Pin { community_id, community_channel_id, member, message_id, state } => todo!(),
-        CommunityMessagingEvents::React { community_id, community_channel_id, reactor, message_id, state, emoji } => todo!(),
+        CommunityMessagingEvents::Edit {
+            community_id,
+            community_channel_id,
+            message_id,
+            modified,
+            lines,
+            nonce,
+            signature,
+        } => todo!(),
+        CommunityMessagingEvents::Delete {
+            community_id,
+            community_channel_id,
+            message_id,
+        } => todo!(),
+        CommunityMessagingEvents::Pin {
+            community_id,
+            community_channel_id,
+            member,
+            message_id,
+            state,
+        } => todo!(),
+        CommunityMessagingEvents::React {
+            community_id,
+            community_channel_id,
+            reactor,
+            message_id,
+            state,
+            emoji,
+        } => todo!(),
         CommunityMessagingEvents::UpdateCommunity { community, kind } => {
             match kind {
                 CommunityUpdateKind::LeaveCommunity => {
                     this.replace_document(community).await?;
-                    if let Err(e) = this.event_broadcast.send(
-                        MessageEventKind::LeftCommunity { 
-                            community_id 
-                        },
-                    ) {
+                    if let Err(e) = this
+                        .event_broadcast
+                        .send(MessageEventKind::LeftCommunity { community_id })
+                    {
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");
                     }
-                },
+                }
                 CommunityUpdateKind::CreateCommunityInvite { invite } => {
                     this.replace_document(community).await?;
-                    if let Err(e) = this.event_broadcast.send(
-                        MessageEventKind::CreatedCommunityInvite { 
-                            community_id, 
-                            invite: CommunityInvite::from(invite) 
-                        }
-                    ) {
+                    if let Err(e) =
+                        this.event_broadcast
+                            .send(MessageEventKind::CreatedCommunityInvite {
+                                community_id,
+                                invite: CommunityInvite::from(invite),
+                            })
+                    {
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");
                     }
-                },
+                }
                 CommunityUpdateKind::DeleteCommunityInvite { invite_id } => {
                     this.replace_document(community).await?;
-                    if let Err(e) = this.event_broadcast.send(
-                        MessageEventKind::DeletedCommunityInvite { 
-                            community_id, 
-                            invite_id,
-                        }
-                    ) {
+                    if let Err(e) =
+                        this.event_broadcast
+                            .send(MessageEventKind::DeletedCommunityInvite {
+                                community_id,
+                                invite_id,
+                            })
+                    {
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");
                     }
-                },
+                }
                 CommunityUpdateKind::AcceptCommunityInvite { invite_id } => {
                     this.replace_document(community).await?;
-                    if let Err(e) = this.event_broadcast.send(
-                        MessageEventKind::AcceptedCommunityInvite { 
-                            community_id, 
-                            invite_id,
-                        }
-                    ) {
+                    if let Err(e) =
+                        this.event_broadcast
+                            .send(MessageEventKind::AcceptedCommunityInvite {
+                                community_id,
+                                invite_id,
+                            })
+                    {
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");
                     }
-                },
+                }
                 CommunityUpdateKind::EditCommunityInvite { invite_id } => {
                     this.replace_document(community).await?;
-                    if let Err(e) = this.event_broadcast.send(
-                        MessageEventKind::EditedCommunityInvite { 
-                            community_id, 
-                            invite_id,
-                        }
-                    ) {
+                    if let Err(e) =
+                        this.event_broadcast
+                            .send(MessageEventKind::EditedCommunityInvite {
+                                community_id,
+                                invite_id,
+                            })
+                    {
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");
                     }
-                },
+                }
                 CommunityUpdateKind::CreateCommunityRole { role } => {
                     this.replace_document(community).await?;
-                    if let Err(e) = this.event_broadcast.send(
-                        MessageEventKind::CreatedCommunityRole { 
-                            community_id, 
-                            role: CommunityRole::from(role),
-                        }
-                    ) {
+                    if let Err(e) =
+                        this.event_broadcast
+                            .send(MessageEventKind::CreatedCommunityRole {
+                                community_id,
+                                role: CommunityRole::from(role),
+                            })
+                    {
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");
                     }
-                },
+                }
                 CommunityUpdateKind::DeleteCommunityRole { role_id } => {
                     this.replace_document(community).await?;
-                    if let Err(e) = this.event_broadcast.send(
-                        MessageEventKind::DeletedCommunityRole { 
-                            community_id, 
-                            role_id,
-                        }
-                    ) {
+                    if let Err(e) =
+                        this.event_broadcast
+                            .send(MessageEventKind::DeletedCommunityRole {
+                                community_id,
+                                role_id,
+                            })
+                    {
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");
                     }
-                },
+                }
                 CommunityUpdateKind::EditCommunityRole { role_id } => {
                     this.replace_document(community).await?;
-                    if let Err(e) = this.event_broadcast.send(
-                        MessageEventKind::EditedCommunityRole { 
-                            community_id, 
-                            role_id,
-                        }
-                    ) {
+                    if let Err(e) =
+                        this.event_broadcast
+                            .send(MessageEventKind::EditedCommunityRole {
+                                community_id,
+                                role_id,
+                            })
+                    {
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");
                     }
-                },
+                }
                 CommunityUpdateKind::GrantCommunityRole { role_id, user } => {
                     this.replace_document(community).await?;
-                    if let Err(e) = this.event_broadcast.send(
-                        MessageEventKind::GrantedCommunityRole { 
-                            community_id, 
-                            role_id,
-                            user,
-                        }
-                    ) {
+                    if let Err(e) =
+                        this.event_broadcast
+                            .send(MessageEventKind::GrantedCommunityRole {
+                                community_id,
+                                role_id,
+                                user,
+                            })
+                    {
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");
                     }
-                },
+                }
                 CommunityUpdateKind::RevokeCommunityRole { role_id, user } => {
                     this.replace_document(community).await?;
-                    if let Err(e) = this.event_broadcast.send(
-                        MessageEventKind::RevokedCommunityRole { 
-                            community_id, 
-                            role_id,
-                            user,
-                        }
-                    ) {
+                    if let Err(e) =
+                        this.event_broadcast
+                            .send(MessageEventKind::RevokedCommunityRole {
+                                community_id,
+                                role_id,
+                                user,
+                            })
+                    {
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");
                     }
-                },
+                }
                 CommunityUpdateKind::CreateCommunityChannel { channel } => {
                     this.replace_document(community).await?;
-                    if let Err(e) = this.event_broadcast.send(
-                        MessageEventKind::CreatedCommunityChannel { 
-                            community_id, 
-                            channel: CommunityChannel::from(channel),
-                        }
-                    ) {
+                    if let Err(e) =
+                        this.event_broadcast
+                            .send(MessageEventKind::CreatedCommunityChannel {
+                                community_id,
+                                channel: CommunityChannel::from(channel),
+                            })
+                    {
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");
                     }
-                },
+                }
                 CommunityUpdateKind::DeleteCommunityChannel { channel_id } => {
                     this.replace_document(community).await?;
-                    if let Err(e) = this.event_broadcast.send(
-                        MessageEventKind::DeletedCommunityChannel { 
-                            community_id, 
-                            channel_id,
-                        }
-                    ) {
+                    if let Err(e) =
+                        this.event_broadcast
+                            .send(MessageEventKind::DeletedCommunityChannel {
+                                community_id,
+                                channel_id,
+                            })
+                    {
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");
                     }
-                },
+                }
                 CommunityUpdateKind::EditCommunityName { name } => {
                     this.replace_document(community).await?;
-                    if let Err(e) = this.event_broadcast.send(
-                        MessageEventKind::EditedCommunityName { 
-                            community_id, 
-                            name,
-                        }
-                    ) {
+                    if let Err(e) = this
+                        .event_broadcast
+                        .send(MessageEventKind::EditedCommunityName { community_id, name })
+                    {
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");
                     }
-                },
+                }
                 CommunityUpdateKind::EditCommunityDescription { description } => {
-                    if let Some(desc) = description.as_ref()  {
+                    if let Some(desc) = description.as_ref() {
                         if desc.is_empty() || desc.len() > MAX_COMMUNITY_DESCRIPTION {
                             return Err(Error::InvalidLength {
                                 context: "description".into(),
@@ -2226,149 +2566,183 @@ async fn message_event(
                     }
 
                     this.replace_document(community).await?;
+                    if let Err(e) =
+                        this.event_broadcast
+                            .send(MessageEventKind::EditedCommunityDescription {
+                                community_id,
+                                description,
+                            })
+                    {
+                        tracing::warn!(%community_id, error = %e, "Error broadcasting event");
+                    }
+                }
+                CommunityUpdateKind::GrantCommunityPermission {
+                    permission,
+                    role_id,
+                } => {
+                    this.replace_document(community).await?;
+                    if let Err(e) =
+                        this.event_broadcast
+                            .send(MessageEventKind::GrantedCommunityPermission {
+                                community_id,
+                                permission,
+                                role_id,
+                            })
+                    {
+                        tracing::warn!(%community_id, error = %e, "Error broadcasting event");
+                    }
+                }
+                CommunityUpdateKind::RevokeCommunityPermission {
+                    permission,
+                    role_id,
+                } => {
+                    this.replace_document(community).await?;
+                    if let Err(e) =
+                        this.event_broadcast
+                            .send(MessageEventKind::RevokedCommunityPermission {
+                                community_id,
+                                permission,
+                                role_id,
+                            })
+                    {
+                        tracing::warn!(%community_id, error = %e, "Error broadcasting event");
+                    }
+                }
+                CommunityUpdateKind::GrantCommunityPermissionForAll { permission } => {
+                    this.replace_document(community).await?;
                     if let Err(e) = this.event_broadcast.send(
-                        MessageEventKind::EditedCommunityDescription {
+                        MessageEventKind::GrantedCommunityPermissionForAll {
                             community_id,
+                            permission,
+                        },
+                    ) {
+                        tracing::warn!(%community_id, error = %e, "Error broadcasting event");
+                    }
+                }
+                CommunityUpdateKind::RevokeCommunityPermissionForAll { permission } => {
+                    this.replace_document(community).await?;
+                    if let Err(e) = this.event_broadcast.send(
+                        MessageEventKind::RevokedCommunityPermissionForAll {
+                            community_id,
+                            permission,
+                        },
+                    ) {
+                        tracing::warn!(%community_id, error = %e, "Error broadcasting event");
+                    }
+                }
+                CommunityUpdateKind::RemoveCommunityMember { member } => {
+                    this.replace_document(community).await?;
+                    if let Err(e) =
+                        this.event_broadcast
+                            .send(MessageEventKind::RemovedCommunityMember {
+                                community_id,
+                                member,
+                            })
+                    {
+                        tracing::warn!(%community_id, error = %e, "Error broadcasting event");
+                    }
+                }
+                CommunityUpdateKind::EditCommunityChannelName { channel_id, name } => {
+                    this.replace_document(community).await?;
+                    if let Err(e) =
+                        this.event_broadcast
+                            .send(MessageEventKind::EditedCommunityChannelName {
+                                community_id,
+                                channel_id,
+                                name,
+                            })
+                    {
+                        tracing::warn!(%community_id, error = %e, "Error broadcasting event");
+                    }
+                }
+                CommunityUpdateKind::EditCommunityChannelDescription {
+                    channel_id,
+                    description,
+                } => {
+                    this.replace_document(community).await?;
+                    if let Err(e) = this.event_broadcast.send(
+                        MessageEventKind::EditedCommunityChannelDescription {
+                            community_id,
+                            channel_id,
                             description,
                         },
                     ) {
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");
                     }
-                },
-                CommunityUpdateKind::GrantCommunityPermission { permission, role_id } => {
+                }
+                CommunityUpdateKind::GrantCommunityChannelPermission {
+                    channel_id,
+                    permission,
+                    role_id,
+                } => {
                     this.replace_document(community).await?;
                     if let Err(e) = this.event_broadcast.send(
-                        MessageEventKind::GrantedCommunityPermission { 
-                            community_id, 
-                            permission,
-                            role_id,
-                        }
-                    ) {
-                        tracing::warn!(%community_id, error = %e, "Error broadcasting event");
-                    }
-                },
-                CommunityUpdateKind::RevokeCommunityPermission { permission, role_id } => {
-                    this.replace_document(community).await?;
-                    if let Err(e) = this.event_broadcast.send(
-                        MessageEventKind::RevokedCommunityPermission { 
-                            community_id, 
-                            permission,
-                            role_id,
-                        }
-                    ) {
-                        tracing::warn!(%community_id, error = %e, "Error broadcasting event");
-                    }
-                },
-                CommunityUpdateKind::GrantCommunityPermissionForAll { permission } => {
-                    this.replace_document(community).await?;
-                    if let Err(e) = this.event_broadcast.send(
-                        MessageEventKind::GrantedCommunityPermissionForAll { 
-                            community_id, 
-                            permission,
-                        }
-                    ) {
-                        tracing::warn!(%community_id, error = %e, "Error broadcasting event");
-                    }
-                },
-                CommunityUpdateKind::RevokeCommunityPermissionForAll { permission } => {
-                    this.replace_document(community).await?;
-                    if let Err(e) = this.event_broadcast.send(
-                        MessageEventKind::RevokedCommunityPermissionForAll { 
-                            community_id, 
-                            permission,
-                        }
-                    ) {
-                        tracing::warn!(%community_id, error = %e, "Error broadcasting event");
-                    }
-                },
-                CommunityUpdateKind::RemoveCommunityMember { member } => {
-                    this.replace_document(community).await?;
-                    if let Err(e) = this.event_broadcast.send(
-                        MessageEventKind::RemovedCommunityMember { 
-                            community_id, 
-                            member,
-                        }
-                    ) {
-                        tracing::warn!(%community_id, error = %e, "Error broadcasting event");
-                    }
-                },
-                CommunityUpdateKind::EditCommunityChannelName { channel_id, name } => {
-                    this.replace_document(community).await?;
-                    if let Err(e) = this.event_broadcast.send(
-                        MessageEventKind::EditedCommunityChannelName { 
-                            community_id, 
-                            channel_id,
-                            name,
-                        }
-                    ) {
-                        tracing::warn!(%community_id, error = %e, "Error broadcasting event");
-                    }
-                },
-                CommunityUpdateKind::EditCommunityChannelDescription { channel_id, description } => {
-                    this.replace_document(community).await?;
-                    if let Err(e) = this.event_broadcast.send(
-                        MessageEventKind::EditedCommunityChannelDescription { 
-                            community_id, 
-                            channel_id,
-                            description,
-                        }
-                    ) {
-                        tracing::warn!(%community_id, error = %e, "Error broadcasting event");
-                    }
-                },
-                CommunityUpdateKind::GrantCommunityChannelPermission { channel_id, permission, role_id } => {
-                    this.replace_document(community).await?;
-                    if let Err(e) = this.event_broadcast.send(
-                        MessageEventKind::GrantedCommunityChannelPermission { 
-                            community_id, 
+                        MessageEventKind::GrantedCommunityChannelPermission {
+                            community_id,
                             channel_id,
                             permission,
                             role_id,
-                        }
+                        },
                     ) {
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");
                     }
-                },
-                CommunityUpdateKind::RevokeCommunityChannelPermission { channel_id, permission, role_id } => {
+                }
+                CommunityUpdateKind::RevokeCommunityChannelPermission {
+                    channel_id,
+                    permission,
+                    role_id,
+                } => {
                     this.replace_document(community).await?;
                     if let Err(e) = this.event_broadcast.send(
-                        MessageEventKind::RevokedCommunityChannelPermission { 
-                            community_id, 
+                        MessageEventKind::RevokedCommunityChannelPermission {
+                            community_id,
                             channel_id,
                             permission,
                             role_id,
-                        }
+                        },
                     ) {
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");
                     }
-                },
-                CommunityUpdateKind::GrantCommunityChannelPermissionForAll { channel_id, permission } => {
+                }
+                CommunityUpdateKind::GrantCommunityChannelPermissionForAll {
+                    channel_id,
+                    permission,
+                } => {
                     this.replace_document(community).await?;
                     if let Err(e) = this.event_broadcast.send(
-                        MessageEventKind::GrantedCommunityChannelPermissionForAll { 
-                            community_id, 
+                        MessageEventKind::GrantedCommunityChannelPermissionForAll {
+                            community_id,
                             channel_id,
                             permission,
-                        }
+                        },
                     ) {
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");
                     }
-                },
-                CommunityUpdateKind::RevokeCommunityChannelPermissionForAll { channel_id, permission } => {
+                }
+                CommunityUpdateKind::RevokeCommunityChannelPermissionForAll {
+                    channel_id,
+                    permission,
+                } => {
                     this.replace_document(community).await?;
                     if let Err(e) = this.event_broadcast.send(
-                        MessageEventKind::RevokedCommunityChannelPermissionForAll { 
-                            community_id, 
+                        MessageEventKind::RevokedCommunityChannelPermissionForAll {
+                            community_id,
                             channel_id,
                             permission,
-                        }
+                        },
                     ) {
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");
                     }
-                },
+                }
             }
-        },
-        CommunityMessagingEvents::Event { community_id, community_channel_id, member, event, cancelled } => todo!(),
+        }
+        CommunityMessagingEvents::Event {
+            community_id,
+            community_channel_id,
+            member,
+            event,
+            cancelled,
+        } => todo!(),
     }
 
     Ok(())
@@ -2539,10 +2913,7 @@ async fn process_pending_payload(this: &mut CommunityTask) {
     }
 }
 
-async fn process_community_event(
-    this: &mut CommunityTask,
-    message: Message,
-) -> Result<(), Error> {
+async fn process_community_event(this: &mut CommunityTask, message: Message) -> Result<(), Error> {
     let payload = PayloadMessage::<Vec<u8>>::from_bytes(&message.data)?;
     let sender = payload.sender().to_did()?;
 

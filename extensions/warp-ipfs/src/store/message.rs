@@ -1,9 +1,9 @@
-mod task;
 mod community_task;
+mod task;
 
+use community_task::CommunityTaskCommand;
 use futures_timer::Delay;
 use task::ConversationTaskCommand;
-use community_task::CommunityTaskCommand;
 
 use bytes::Bytes;
 use std::borrow::BorrowMut;
@@ -52,16 +52,16 @@ use crate::{
 use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
 
 use crate::store::{
-    CommunityEvents, MAX_COMMUNITY_CHANNELS,
     community::{
         CommunityChannelDocument, CommunityDocument, CommunityInviteDocument, CommunityRoleDocument,
-    }
+    },
+    CommunityEvents, MAX_COMMUNITY_CHANNELS,
 };
 use chrono::{DateTime, Utc};
 use warp::raygun::community::{
-    CommunityChannelPermission, CommunityPermission, CommunityRole, CommunityRoles, RoleId,
-    Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType,
-    CommunityInvite, CommunityPermissions,
+    Community, CommunityChannel, CommunityChannelPermission, CommunityChannelPermissions,
+    CommunityChannelType, CommunityInvite, CommunityPermission, CommunityPermissions,
+    CommunityRole, CommunityRoles, RoleId,
 };
 use warp::raygun::{ConversationImage, GroupPermissionOpt};
 use warp::{
@@ -948,9 +948,7 @@ impl MessageStore {
         let _ = community_meta
             .command_tx
             .clone()
-            .send(CommunityTaskCommand::LeaveCommunity{
-                response: tx,
-            })
+            .send(CommunityTaskCommand::LeaveCommunity { response: tx })
             .await;
         rx.await.map_err(anyhow::Error::from)?
     }
@@ -965,9 +963,7 @@ impl MessageStore {
         let _ = community_meta
             .command_tx
             .clone()
-            .send(CommunityTaskCommand::GetCommunityIcon {
-                response: tx,
-            })
+            .send(CommunityTaskCommand::GetCommunityIcon { response: tx })
             .await;
         rx.await.map_err(anyhow::Error::from)?
     }
@@ -984,9 +980,7 @@ impl MessageStore {
         let _ = community_meta
             .command_tx
             .clone()
-            .send(CommunityTaskCommand::GetCommunityBanner {
-                response: tx,
-            })
+            .send(CommunityTaskCommand::GetCommunityBanner { response: tx })
             .await;
         rx.await.map_err(anyhow::Error::from)?
     }
@@ -1136,7 +1130,7 @@ impl MessageStore {
             .clone()
             .send(CommunityTaskCommand::EditCommunityInvite {
                 invite_id,
-                invite, 
+                invite,
                 response: tx,
             })
             .await;
@@ -1605,11 +1599,13 @@ impl MessageStore {
         let _ = community_meta
             .command_tx
             .clone()
-            .send(CommunityTaskCommand::GrantCommunityChannelPermissionForAll {
-                channel_id,
-                permission,
-                response: tx,
-            })
+            .send(
+                CommunityTaskCommand::GrantCommunityChannelPermissionForAll {
+                    channel_id,
+                    permission,
+                    response: tx,
+                },
+            )
             .await;
         rx.await.map_err(anyhow::Error::from)?
     }
@@ -1628,11 +1624,13 @@ impl MessageStore {
         let _ = community_meta
             .command_tx
             .clone()
-            .send(CommunityTaskCommand::RevokeCommunityChannelPermissionForAll {
-                channel_id,
-                permission,
-                response: tx,
-            })
+            .send(
+                CommunityTaskCommand::RevokeCommunityChannelPermissionForAll {
+                    channel_id,
+                    permission,
+                    response: tx,
+                },
+            )
             .await;
         rx.await.map_err(anyhow::Error::from)?
     }
@@ -2511,7 +2509,6 @@ impl ConversationInner {
 
         Ok(())
     }
-
 }
 impl ConversationInner {
     async fn create_community_task(&mut self, community_id: Uuid) -> Result<(), Error> {
@@ -2640,11 +2637,7 @@ impl ConversationInner {
                 tracing::warn!(community_id = %community.id, "Unable to publish to topic. Queuing event");
                 self.queue_event(
                     target.clone(),
-                    Queue::direct(
-                        peer_id,
-                        target.messaging(),
-                        payload.message().to_vec(),
-                    ),
+                    Queue::direct(peer_id, target.messaging(), payload.message().to_vec()),
                 )
                 .await;
             }
@@ -2715,26 +2708,36 @@ impl ConversationInner {
 
     pub async fn list_communities_joined(&self) -> Result<IndexSet<Uuid>, Error> {
         let own_did = &self.identity.did_key();
-        Ok(self.list_community().await.iter().filter_map(|c| {
-            if &c.creator == own_did || c.members.contains(own_did) {
-                Some(c.id)
-            } else {
-                None
-            }
-        }).collect())
+        Ok(self
+            .list_community()
+            .await
+            .iter()
+            .filter_map(|c| {
+                if &c.creator == own_did || c.members.contains(own_did) {
+                    Some(c.id)
+                } else {
+                    None
+                }
+            })
+            .collect())
     }
     pub async fn list_communities_invited_to(&self) -> Result<IndexSet<Uuid>, Error> {
         let own_did = &self.identity.did_key();
-        Ok(self.list_community().await.iter().filter_map(|c| {
-            for (id, invite) in &c.invites {
-                if let Some(target) = &invite.target_user {
-                    if target == own_did {
-                        return Some(c.id);
+        Ok(self
+            .list_community()
+            .await
+            .iter()
+            .filter_map(|c| {
+                for (id, invite) in &c.invites {
+                    if let Some(target) = &invite.target_user {
+                        if target == own_did {
+                            return Some(c.id);
+                        }
                     }
                 }
-            }
-            None
-        }).collect())
+                None
+            })
+            .collect())
     }
 }
 

@@ -1,9 +1,9 @@
 use super::{conversation::message::MessageDocument, topics::ConversationTopic, PeerIdExt};
 use crate::store::DidExt;
 use chrono::{DateTime, Utc};
-use ipld_core::cid::Cid;
 use core::hash::Hash;
 use indexmap::{IndexMap, IndexSet};
+use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, Keypair};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -202,7 +202,6 @@ impl CommunityDocument {
         // Ok(list.contains(ipfs, message_id).await)
         Err(Error::Unimplemented)
     }
-
 }
 impl CommunityDocument {
     pub fn new(keypair: &Keypair, name: String) -> Result<Self, Error> {

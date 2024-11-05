@@ -571,7 +571,9 @@ where
     M: MultiPass,
     R: RayGun,
 {
-    async fn get_community_stream(&mut self, community_id: Uuid,
+    async fn get_community_stream(
+        &mut self,
+        community_id: Uuid,
     ) -> Result<MessageEventStream, Error> {
         self.raygun.get_community_stream(community_id).await
     }

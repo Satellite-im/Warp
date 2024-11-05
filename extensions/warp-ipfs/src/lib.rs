@@ -1673,7 +1673,6 @@ impl RayGunAttachment for WarpIpfs {
 
 #[async_trait::async_trait]
 impl RayGunCommunity for WarpIpfs {
-
     async fn get_community_stream(
         &mut self,
         community_id: Uuid,

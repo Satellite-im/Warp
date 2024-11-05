@@ -30,7 +30,10 @@ use warp::{
     },
     error::Error,
     multipass::identity::IdentityStatus,
-    raygun::{community::{CommunityChannelPermission, CommunityPermission, RoleId}, GroupPermissions, MessageEvent, PinState, ReactionState},
+    raygun::{
+        community::{CommunityChannelPermission, CommunityPermission, RoleId},
+        GroupPermissions, MessageEvent, PinState, ReactionState,
+    },
 };
 
 use conversation::{message::MessageDocument, ConversationDocument};
@@ -465,34 +468,62 @@ pub enum ConversationUpdateKind {
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum CommunityUpdateKind {
     LeaveCommunity,
-    CreateCommunityInvite { invite: CommunityInviteDocument },
-    DeleteCommunityInvite { invite_id: Uuid },
-    AcceptCommunityInvite { invite_id: Uuid },
-    EditCommunityInvite { invite_id: Uuid },
-    CreateCommunityRole { role: CommunityRoleDocument },
-    DeleteCommunityRole { role_id: RoleId },
-    EditCommunityRole { role_id: RoleId },
-    GrantCommunityRole { role_id: RoleId, user: DID },
-    RevokeCommunityRole { role_id: RoleId, user: DID },
-    CreateCommunityChannel { channel: CommunityChannelDocument },
-    DeleteCommunityChannel { channel_id: Uuid },
-    EditCommunityName { name: String },
-    EditCommunityDescription { description: Option<String> },
-    GrantCommunityPermission { 
+    CreateCommunityInvite {
+        invite: CommunityInviteDocument,
+    },
+    DeleteCommunityInvite {
+        invite_id: Uuid,
+    },
+    AcceptCommunityInvite {
+        invite_id: Uuid,
+    },
+    EditCommunityInvite {
+        invite_id: Uuid,
+    },
+    CreateCommunityRole {
+        role: CommunityRoleDocument,
+    },
+    DeleteCommunityRole {
+        role_id: RoleId,
+    },
+    EditCommunityRole {
+        role_id: RoleId,
+    },
+    GrantCommunityRole {
+        role_id: RoleId,
+        user: DID,
+    },
+    RevokeCommunityRole {
+        role_id: RoleId,
+        user: DID,
+    },
+    CreateCommunityChannel {
+        channel: CommunityChannelDocument,
+    },
+    DeleteCommunityChannel {
+        channel_id: Uuid,
+    },
+    EditCommunityName {
+        name: String,
+    },
+    EditCommunityDescription {
+        description: Option<String>,
+    },
+    GrantCommunityPermission {
         permission: CommunityPermission,
         role_id: RoleId,
     },
-    RevokeCommunityPermission { 
+    RevokeCommunityPermission {
         permission: CommunityPermission,
         role_id: RoleId,
     },
-    GrantCommunityPermissionForAll { 
+    GrantCommunityPermissionForAll {
         permission: CommunityPermission,
     },
-    RevokeCommunityPermissionForAll { 
+    RevokeCommunityPermissionForAll {
         permission: CommunityPermission,
     },
-    RemoveCommunityMember { 
+    RemoveCommunityMember {
         member: DID,
     },
     EditCommunityChannelName {

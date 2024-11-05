@@ -248,7 +248,6 @@ pub enum CommunityChannelPermission {
 
 #[async_trait::async_trait]
 pub trait RayGunCommunity: Sync + Send {
-
     async fn get_community_stream(
         &mut self,
         community_id: Uuid,

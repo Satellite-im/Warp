@@ -8,7 +8,10 @@ use crate::error::Error;
 use crate::raygun::community::RayGunCommunity;
 use crate::{Extension, SingleHandle};
 
-use community::{CommunityChannel, CommunityChannelPermission, CommunityInvite, CommunityPermission, CommunityRole, RoleId};
+use community::{
+    CommunityChannel, CommunityChannelPermission, CommunityInvite, CommunityPermission,
+    CommunityRole, RoleId,
+};
 use derive_more::Display;
 use futures::stream::BoxStream;
 
@@ -238,7 +241,6 @@ pub enum MessageEventKind {
         channel_id: Uuid,
         permission: CommunityChannelPermission,
     },
-
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
