@@ -7,7 +7,7 @@ use bytes::Bytes;
 use std::borrow::BorrowMut;
 use std::time::Duration;
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     path::Path,
     sync::Arc,
 };
@@ -1272,28 +1272,22 @@ impl ConversationInner {
     }
 
     pub async fn delete(&mut self, id: Uuid) -> Result<ConversationDocument, Error> {
-        if !self.contains(id).await {
-            return Err(Error::InvalidConversation);
-        }
+        let conversation = self.get(id).await?;
+        let mut meta = self
+            .conversation_task
+            .remove(&id)
+            .ok_or(Error::InvalidConversation)?;
 
-        let mut conversation = self.get(id).await?;
+        let (tx, rx) = oneshot::channel();
+        let _ = meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::Delete { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)??;
 
-        if conversation.deleted {
-            return Err(Error::InvalidConversation);
-        }
-
-        conversation.messages.take();
-        conversation.deleted = true;
-
-        self.set_document(&mut conversation).await?;
-
-        if let Ok(mut ks_map) = self.root.get_conversation_keystore_map().await {
-            if ks_map.remove(&id.to_string()).is_some() {
-                if let Err(e) = self.set_keystore_map(ks_map).await {
-                    tracing::warn!(conversation_id = %id, "Failed to remove keystore: {e}");
-                }
-            }
-        }
+        meta.command_tx.close_channel();
+        meta.handle.abort();
 
         Ok(conversation)
     }
@@ -1311,10 +1305,6 @@ impl ConversationInner {
             .await
             .any(|conversation| async move { conversation.id() == id })
             .await
-    }
-
-    pub async fn set_keystore_map(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
-        self.root.set_conversation_keystore_map(map).await
     }
 
     pub async fn set_document<B: BorrowMut<ConversationDocument>>(
@@ -1457,11 +1447,6 @@ impl ConversationInner {
         conversation_id: Uuid,
         broadcast: bool,
     ) -> Result<(), Error> {
-        if let Some(mut meta) = self.conversation_task.remove(&conversation_id) {
-            meta.command_tx.close_channel();
-            meta.handle.abort();
-        }
-
         let document_type = self.delete(conversation_id).await?;
 
         let own_did = &self.identity.did_key();
