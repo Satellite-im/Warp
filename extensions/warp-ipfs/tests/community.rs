@@ -1,10 +1,11 @@
 mod common;
 #[cfg(test)]
 mod test {
+    use chrono::{DateTime, Utc};
     use futures::StreamExt;
     use std::time::Duration;
     use warp::raygun::{
-        community::{Community, CommunityInvite, CommunityPermission, RayGunCommunity},
+        community::{Community, CommunityChannelPermission, CommunityChannelType, CommunityInvite, CommunityPermission, RayGunCommunity},
         MessageEventKind,
     };
 
@@ -52,11 +53,9 @@ mod test {
                     user,
                 }) = event
                 {
-                    assert!(
-                        community_id == community.id()
-                            && invite_id == invite.id()
-                            && user == did_b.clone()
-                    );
+                    assert!(community_id == community.id());
+                    assert!(invite_id == invite.id());
+                    assert!(user == did_b.clone());
                     break;
                 }
             }
@@ -265,39 +264,29 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
         let (instance_c, did_c, _) = &mut accounts[2].clone();
 
-        let community = instance_a
-            .create_community("Community0")
-            .await
-            .expect("user a should be able to create role");
+        let community = instance_a.create_community("Community0").await?;
+
+        let invite_for_b = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+
+        instance_b
+            .accept_community_invite(community.id(), invite_for_b.id())
+            .await?;
+
         let role = instance_a
             .create_community_role(community.id(), "Role0")
-            .await
-            .expect("user a should be able to create role");
+            .await?;
         instance_a
             .grant_community_permission(
                 community.id(),
                 CommunityPermission::ManageInvites,
                 role.id(),
             )
-            .await
-            .expect("user a should be able to grant permission");
-
-        let invite_for_b = instance_a
-            .create_community_invite(community.id(), Some(did_b.clone()), None)
-            .await
-            .expect("user a should be able to create invite");
-
-        instance_b
-            .accept_community_invite(community.id(), invite_for_b.id())
-            .await
-            .expect("user b should be able to accept invite");
-
+            .await?;
         instance_a
             .grant_community_role(community.id(), role.id(), did_b.clone())
-            .await
-            .expect("user a should be able to grant role to user b");
-
-        let mut conversation_b = instance_b.get_community_stream(community.id()).await?;
+            .await?;
 
         let role_as_seen_by_a = instance_a
             .get_community_role(community.id(), role.id())
@@ -311,13 +300,11 @@ mod test {
 
         let invite_for_c = instance_b
             .create_community_invite(community.id(), Some(did_c.clone()), None)
-            .await
-            .expect("user b should be able to create invite");
+            .await?;
 
         instance_c
             .accept_community_invite(community.id(), invite_for_c.id())
-            .await
-            .expect("user c should be able to accept invite");
+            .await?;
 
         Ok(())
     }
@@ -330,20 +317,25 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
-        let invite = instance_a
+        let invite_for_b = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+
+        instance_b
+            .accept_community_invite(community.id(), invite_for_b.id())
+            .await?;
+
+        let invite_to_try_delete = instance_a
             .create_community_invite(community.id(), None, None)
             .await?;
 
-        match instance_b
-            .delete_community_invite(community.id(), invite.id())
-            .await
-        {
-            Err(e) => match e {
-                Error::Unauthorized => {}
-                _ => panic!("error should be Error::Unauthorized"),
-            },
-            Ok(_) => panic!("should be unauthorized to delete community"),
-        }
+        let result = instance_b
+            .delete_community_invite(community.id(), invite_to_try_delete.id())
+            .await;
+        assert_eq!(
+            format!("{:?}", result),
+            format!("{:?}", Err::<Community, Error>(Error::Unauthorized))
+        );
         Ok(())
     }
     #[async_test]
@@ -355,6 +347,14 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
+
+        let invite_for_b = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        instance_b
+            .accept_community_invite(community.id(), invite_for_b.id())
+            .await?;
+
         let role = instance_a
             .create_community_role(community.id(), "Role0")
             .await?;
@@ -368,12 +368,12 @@ mod test {
                 role.id(),
             )
             .await?;
-        let invite = instance_a
+
+        let invite_to_delete = instance_a
             .create_community_invite(community.id(), None, None)
             .await?;
-
         instance_b
-            .delete_community_invite(community.id(), invite.id())
+            .delete_community_invite(community.id(), invite_to_delete.id())
             .await?;
         Ok(())
     }
@@ -404,7 +404,24 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
-        assert!(false);
+        let invite_for_b = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        instance_b
+            .accept_community_invite(community.id(), invite_for_b.id())
+            .await?;
+
+        let mut invite = instance_a
+            .create_community_invite(community.id(), None, None)
+            .await?;
+        invite.set_target_user(Some(did_b.clone()));
+        let result = instance_b
+            .edit_community_invite(community.id(), invite.id(), invite)
+            .await;
+        assert_eq!(
+            format!("{:?}", result),
+            format!("{:?}", Err::<Community, Error>(Error::Unauthorized))
+        );
         Ok(())
     }
     #[async_test]
@@ -416,43 +433,94 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
-        assert!(false);
+        let invite_for_b = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        instance_b
+            .accept_community_invite(community.id(), invite_for_b.id())
+            .await?;
+
+        let role = instance_a
+            .create_community_role(community.id(), "Role0")
+            .await?;
+        instance_a
+            .grant_community_role(community.id(), role.id(), did_b.clone())
+            .await?;
+        instance_a
+            .grant_community_permission(
+                community.id(),
+                CommunityPermission::ManageInvites,
+                role.id(),
+            )
+            .await?;
+
+        let mut invite = instance_a
+            .create_community_invite(community.id(), None, None)
+            .await?;
+        invite.set_target_user(Some(did_b.clone()));
+        instance_b
+            .edit_community_invite(community.id(), invite.id(), invite)
+            .await?;
         Ok(())
     }
     #[async_test]
-    async fn accept_valid_community_invitation() -> anyhow::Result<()> {
-        let context = Some("test::accept_valid_community_invitation".into());
+    async fn accept_valid_community_invite() -> anyhow::Result<()> {
+        let context = Some("test::accept_valid_community_invite".into());
         let account_opts = (None, None, context);
         let mut accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
-        assert!(false);
+        let invite_for_b = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        instance_b
+            .accept_community_invite(community.id(), invite_for_b.id())
+            .await?;
         Ok(())
     }
     #[async_test]
-    async fn try_accept_invalid_community_invitation() -> anyhow::Result<()> {
-        let context = Some("test::try_accept_invalid_community_invitation".into());
+    async fn try_accept_wrong_target_community_invite() -> anyhow::Result<()> {
+        let context = Some("test::try_accept_wrong_target_community_invite".into());
+        let account_opts = (None, None, context);
+        let mut accounts = create_accounts(vec![account_opts.clone(), account_opts.clone(), account_opts]).await?;
+        let (instance_a, _, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
+        let (_, did_c, _) = &mut accounts[2].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+        let invite_for_b = instance_a
+            .create_community_invite(community.id(), Some(did_c.clone()), None)
+            .await?;
+        let result = instance_b
+            .accept_community_invite(community.id(), invite_for_b.id())
+            .await;
+        assert_eq!(
+            format!("{:?}", result),
+            format!("{:?}", Err::<Community, Error>(Error::InvalidCommunity))
+        );
+        Ok(())
+    }
+    #[async_test]
+    async fn try_accept_expired_community_invite() -> anyhow::Result<()> {
+        let context = Some("test::try_accept_expired_community_invite".into());
         let account_opts = (None, None, context);
         let mut accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
-        assert!(false);
-        Ok(())
-    }
-    #[async_test]
-    async fn try_accept_expired_community_invitation() -> anyhow::Result<()> {
-        let context = Some("test::try_accept_expired_community_invitation".into());
-        let account_opts = (None, None, context);
-        let mut accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
-        let (instance_a, _, _) = &mut accounts[0].clone();
-        let (instance_b, did_b, _) = &mut accounts[1].clone();
-
-        let community = instance_a.create_community("Community0").await?;
-        assert!(false);
+        let invite_for_b = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), Some(chrono::Utc::now() - chrono::Duration::days(1)))
+            .await?;
+        let result = instance_b
+            .accept_community_invite(community.id(), invite_for_b.id())
+            .await;
+        assert_eq!(
+            format!("{:?}", result),
+            format!("{:?}", Err::<Community, Error>(Error::CommunityInviteExpired))
+        );
         Ok(())
     }
 
@@ -465,7 +533,17 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
-        assert!(false);
+        let channel = instance_a.create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard).await?;
+        instance_a.revoke_community_channel_permission_for_all(community.id(), channel.id(), CommunityChannelPermission::ViewChannel).await?;
+        
+        let invite = instance_a.create_community_invite(community.id(), Some(did_b.clone()), None).await?;
+        instance_b.accept_community_invite(community.id(), invite.id()).await?;
+
+        let result = instance_b.get_community_channel(community.id(), channel.id()).await;
+        assert_eq!(
+            format!("{:?}", result),
+            format!("{:?}", Err::<Community, Error>(Error::Unauthorized))
+        );
         Ok(())
     }
     #[async_test]
@@ -477,7 +555,12 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
-        assert!(false);
+        let channel = instance_a.create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard).await?;
+        
+        let invite = instance_a.create_community_invite(community.id(), Some(did_b.clone()), None).await?;
+        instance_b.accept_community_invite(community.id(), invite.id()).await?;
+
+        instance_b.get_community_channel(community.id(), channel.id()).await?;
         Ok(())
     }
     #[async_test]
@@ -489,7 +572,14 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
-        assert!(false);
+        let invite = instance_a.create_community_invite(community.id(), Some(did_b.clone()), None).await?;
+        instance_b.accept_community_invite(community.id(), invite.id()).await?;
+        
+        let result = instance_b.create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard).await;
+        assert_eq!(
+            format!("{:?}", result),
+            format!("{:?}", Err::<Community, Error>(Error::Unauthorized))
+        );
         Ok(())
     }
     #[async_test]
@@ -501,7 +591,24 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
-        assert!(false);
+        let invite = instance_a.create_community_invite(community.id(), Some(did_b.clone()), None).await?;
+        instance_b.accept_community_invite(community.id(), invite.id()).await?;
+        
+        let role = instance_a
+            .create_community_role(community.id(), "Role0")
+            .await?;
+        instance_a
+            .grant_community_role(community.id(), role.id(), did_b.clone())
+            .await?;
+        instance_a
+            .grant_community_permission(
+                community.id(),
+                CommunityPermission::ManageChannels,
+                role.id(),
+            )
+            .await?;
+
+        instance_b.create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard).await?;
         Ok(())
     }
     #[async_test]
@@ -513,7 +620,15 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
-        assert!(false);
+        let invite = instance_a.create_community_invite(community.id(), Some(did_b.clone()), None).await?;
+        instance_b.accept_community_invite(community.id(), invite.id()).await?;
+        
+        let channel = instance_a.create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard).await?;
+        let result = instance_b.delete_community_channel(community.id(), channel.id()).await;
+        assert_eq!(
+            format!("{:?}", result),
+            format!("{:?}", Err::<Community, Error>(Error::Unauthorized))
+        );
         Ok(())
     }
     #[async_test]
@@ -525,7 +640,25 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
-        assert!(false);
+        let invite = instance_a.create_community_invite(community.id(), Some(did_b.clone()), None).await?;
+        instance_b.accept_community_invite(community.id(), invite.id()).await?;
+        
+        let role = instance_a
+            .create_community_role(community.id(), "Role0")
+            .await?;
+        instance_a
+            .grant_community_role(community.id(), role.id(), did_b.clone())
+            .await?;
+        instance_a
+            .grant_community_permission(
+                community.id(),
+                CommunityPermission::ManageChannels,
+                role.id(),
+            )
+            .await?;
+
+        let channel = instance_a.create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard).await?;
+        let result = instance_b.delete_community_channel(community.id(), channel.id()).await?;
         Ok(())
     }
 
@@ -538,7 +671,14 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
-        assert!(false);
+        let invite = instance_a.create_community_invite(community.id(), Some(did_b.clone()), None).await?;
+        instance_b.accept_community_invite(community.id(), invite.id()).await?;
+
+        let result = instance_b.edit_community_name(community.id(), "Community1").await;
+        assert_eq!(
+            format!("{:?}", result),
+            format!("{:?}", Err::<Community, Error>(Error::Unauthorized))
+        );
         Ok(())
     }
     #[async_test]
@@ -550,7 +690,24 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
-        assert!(false);
+        let invite = instance_a.create_community_invite(community.id(), Some(did_b.clone()), None).await?;
+        instance_b.accept_community_invite(community.id(), invite.id()).await?;
+
+        let role = instance_a
+            .create_community_role(community.id(), "Role0")
+            .await?;
+        instance_a
+            .grant_community_role(community.id(), role.id(), did_b.clone())
+            .await?;
+        instance_a
+            .grant_community_permission(
+                community.id(),
+                CommunityPermission::EditInfo,
+                role.id(),
+            )
+            .await?;
+
+        instance_b.edit_community_name(community.id(), "Community1").await?;
         Ok(())
     }
     #[async_test]
@@ -562,7 +719,14 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
-        assert!(false);
+        let invite = instance_a.create_community_invite(community.id(), Some(did_b.clone()), None).await?;
+        instance_b.accept_community_invite(community.id(), invite.id()).await?;
+
+        let result = instance_b.edit_community_description(community.id(), Some("description".to_string())).await;
+        assert_eq!(
+            format!("{:?}", result),
+            format!("{:?}", Err::<Community, Error>(Error::Unauthorized))
+        );
         Ok(())
     }
     #[async_test]
@@ -574,35 +738,39 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
-        assert!(false);
+        let invite = instance_a.create_community_invite(community.id(), Some(did_b.clone()), None).await?;
+        instance_b.accept_community_invite(community.id(), invite.id()).await?;
+
+        let role = instance_a
+            .create_community_role(community.id(), "Role0")
+            .await?;
+        instance_a
+            .grant_community_role(community.id(), role.id(), did_b.clone())
+            .await?;
+        instance_a
+            .grant_community_permission(
+                community.id(),
+                CommunityPermission::EditInfo,
+                role.id(),
+            )
+            .await?;
+
+        instance_b.edit_community_description(community.id(), Some("description".to_string())).await?;
         Ok(())
     }
     #[async_test]
     async fn edit_community_description_as_creator() -> anyhow::Result<()> {
         let context = Some("test::edit_community_description_as_creator".into());
         let account_opts = (None, None, context);
-        let mut accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let mut accounts = create_accounts(vec![account_opts]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
-        let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
-        let invite = instance_a
-            .create_community_invite(community.id(), Some(did_b.clone()), None)
-            .await?;
+        let new_description = Some("description".to_string());
+        instance_a.edit_community_description(community.id(), new_description.clone()).await?;
 
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
-
-        let new_description = "desc".to_string();
-        instance_a
-            .edit_community_description(community.id(), Some(new_description.clone()))
-            .await?;
-
-        let community = instance_b.get_community(community.id()).await?;
-
-        assert_eq!(community.description(), Some(new_description).as_deref());
-
+        let community = instance_a.get_community(community.id()).await?;
+        assert_eq!(community.description(), new_description.as_deref());
         Ok(())
     }
     #[async_test]
@@ -614,7 +782,16 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
-        assert!(false);
+        let role = instance_a.create_community_role(community.id(), "Role0").await?;
+
+        let invite = instance_a.create_community_invite(community.id(), Some(did_b.clone()), None).await?;
+        instance_b.accept_community_invite(community.id(), invite.id()).await?;
+        
+        let result = instance_b.edit_community_role_name(community.id(), role.id(), "new_name".to_string()).await;
+        assert_eq!(
+            format!("{:?}", result),
+            format!("{:?}", Err::<Community, Error>(Error::Unauthorized))
+        );
         Ok(())
     }
     #[async_test]
