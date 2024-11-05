@@ -3704,7 +3704,7 @@ async fn process_request_response_event(
                 }
 
                 if let Err(e) = this.request_key(&sender).await {
-                    tracing::error!(%conversation_id, "unable to send key exchange request to {sender}");
+                    tracing::error!(%conversation_id, error = %e, "unable to send key exchange request to {sender}");
                 }
             }
             _ => {
