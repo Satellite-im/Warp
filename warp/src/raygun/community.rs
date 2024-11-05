@@ -236,14 +236,13 @@ pub enum CommunityPermission {
     ManageMembers,
     ManageChannels,
     ManageInvites,
+    DeleteMessages,
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum CommunityChannelPermission {
     ViewChannel,
-    EditInfo,
     SendMessages,
-    DeleteMessages,
 }
 
 #[async_trait::async_trait]

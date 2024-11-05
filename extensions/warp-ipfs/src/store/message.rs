@@ -2722,7 +2722,7 @@ impl ConversationInner {
             .await
             .iter()
             .filter_map(|c| {
-                for (id, invite) in &c.invites {
+                for (_, invite) in &c.invites {
                     if let Some(target) = &invite.target_user {
                         if target == own_did {
                             return Some((c.id, CommunityInvite::from(invite.clone())));

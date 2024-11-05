@@ -921,8 +921,6 @@ impl CommunityTask {
 
         let keypair = self.root.keypair();
 
-        let own_did = keypair.to_did()?;
-
         let id = self.community_id;
 
         let bytes = {
@@ -969,8 +967,6 @@ impl CommunityTask {
     fn community_key(&self, member: Option<&DID>) -> Result<Vec<u8>, Error> {
         let keypair = self.root.keypair();
         let own_did = self.identity.did_key();
-
-        let community = &self.document;
 
         let recipient = member.unwrap_or(&own_did);
 
@@ -1046,7 +1042,6 @@ impl CommunityTask {
         community_channel_id: Uuid,
         event: MessageEvent,
     ) -> Result<(), Error> {
-        let community_id = self.community_id;
         let community_id = self.community_id;
         let member = self.identity.did_key();
 
@@ -1643,7 +1638,6 @@ impl CommunityTask {
         &mut self,
         description: Option<String>,
     ) -> Result<(), Error> {
-        let community_id = self.community_id;
         let own_did = &self.identity.did_key();
         if !self
             .document
@@ -1880,11 +1874,10 @@ impl CommunityTask {
         name: String,
     ) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
-        if !self.document.has_channel_permission(
-            own_did,
-            &CommunityChannelPermission::EditInfo,
-            channel_id,
-        ) {
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::ManageChannels)
+        {
             return Err(Error::Unauthorized);
         }
 
@@ -1923,11 +1916,10 @@ impl CommunityTask {
         description: Option<String>,
     ) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
-        if !self.document.has_channel_permission(
-            own_did,
-            &CommunityChannelPermission::EditInfo,
-            channel_id,
-        ) {
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::ManageChannels)
+        {
             return Err(Error::Unauthorized);
         }
 
@@ -2167,15 +2159,14 @@ impl CommunityTask {
     }
     pub async fn delete_community_channel_message(
         &mut self,
-        channel_id: Uuid,
+        _channel_id: Uuid,
         _message_id: Uuid,
     ) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
-        if !self.document.has_channel_permission(
-            own_did,
-            &CommunityChannelPermission::DeleteMessages,
-            channel_id,
-        ) {
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::DeleteMessages)
+        {
             return Err(Error::Unauthorized);
         }
 
@@ -2730,13 +2721,7 @@ async fn message_event(
                 }
             }
         }
-        CommunityMessagingEvents::Event {
-            community_id,
-            community_channel_id,
-            member,
-            event,
-            cancelled,
-        } => todo!(),
+        _ => {},
     }
 
     Ok(())
@@ -3046,8 +3031,6 @@ async fn process_queue(this: &mut CommunityTask) {
 }
 
 fn pubkey_or_keystore(community: &CommunityTask) -> Result<Either<DID, Keystore>, Error> {
-    let keypair = community.root.keypair();
     let keystore = Either::Right(community.keystore.clone());
-
     Ok(keystore)
 }

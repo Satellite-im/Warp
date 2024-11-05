@@ -214,6 +214,7 @@ impl CommunityDocument {
         permissions.insert(CommunityPermission::ManageMembers, IndexSet::new());
         permissions.insert(CommunityPermission::ManageChannels, IndexSet::new());
         permissions.insert(CommunityPermission::ManageInvites, IndexSet::new());
+        permissions.insert(CommunityPermission::DeleteMessages, IndexSet::new());
 
         let mut members = IndexSet::new();
         members.insert(creator.clone());
@@ -362,9 +363,6 @@ impl CommunityChannelDocument {
         description: Option<String>,
         channel_type: CommunityChannelType,
     ) -> Self {
-        let mut permissions = CommunityChannelPermissions::new();
-        permissions.insert(CommunityChannelPermission::EditInfo, IndexSet::new());
-        permissions.insert(CommunityChannelPermission::DeleteMessages, IndexSet::new());
         Self {
             id: Uuid::new_v4(),
             name,
@@ -372,7 +370,7 @@ impl CommunityChannelDocument {
             created: Utc::now(),
             modified: Utc::now(),
             channel_type,
-            permissions: permissions,
+            permissions: CommunityChannelPermissions::new(),
         }
     }
 }
