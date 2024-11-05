@@ -309,12 +309,8 @@ impl ConversationTask {
                     Ok(store) => store,
                     Err(_) => {
                         let mut store = Keystore::new();
-                        store.insert(
-                            root.keypair(),
-                            &identity.did_key(),
-                            warp::crypto::generate::<64>(),
-                        )?;
-                        task.set_keystore().await?;
+                        store.insert(root.keypair(), &identity.did_key(), generate::<64>())?;
+                        task.set_keystore(Some(&store)).await?;
                         store
                     }
                 }
@@ -778,11 +774,14 @@ impl ConversationTask {
 }
 
 impl ConversationTask {
-    pub async fn set_keystore(&mut self) -> Result<(), Error> {
+    pub async fn set_keystore(&mut self, keystore: Option<&Keystore>) -> Result<(), Error> {
         let mut map = self.root.get_conversation_keystore_map().await?;
 
         let id = self.conversation_id.to_string();
-        let cid = self.ipfs.put_dag(&self.keystore).await?;
+
+        let keystore = keystore.unwrap_or(&self.keystore);
+
+        let cid = self.ipfs.put_dag(keystore).await?;
 
         map.insert(id, cid);
 
@@ -3517,7 +3516,7 @@ async fn process_request_response_event(
                         let key = generate::<64>().into();
                         keystore.insert(keypair, &own_did, &key)?;
 
-                        this.set_keystore().await?;
+                        this.set_keystore(None).await?;
                         key
                     }
                     Err(e) => {
@@ -3592,7 +3591,7 @@ async fn process_request_response_event(
 
                 keystore.insert(keypair, &sender, raw_key)?;
 
-                this.set_keystore().await?;
+                this.set_keystore(None).await?;
 
                 if let Some((_, received)) = this.pending_key_exchange.get_mut(&sender) {
                     *received = true;

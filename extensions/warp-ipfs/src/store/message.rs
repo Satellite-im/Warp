@@ -179,11 +179,6 @@ impl MessageStore {
         inner.set_document(document).await
     }
 
-    pub async fn set_keystore(&self, id: Uuid, document: Keystore) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
-        inner.set_keystore(id, document).await
-    }
-
     pub async fn delete(&self, id: Uuid) -> Result<ConversationDocument, Error> {
         let inner = &mut *self.inner.write().await;
         inner.delete(id).await
@@ -1213,11 +1208,6 @@ impl ConversationInner {
 
         self.set_document(&mut conversation).await?;
 
-        let mut keystore = Keystore::new();
-        keystore.insert(self.root.keypair(), own_did, warp::crypto::generate::<64>())?;
-
-        self.set_keystore(conversation_id, keystore).await?;
-
         self.create_conversation_task(conversation_id).await?;
 
         let peer_id_list = recipient
@@ -1279,21 +1269,6 @@ impl ConversationInner {
         }
 
         self.root.get_conversation_keystore(id).await
-    }
-
-    pub async fn set_keystore(&mut self, id: Uuid, document: Keystore) -> Result<(), Error> {
-        if !self.contains(id).await {
-            return Err(Error::InvalidConversation);
-        }
-
-        let mut map = self.root.get_conversation_keystore_map().await?;
-
-        let id = id.to_string();
-        let cid = self.ipfs.put_dag(document).await?;
-
-        map.insert(id, cid);
-
-        self.set_keystore_map(map).await
     }
 
     pub async fn delete(&mut self, id: Uuid) -> Result<ConversationDocument, Error> {
@@ -1753,8 +1728,6 @@ async fn process_conversation(
             conversation.favorite = false;
 
             this.set_document(conversation).await?;
-
-            this.set_keystore(conversation_id, keystore).await?;
 
             this.create_conversation_task(conversation_id).await?;
 
