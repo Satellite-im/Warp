@@ -10,6 +10,7 @@ pub mod payload;
 pub mod phonebook;
 pub mod queue;
 
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
@@ -337,8 +338,7 @@ pub enum MessagingEvents {
         conversation_id: Uuid,
         message_id: Uuid,
         modified: DateTime<Utc>,
-        lines: Vec<String>,
-        nonce: Vec<u8>,
+        lines: Bytes,
         signature: Vec<u8>,
     },
     Delete {

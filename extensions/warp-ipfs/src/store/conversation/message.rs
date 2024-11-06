@@ -238,7 +238,50 @@ impl MessageDocument {
         &self.attachments
     }
 
-    pub async fn update(
+    pub fn set_message(&mut self, bytes: impl Into<Bytes>) {
+        self.message.replace(bytes.into());
+    }
+
+    pub fn set_signature(&mut self, signature: &[u8]) -> Result<(), Error> {
+        let signature = MessageSignature::try_from(signature.to_owned())?;
+        self.signature.replace(signature);
+        Ok(())
+    }
+
+    pub fn update(&mut self, message: Message) -> Result<(), Error> {
+        tracing::info!(id = %self.conversation_id, message_id = %self.id, "Updating message");
+
+        let sender = self.sender.to_did();
+
+        if message.id() != self.id
+            || message.conversation_id() != self.conversation_id
+            || message.sender() != sender
+        {
+            tracing::error!(id = %self.conversation_id, message_id = %self.id, "Message does not exist, is invalid or has invalid sender");
+            //TODO: Maybe remove message from this point?
+            return Err(Error::InvalidMessage);
+        }
+
+        self.pinned = message.pinned();
+        self.modified = message.modified();
+
+        let reactions = message.reactions();
+        if reactions.len() > MAX_REACTIONS {
+            return Err(Error::InvalidLength {
+                context: "reactions".into(),
+                current: reactions.len(),
+                minimum: None,
+                maximum: Some(MAX_REACTIONS),
+            });
+        }
+
+        self.reactions = reactions;
+
+        tracing::info!(id = %self.conversation_id, message_id = %self.id, "Message is updated");
+        Ok(())
+    }
+
+    pub async fn update_with_complete_message(
         &mut self,
         ipfs: &Ipfs,
         keypair: &Keypair,

@@ -1402,10 +1402,17 @@ impl ConversationTask {
         message.set_modified(Utc::now());
 
         message_document
-            .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
+            .update_with_complete_message(
+                &self.ipfs,
+                keypair,
+                message,
+                None,
+                keystore.as_ref(),
+                None,
+            )
             .await?;
 
-        let nonce = message_document.nonce_from_message()?;
+        let messages = message_document.raw_encrypted_message()?.clone();
         let signature = message_document.signature.expect("message to be signed");
 
         let message_cid = self
@@ -1427,7 +1434,6 @@ impl ConversationTask {
             message_id,
             modified: message_document.modified.expect("message to be modified"),
             lines: messages,
-            nonce: nonce.to_vec(),
             signature: signature.into(),
         };
 
@@ -1621,9 +1627,7 @@ impl ConversationTask {
             }
         };
 
-        message_document
-            .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
-            .await?;
+        message_document.update(message)?;
 
         let message_cid = self
             .document
@@ -1712,9 +1716,7 @@ impl ConversationTask {
 
                 entry.push(own_did.clone());
 
-                message_document
-                    .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
-                    .await?;
+                message_document.update(message)?;
 
                 message_cid = self
                     .document
@@ -1746,9 +1748,7 @@ impl ConversationTask {
                     indexmap::map::Entry::Vacant(_) => return Err(Error::ReactionDoesntExist),
                 };
 
-                message_document
-                    .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
-                    .await?;
+                message_document.update(message)?;
 
                 message_cid = self
                     .document
@@ -2998,7 +2998,6 @@ async fn message_event(
     let conversation_id = this.conversation_id;
 
     let keypair = this.root.keypair();
-    let own_did = this.identity.did_key();
 
     let keystore = pubkey_or_keystore(&*this)?;
 
@@ -3074,7 +3073,6 @@ async fn message_event(
             message_id,
             modified,
             lines,
-            nonce,
             signature,
         } => {
             let mut message_document = this
@@ -3082,11 +3080,16 @@ async fn message_event(
                 .get_message_document(&this.ipfs, message_id)
                 .await?;
 
-            let mut message = message_document
+            message_document.modified.replace(modified);
+            message_document.set_message(lines);
+            message_document.set_signature(&signature)?;
+
+            let message = message_document
                 .resolve(&this.ipfs, keypair, true, keystore.as_ref())
                 .await?;
 
-            let lines_value_length: usize = lines
+            let lines_value_length: usize = message
+                .lines()
                 .iter()
                 .map(|s| s.trim())
                 .filter(|s| !s.is_empty())
@@ -3107,21 +3110,7 @@ async fn message_event(
                 });
             }
 
-            let sender = message.sender();
-
-            *message.lines_mut() = lines;
-            message.set_modified(modified);
-
-            message_document
-                .update(
-                    &this.ipfs,
-                    keypair,
-                    message,
-                    (!signature.is_empty() && sender.ne(&own_did)).then_some(signature),
-                    keystore.as_ref(),
-                    Some(nonce.as_slice()),
-                )
-                .await?;
+            message_document.update(message)?;
 
             this.document
                 .update_message_document(&this.ipfs, &message_document)
@@ -3203,9 +3192,7 @@ async fn message_event(
                 }
             };
 
-            message_document
-                .update(&this.ipfs, keypair, message, None, keystore.as_ref(), None)
-                .await?;
+            message_document.update(message)?;
 
             this.document
                 .update_message_document(&this.ipfs, &message_document)
@@ -3254,9 +3241,7 @@ async fn message_event(
 
                     entry.push(reactor.clone());
 
-                    message_document
-                        .update(&this.ipfs, keypair, message, None, keystore.as_ref(), None)
-                        .await?;
+                    message_document.update(message)?;
 
                     this.document
                         .update_message_document(&this.ipfs, &message_document)
@@ -3293,9 +3278,7 @@ async fn message_event(
                         indexmap::map::Entry::Vacant(_) => return Err(Error::ReactionDoesntExist),
                     };
 
-                    message_document
-                        .update(&this.ipfs, keypair, message, None, keystore.as_ref(), None)
-                        .await?;
+                    message_document.update(message)?;
 
                     this.document
                         .update_message_document(&this.ipfs, &message_document)
