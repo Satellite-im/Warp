@@ -952,7 +952,7 @@ impl RootDocumentInner {
 
         let cid = match document.conversations_keystore {
             Some(cid) => cid,
-            None => return Ok(Keystore::new()),
+            None => return Err(Error::ObjectNotFound),
         };
 
         let path = IpfsPath::from(cid).sub_path(&id.to_string())?;
@@ -969,7 +969,7 @@ impl RootDocumentInner {
 
         let cid = match document.communities_keystore {
             Some(cid) => cid,
-            None => return Ok(Keystore::new()),
+            None => return Err(Error::ObjectNotFound),
         };
 
         let path = IpfsPath::from(cid).sub_path(&id.to_string())?;

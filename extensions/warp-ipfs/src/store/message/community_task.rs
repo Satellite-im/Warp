@@ -13,6 +13,9 @@ use rust_ipfs::{PeerId, SubscriptionStream};
 use serde::{Deserialize, Serialize};
 use std::borrow::BorrowMut;
 use std::collections::{BTreeMap, HashMap};
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll, Waker};
 use std::str::FromStr;
 use std::time::Duration;
 use uuid::Uuid;
@@ -228,6 +231,9 @@ pub enum CommunityTaskCommand {
     EventHandler {
         response: oneshot::Sender<tokio::sync::broadcast::Sender<MessageEventKind>>,
     },
+    Delete {
+        response: oneshot::Sender<Result<(), Error>>,
+    },
 }
 
 pub struct CommunityTask {
@@ -255,6 +261,35 @@ pub struct CommunityTask {
 
     //TODO: replace queue
     queue: HashMap<DID, Vec<QueueItem>>,
+
+    terminate: CommunityTermination,
+}
+
+#[derive(Default, Debug)]
+struct CommunityTermination {
+    terminate: bool,
+    waker: Option<Waker>,
+}
+
+impl CommunityTermination {
+    fn cancel(&mut self) {
+        self.terminate = true;
+        if let Some(waker) = self.waker.take() {
+            waker.wake();
+        }
+    }
+}
+
+impl Future for CommunityTermination {
+    type Output = ();
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if self.terminate {
+            return Poll::Ready(());
+        }
+
+        self.waker.replace(cx.waker().clone());
+        Poll::Pending
+    }
 }
 
 impl CommunityTask {
@@ -305,18 +340,15 @@ impl CommunityTask {
             message_command,
             command_rx,
             queue: Default::default(),
+            terminate: CommunityTermination::default(),
         };
 
         task.keystore = match root.get_community_keystore(community_id).await {
             Ok(store) => store,
             Err(_) => {
                 let mut store = Keystore::new();
-                store.insert(
-                    root.keypair(),
-                    &identity.did_key(),
-                    warp::crypto::generate::<64>(),
-                )?;
-                task.set_keystore().await?;
+                store.insert(root.keypair(), &identity.did_key(), generate::<64>())?;
+                task.set_keystore(Some(&store)).await?;
                 store
             }
         };
@@ -369,6 +401,9 @@ impl CommunityTask {
         loop {
             tokio::select! {
                 biased;
+                _ = &mut this.terminate => {
+                    break;
+                }
                 Some(command) = this.command_rx.next() => {
                     this.process_command(command).await;
                 }
@@ -819,16 +854,38 @@ impl CommunityTask {
                 let sender = self.event_broadcast.clone();
                 let _ = response.send(sender);
             }
+            CommunityTaskCommand::Delete { response } => {
+                let result = self.delete().await;
+                let _ = response.send(result);
+            }
         }
     }
 }
 
 impl CommunityTask {
-    pub async fn set_keystore(&mut self) -> Result<(), Error> {
+    pub async fn delete(&mut self) -> Result<(), Error> {
+        // TODO: Maybe announce to network of the local node removal here
+        //self.document.messages.take();
+        self.document.deleted = true;
+        self.set_document().await?;
+        if let Ok(mut ks_map) = self.root.get_community_keystore_map().await {
+            if ks_map.remove(&self.community_id.to_string()).is_some() {
+                if let Err(e) = self.root.set_community_keystore_map(ks_map).await {
+                    tracing::warn!(community_id = %self.community_id, error = %e, "failed to remove keystore");
+                }
+            }
+        }
+        self.terminate.cancel();
+        Ok(())
+    }
+    pub async fn set_keystore(&mut self, keystore: Option<&Keystore>) -> Result<(), Error> {
         let mut map = self.root.get_community_keystore_map().await?;
 
         let id = self.community_id.to_string();
-        let cid = self.ipfs.put_dag(&self.keystore).await?;
+
+        let keystore = keystore.unwrap_or(&self.keystore);
+
+        let cid = self.ipfs.put_dag(keystore).await?;
 
         map.insert(id, cid);
 
@@ -2779,7 +2836,7 @@ async fn process_request_response_event(
                         let key = generate::<64>().into();
                         keystore.insert(keypair, &own_did, &key)?;
 
-                        this.set_keystore().await?;
+                        this.set_keystore(None).await?;
                         key
                     }
                     Err(e) => {
@@ -2848,7 +2905,7 @@ async fn process_request_response_event(
 
                 keystore.insert(keypair, &sender, raw_key)?;
 
-                this.set_keystore().await?;
+                this.set_keystore(None).await?;
 
                 if let Some(list) = this.pending_key_exchange.get_mut(&sender) {
                     for (_, received) in list {
