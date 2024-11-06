@@ -17,8 +17,11 @@ use std::borrow::BorrowMut;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
 use std::ffi::OsStr;
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::str::FromStr;
+use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 use tokio_stream::StreamMap;
 use uuid::Uuid;
@@ -220,9 +223,11 @@ pub enum ConversationTaskCommand {
         member: DID,
         response: oneshot::Sender<Result<(), Error>>,
     },
-
     EventHandler {
         response: oneshot::Sender<tokio::sync::broadcast::Sender<MessageEventKind>>,
+    },
+    Delete {
+        response: oneshot::Sender<Result<(), Error>>,
     },
 }
 
@@ -254,6 +259,35 @@ pub struct ConversationTask {
 
     //TODO: replace queue
     queue: HashMap<DID, Vec<QueueItem>>,
+
+    terminate: ConversationTermination,
+}
+
+#[derive(Default, Debug)]
+struct ConversationTermination {
+    terminate: bool,
+    waker: Option<Waker>,
+}
+
+impl ConversationTermination {
+    fn cancel(&mut self) {
+        self.terminate = true;
+        if let Some(waker) = self.waker.take() {
+            waker.wake();
+        }
+    }
+}
+
+impl Future for ConversationTermination {
+    type Output = ();
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if self.terminate {
+            return Poll::Ready(());
+        }
+
+        self.waker.replace(cx.waker().clone());
+        Poll::Pending
+    }
 }
 
 impl ConversationTask {
@@ -307,6 +341,7 @@ impl ConversationTask {
             message_command,
             command_rx,
             queue: Default::default(),
+            terminate: ConversationTermination::default(),
         };
 
         task.keystore = match task.document.conversation_type() {
@@ -316,12 +351,8 @@ impl ConversationTask {
                     Ok(store) => store,
                     Err(_) => {
                         let mut store = Keystore::new();
-                        store.insert(
-                            root.keypair(),
-                            &identity.did_key(),
-                            warp::crypto::generate::<64>(),
-                        )?;
-                        task.set_keystore().await?;
+                        store.insert(root.keypair(), &identity.did_key(), generate::<64>())?;
+                        task.set_keystore(Some(&store)).await?;
                         store
                     }
                 }
@@ -378,6 +409,9 @@ impl ConversationTask {
         loop {
             tokio::select! {
                 biased;
+                _ = &mut this.terminate => {
+                    break;
+                }
                 Some(command) = this.command_rx.next() => {
                     this.process_command(command).await;
                 }
@@ -788,16 +822,39 @@ impl ConversationTask {
                 let sender = self.event_broadcast.clone();
                 let _ = response.send(sender);
             }
+            ConversationTaskCommand::Delete { response } => {
+                let result = self.delete().await;
+                let _ = response.send(result);
+            }
         }
     }
 }
 
 impl ConversationTask {
-    pub async fn set_keystore(&mut self) -> Result<(), Error> {
+    pub async fn delete(&mut self) -> Result<(), Error> {
+        // TODO: Maybe announce to network of the local node removal here
+        self.document.messages.take();
+        self.document.deleted = true;
+        self.set_document().await?;
+        if let Ok(mut ks_map) = self.root.get_conversation_keystore_map().await {
+            if ks_map.remove(&self.conversation_id.to_string()).is_some() {
+                if let Err(e) = self.root.set_conversation_keystore_map(ks_map).await {
+                    tracing::warn!(conversation_id = %self.conversation_id, error = %e, "failed to remove keystore");
+                }
+            }
+        }
+        self.terminate.cancel();
+        Ok(())
+    }
+
+    pub async fn set_keystore(&mut self, keystore: Option<&Keystore>) -> Result<(), Error> {
         let mut map = self.root.get_conversation_keystore_map().await?;
 
         let id = self.conversation_id.to_string();
-        let cid = self.ipfs.put_dag(&self.keystore).await?;
+
+        let keystore = keystore.unwrap_or(&self.keystore);
+
+        let cid = self.ipfs.put_dag(keystore).await?;
 
         map.insert(id, cid);
 
@@ -3570,7 +3627,7 @@ async fn process_request_response_event(
                         let key = generate::<64>().into();
                         keystore.insert(keypair, &own_did, &key)?;
 
-                        this.set_keystore().await?;
+                        this.set_keystore(None).await?;
                         key
                     }
                     Err(e) => {
@@ -3667,7 +3724,7 @@ async fn process_request_response_event(
 
                 keystore.insert(keypair, &sender, raw_key)?;
 
-                this.set_keystore().await?;
+                this.set_keystore(None).await?;
 
                 if let Some((_, received)) = this.pending_key_exchange.get_mut(&sender) {
                     *received = true;
