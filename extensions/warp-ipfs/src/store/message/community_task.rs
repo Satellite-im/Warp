@@ -48,8 +48,7 @@ use crate::store::ds_key::DataStoreKey;
 use crate::store::event_subscription::EventSubscription;
 use crate::store::topics::PeerTopic;
 use crate::store::{
-    ecdh_shared_key, verify_serde_sig, CommunityUpdateKind, ConversationEvents,
-    MAX_COMMUNITY_CHANNELS, MAX_COMMUNITY_DESCRIPTION, SHUTTLE_TIMEOUT,
+    document, ecdh_shared_key, verify_serde_sig, CommunityUpdateKind, ConversationEvents, MAX_COMMUNITY_CHANNELS, MAX_COMMUNITY_DESCRIPTION, SHUTTLE_TIMEOUT
 };
 use crate::utils::{ByteCollection, ExtensionType};
 use crate::{
@@ -238,7 +237,7 @@ pub struct CommunityTask {
     file: FileStore,
     identity: IdentityStore,
     discovery: Discovery,
-    pending_key_exchange: IndexMap<DID, (Vec<u8>, bool)>,
+    pending_key_exchange: IndexMap<DID, Vec<(Vec<u8>, bool)>>,
     document: CommunityDocument,
     keystore: Keystore,
 
@@ -936,7 +935,9 @@ impl CommunityTask {
                     //       while waiting for the response.
 
                     self.pending_key_exchange
-                        .insert(sender, (data.message().to_vec(), false));
+                        .entry(sender)
+                        .or_default()
+                        .push((data.message().to_vec(), false));
 
                     // Maybe send a request? Although we could, we should check to determine if one was previously sent or queued first,
                     // but for now we can leave this commented until the queue is removed and refactored.
@@ -1256,6 +1257,9 @@ impl CommunityTask {
         }
 
         self.document.members.insert(own_did.clone());
+        if let Some(target_user) = &invite_doc.target_user {
+            self.document.invites.swap_remove(&invite_doc.id.to_string());
+        }
         self.set_document().await?;
 
         let _ = self
@@ -2390,7 +2394,20 @@ async fn message_event(
                     }
                 }
                 CommunityUpdateKind::CreateCommunityInvite { invite } => {
-                    this.replace_document(community).await?;
+                    if let Some(did) = &invite.target_user {
+                        if !this.discovery.contains(did).await {
+                            let _ = this.discovery.insert(did).await;
+                        }
+                        if did == &own_did && !community.members.contains(&own_did) {
+                            this.replace_document(community).await?;
+                        }
+                        if let Err(e) = this.request_key(did).await {
+                            tracing::error!(%community_id, error = %e, "error requesting key");
+                        }
+                    } else {
+                        this.replace_document(community).await?;
+                    }
+
                     if let Err(e) =
                         this.event_broadcast
                             .send(MessageEventKind::CreatedCommunityInvite {
@@ -2833,8 +2850,10 @@ async fn process_request_response_event(
 
                 this.set_keystore().await?;
 
-                if let Some((_, received)) = this.pending_key_exchange.get_mut(&sender) {
-                    *received = true;
+                if let Some(list) = this.pending_key_exchange.get_mut(&sender) {
+                    for (_, received) in list {
+                        *received = true;
+                    }
                 }
             }
             _ => {
@@ -2856,12 +2875,15 @@ async fn process_pending_payload(this: &mut CommunityTask) {
 
     let mut processed_events: IndexSet<_> = IndexSet::new();
 
-    _this.pending_key_exchange.retain(|did, (data, received)| {
-        if *received {
-            processed_events.insert((did.clone(), data.clone()));
-            return false;
-        }
-        true
+    _this.pending_key_exchange.retain(|did, list| {
+        list.retain(|(data, received)| {
+            if *received {
+                processed_events.insert((did.clone(), data.clone()));
+                return false;
+            }
+            true
+        });
+        !list.is_empty()
     });
 
     let store = _this.keystore.clone();
