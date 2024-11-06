@@ -7,7 +7,7 @@ use bytes::Bytes;
 use std::borrow::BorrowMut;
 use std::time::Duration;
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     path::Path,
     sync::Arc,
 };
@@ -177,11 +177,6 @@ impl MessageStore {
     pub async fn set<B: BorrowMut<ConversationDocument>>(&self, document: B) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
         inner.set_document(document).await
-    }
-
-    pub async fn set_keystore(&self, id: Uuid, document: Keystore) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
-        inner.set_keystore(id, document).await
     }
 
     pub async fn delete(&self, id: Uuid) -> Result<ConversationDocument, Error> {
@@ -1213,11 +1208,6 @@ impl ConversationInner {
 
         self.set_document(&mut conversation).await?;
 
-        let mut keystore = Keystore::new();
-        keystore.insert(self.root.keypair(), own_did, warp::crypto::generate::<64>())?;
-
-        self.set_keystore(conversation_id, keystore).await?;
-
         self.create_conversation_task(conversation_id).await?;
 
         let peer_id_list = recipient
@@ -1281,44 +1271,23 @@ impl ConversationInner {
         self.root.get_conversation_keystore(id).await
     }
 
-    pub async fn set_keystore(&mut self, id: Uuid, document: Keystore) -> Result<(), Error> {
-        if !self.contains(id).await {
-            return Err(Error::InvalidConversation);
-        }
-
-        let mut map = self.root.get_conversation_keystore_map().await?;
-
-        let id = id.to_string();
-        let cid = self.ipfs.put_dag(document).await?;
-
-        map.insert(id, cid);
-
-        self.set_keystore_map(map).await
-    }
-
     pub async fn delete(&mut self, id: Uuid) -> Result<ConversationDocument, Error> {
-        if !self.contains(id).await {
-            return Err(Error::InvalidConversation);
-        }
+        let conversation = self.get(id).await?;
+        let mut meta = self
+            .conversation_task
+            .remove(&id)
+            .ok_or(Error::InvalidConversation)?;
 
-        let mut conversation = self.get(id).await?;
+        let (tx, rx) = oneshot::channel();
+        let _ = meta
+            .command_tx
+            .clone()
+            .send(ConversationTaskCommand::Delete { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)??;
 
-        if conversation.deleted {
-            return Err(Error::InvalidConversation);
-        }
-
-        conversation.messages.take();
-        conversation.deleted = true;
-
-        self.set_document(&mut conversation).await?;
-
-        if let Ok(mut ks_map) = self.root.get_conversation_keystore_map().await {
-            if ks_map.remove(&id.to_string()).is_some() {
-                if let Err(e) = self.set_keystore_map(ks_map).await {
-                    tracing::warn!(conversation_id = %id, "Failed to remove keystore: {e}");
-                }
-            }
-        }
+        meta.command_tx.close_channel();
+        meta.handle.abort();
 
         Ok(conversation)
     }
@@ -1336,10 +1305,6 @@ impl ConversationInner {
             .await
             .any(|conversation| async move { conversation.id() == id })
             .await
-    }
-
-    pub async fn set_keystore_map(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
-        self.root.set_conversation_keystore_map(map).await
     }
 
     pub async fn set_document<B: BorrowMut<ConversationDocument>>(
@@ -1482,11 +1447,6 @@ impl ConversationInner {
         conversation_id: Uuid,
         broadcast: bool,
     ) -> Result<(), Error> {
-        if let Some(mut meta) = self.conversation_task.remove(&conversation_id) {
-            meta.command_tx.close_channel();
-            meta.handle.abort();
-        }
-
         let document_type = self.delete(conversation_id).await?;
 
         let own_did = &self.identity.did_key();
@@ -1753,8 +1713,6 @@ async fn process_conversation(
             conversation.favorite = false;
 
             this.set_document(conversation).await?;
-
-            this.set_keystore(conversation_id, keystore).await?;
 
             this.create_conversation_task(conversation_id).await?;
 
