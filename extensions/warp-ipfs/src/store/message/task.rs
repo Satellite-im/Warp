@@ -237,7 +237,7 @@ pub struct ConversationTask {
     file: FileStore,
     identity: IdentityStore,
     discovery: Discovery,
-    pending_key_exchange: IndexMap<DID, (Vec<u8>, bool)>,
+    pending_key_exchange: IndexMap<DID, Vec<(Vec<u8>, bool)>>,
     document: ConversationDocument,
     keystore: Keystore,
 
@@ -1054,7 +1054,9 @@ impl ConversationTask {
                         //       while waiting for the response.
 
                         self.pending_key_exchange
-                            .insert(sender, (data.message().to_vec(), false));
+                            .entry(sender)
+                            .or_default()
+                            .push((data.message().to_vec(), false));
 
                         // Maybe send a request? Although we could, we should check to determine if one was previously sent or queued first,
                         // but for now we can leave this commented until the queue is removed and refactored.
@@ -3651,8 +3653,10 @@ async fn process_request_response_event(
 
                 this.set_keystore(None).await?;
 
-                if let Some((_, received)) = this.pending_key_exchange.get_mut(&sender) {
-                    *received = true;
+                if let Some(list) = this.pending_key_exchange.get_mut(&sender) {
+                    for (_, received) in list {
+                        *received = true;
+                    }
                 }
             }
             _ => {
@@ -3674,12 +3678,15 @@ async fn process_pending_payload(this: &mut ConversationTask) {
 
     let mut processed_events: IndexSet<_> = IndexSet::new();
 
-    _this.pending_key_exchange.retain(|did, (data, received)| {
-        if *received {
-            processed_events.insert((did.clone(), data.clone()));
-            return false;
-        }
-        true
+    _this.pending_key_exchange.retain(|did, list| {
+        list.retain(|(data, received)| {
+            if *received {
+                processed_events.insert((did.clone(), data.clone()));
+                return false;
+            }
+            true
+        });
+        !list.is_empty()
     });
 
     let store = _this.keystore.clone();
