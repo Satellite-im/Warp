@@ -1160,6 +1160,7 @@ impl CommunityTask {
                 kind: CommunityUpdateKind::LeaveCommunity,
             },
             true,
+            vec![],
         )
         .await
     }
@@ -1218,6 +1219,10 @@ impl CommunityTask {
                 invite: CommunityInvite::from(invite_doc.clone()),
             });
 
+        let mut exclude = vec![];
+        if let Some(target) = &target_user {
+            exclude.push(target.clone());
+        }
         self.publish(
             None,
             CommunityMessagingEvents::UpdateCommunity {
@@ -1227,6 +1232,7 @@ impl CommunityTask {
                 },
             },
             true,
+            exclude,
         )
         .await?;
 
@@ -1282,6 +1288,7 @@ impl CommunityTask {
                 kind: CommunityUpdateKind::DeleteCommunityInvite { invite_id },
             },
             true,
+            vec![],
         )
         .await
     }
@@ -1337,6 +1344,7 @@ impl CommunityTask {
                 },
             },
             true,
+            vec![],
         )
         .await
     }
@@ -1376,6 +1384,7 @@ impl CommunityTask {
                 kind: CommunityUpdateKind::EditCommunityInvite { invite_id },
             },
             true,
+            vec![],
         )
         .await
     }
@@ -1409,6 +1418,7 @@ impl CommunityTask {
                 kind: CommunityUpdateKind::CreateCommunityRole { role: role.clone() },
             },
             true,
+            vec![],
         )
         .await?;
 
@@ -1451,6 +1461,7 @@ impl CommunityTask {
                 kind: CommunityUpdateKind::DeleteCommunityRole { role_id },
             },
             true,
+            vec![],
         )
         .await
     }
@@ -1496,6 +1507,7 @@ impl CommunityTask {
                 kind: CommunityUpdateKind::EditCommunityRole { role_id },
             },
             true,
+            vec![],
         )
         .await
     }
@@ -1531,6 +1543,7 @@ impl CommunityTask {
                 kind: CommunityUpdateKind::GrantCommunityRole { role_id, user },
             },
             true,
+            vec![],
         )
         .await
     }
@@ -1566,6 +1579,7 @@ impl CommunityTask {
                 kind: CommunityUpdateKind::RevokeCommunityRole { role_id, user },
             },
             true,
+            vec![],
         )
         .await
     }
@@ -1609,6 +1623,7 @@ impl CommunityTask {
                 },
             },
             true,
+            vec![],
         )
         .await?;
 
@@ -1640,6 +1655,7 @@ impl CommunityTask {
                 kind: CommunityUpdateKind::DeleteCommunityChannel { channel_id },
             },
             true,
+            vec![],
         )
         .await
     }
@@ -1692,6 +1708,7 @@ impl CommunityTask {
                 },
             },
             true,
+            vec![],
         )
         .await
     }
@@ -1737,6 +1754,7 @@ impl CommunityTask {
                 },
             },
             true,
+            vec![],
         )
         .await
     }
@@ -1784,6 +1802,7 @@ impl CommunityTask {
                 },
             },
             true,
+            vec![],
         )
         .await
     }
@@ -1823,6 +1842,7 @@ impl CommunityTask {
                 },
             },
             true,
+            vec![],
         )
         .await
     }
@@ -1859,6 +1879,7 @@ impl CommunityTask {
                 kind: CommunityUpdateKind::GrantCommunityPermissionForAll { permission },
             },
             true,
+            vec![],
         )
         .await
     }
@@ -1893,6 +1914,7 @@ impl CommunityTask {
                 kind: CommunityUpdateKind::RevokeCommunityPermissionForAll { permission },
             },
             true,
+            vec![],
         )
         .await
     }
@@ -1925,6 +1947,7 @@ impl CommunityTask {
                 kind: CommunityUpdateKind::RemoveCommunityMember { member },
             },
             true,
+            vec![],
         )
         .await
     }
@@ -1968,6 +1991,7 @@ impl CommunityTask {
                 },
             },
             true,
+            vec![],
         )
         .await
     }
@@ -2010,6 +2034,7 @@ impl CommunityTask {
                 },
             },
             true,
+            vec![],
         )
         .await
     }
@@ -2064,6 +2089,7 @@ impl CommunityTask {
                 },
             },
             true,
+            vec![],
         )
         .await
     }
@@ -2111,6 +2137,7 @@ impl CommunityTask {
                 },
             },
             true,
+            vec![],
         )
         .await
     }
@@ -2157,6 +2184,7 @@ impl CommunityTask {
                 },
             },
             true,
+            vec![],
         )
         .await
     }
@@ -2199,6 +2227,7 @@ impl CommunityTask {
                 },
             },
             true,
+            vec![],
         )
         .await
     }
@@ -2276,7 +2305,7 @@ impl CommunityTask {
             }
         }
 
-        self.publish(Some(message_id), event, true).await
+        self.publish(Some(message_id), event, true, vec![]).await
     }
 
     pub async fn publish(
@@ -2284,6 +2313,7 @@ impl CommunityTask {
         message_id: Option<Uuid>,
         event: CommunityMessagingEvents,
         queue: bool,
+        exclude: Vec<DID>,
     ) -> Result<(), Error> {
         let event = serde_json::to_vec(&event)?;
         let keypair = self.root.keypair();
@@ -2303,7 +2333,7 @@ impl CommunityTask {
 
         let recipients = self.document.participants().clone();
 
-        for recipient in recipients.iter().filter(|did| own_did.ne(did)) {
+        for recipient in recipients.iter().filter(|did| own_did.ne(did)).filter(|did| !exclude.contains(did)) {
             let peer_id = recipient.to_peer_id()?;
 
             // We want to confirm that there is atleast one peer subscribed before attempting to send a message
@@ -2451,18 +2481,15 @@ async fn message_event(
                     }
                 }
                 CommunityUpdateKind::CreateCommunityInvite { invite } => {
+                    this.replace_document(community).await?;
                     if let Some(did) = &invite.target_user {
+                        
                         if !this.discovery.contains(did).await {
                             let _ = this.discovery.insert(did).await;
-                        }
-                        if did == &own_did && !community.members.contains(&own_did) {
-                            this.replace_document(community).await?;
                         }
                         if let Err(e) = this.request_key(did).await {
                             tracing::error!(%community_id, error = %e, "error requesting key");
                         }
-                    } else {
-                        this.replace_document(community).await?;
                     }
 
                     if let Err(e) =

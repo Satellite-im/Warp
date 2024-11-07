@@ -8,7 +8,7 @@ mod test {
             Community, CommunityChannelPermission, CommunityChannelType, CommunityInvite,
             CommunityPermission, RayGunCommunity,
         },
-        MessageEventKind,
+        MessageEventKind, MessageEventStream,
     };
 
     #[cfg(target_arch = "wasm32")]
@@ -24,46 +24,86 @@ mod test {
 
     use crate::common::create_accounts;
 
+    async fn next_event(stream: &mut MessageEventStream, timeout: Duration) -> Result<MessageEventKind, std::io::Error> {
+        crate::common::timeout(timeout, async {
+            loop {
+                if let Some(event) = stream.next().await {
+                    return event;
+                }
+            }
+        })
+        .await
+    }
     #[async_test]
     async fn get_community_stream() -> anyhow::Result<()> {
         let context = Some("test::get_community_stream".into());
         let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
-        let (instance_a, _, _) = &mut accounts[0].clone();
+        let accounts = create_accounts(vec![account_opts.clone(), account_opts.clone(), account_opts]).await?;
+        let (instance_a, did_a, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
+        let (instance_c, did_c, _) = &mut accounts[2].clone();
 
         let community = instance_a.create_community("Community0").await?;
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(next_event(&mut stream_a, Duration::from_secs(60)).await?, 
+            MessageEventKind::CreatedCommunityInvite { community_id: community.id(), invite: invite.clone()}
+        );
 
         let invite_list = instance_b.list_communities_invited_to().await?;
+        assert!(invite_list.len() == 1);
+        let mut stream_b = instance_b.get_community_stream(community.id()).await?;
         for (community_id, invite) in invite_list {
             instance_b
                 .accept_community_invite(community_id, invite.id())
                 .await?;
         }
+        assert_eq!(next_event(&mut stream_a, Duration::from_secs(60)).await?, 
+            MessageEventKind::AcceptedCommunityInvite { community_id: community.id(), invite_id: invite.id(), user: did_b.clone()}
+        );
+        assert_eq!(next_event(&mut stream_b, Duration::from_secs(60)).await?, 
+            MessageEventKind::AcceptedCommunityInvite { community_id: community.id(), invite_id: invite.id(), user: did_b.clone()}
+        );
+        
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_c.clone()), None)
+            .await?;
+        assert_eq!(next_event(&mut stream_a, Duration::from_secs(60)).await?, 
+            MessageEventKind::CreatedCommunityInvite { community_id: community.id(), invite: invite.clone()}
+        );
+        assert_eq!(next_event(&mut stream_b, Duration::from_secs(60)).await?, 
+            MessageEventKind::CreatedCommunityInvite { community_id: community.id(), invite: invite.clone()}
+        );
 
-        let mut stream = instance_a.get_community_stream(community.id()).await?;
-        crate::common::timeout(Duration::from_secs(10), async {
-            loop {
-                let event = stream.next().await;
-                println!("{:?}", &event);
-                if let Some(MessageEventKind::AcceptedCommunityInvite {
-                    community_id,
-                    invite_id,
-                    user,
-                }) = event
-                {
-                    assert!(community_id == community.id());
-                    assert!(invite_id == invite.id());
-                    assert!(user == did_b.clone());
-                    break;
-                }
-            }
-        })
-        .await?;
+        let invite_list = instance_c.list_communities_invited_to().await?;
+        assert!(invite_list.len() == 1);
+        for (community_id, invite) in invite_list {
+            instance_c
+                .accept_community_invite(community_id, invite.id())
+                .await?;
+        }
+        assert_eq!(next_event(&mut stream_a, Duration::from_secs(60)).await?, 
+            MessageEventKind::AcceptedCommunityInvite { community_id: community.id(), invite_id: invite.id(), user: did_c.clone()}
+        );
+        assert_eq!(next_event(&mut stream_b, Duration::from_secs(60)).await?, 
+            MessageEventKind::AcceptedCommunityInvite { community_id: community.id(), invite_id: invite.id(), user: did_c.clone()}
+        );
+        
+        let community_seen_by_a = instance_a.get_community(community.id()).await?;
+        let community_seen_by_b = instance_b.get_community(community.id()).await?;
+        let community_seen_by_c = instance_c.get_community(community.id()).await?;
 
+        assert_eq!(
+            format!("{:?}", community_seen_by_a),
+            format!("{:?}", community_seen_by_b)
+        );
+        assert_eq!(
+            format!("{:?}", community_seen_by_b),
+            format!("{:?}", community_seen_by_c)
+        );
         Ok(())
     }
 

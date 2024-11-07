@@ -2268,6 +2268,52 @@ impl ConversationInner {
         Ok(())
     }
 
+    async fn request_community_key(&mut self, community_id: Uuid, did: &DID) -> Result<(), Error> {
+        let request = ConversationRequestResponse::Request {
+            conversation_id: community_id,
+            kind: ConversationRequestKind::Key,
+        };
+
+        let community = self.get_community_document(community_id).await?;
+
+        if !community.participants().contains(did) {
+            //TODO: user is not a recipient of the conversation
+            return Err(Error::PublicKeyInvalid);
+        }
+
+        let keypair = self.root.keypair();
+
+        let bytes = ecdh_encrypt(keypair, Some(did), serde_json::to_vec(&request)?)?;
+
+        let payload = PayloadBuilder::new(keypair, bytes)
+            .from_ipfs(&self.ipfs)
+            .await?;
+
+        let topic = community.exchange_topic(did);
+
+        let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
+        let peer_id = did.to_peer_id()?;
+        if !peers.contains(&peer_id)
+            || (peers.contains(&peer_id)
+                && self
+                    .ipfs
+                    .pubsub_publish(topic.clone(), payload.to_bytes()?)
+                    .await
+                    .is_err())
+        {
+            tracing::warn!(%community_id, "Unable to publish to topic");
+            self.queue_event(
+                did.clone(),
+                Queue::direct(peer_id, topic.clone(), payload.message().to_vec()),
+            )
+            .await;
+        }
+
+        // TODO: Store request locally and hold any messages and events until key is received from peer
+
+        Ok(())
+    }
+
     pub async fn delete_conversation(
         &mut self,
         conversation_id: Uuid,
@@ -2735,9 +2781,6 @@ async fn process_conversation(
 
             let conversation_type = conversation.conversation_type();
 
-            let mut keystore = Keystore::new();
-            keystore.insert(keypair, &did, warp::crypto::generate::<64>())?;
-
             conversation.verify()?;
 
             //TODO: Resolve message list
@@ -2831,17 +2874,12 @@ async fn process_conversation(
                 }
             }
 
-            let mut keystore = Keystore::new();
-            keystore.insert(keypair, &did, warp::crypto::generate::<64>())?;
-
-            //TODO: Process and store invite and signal to subscription event about new invite
-
             this.set_community_document(community_document).await?;
 
             this.create_community_task(community_id).await?;
 
             for recipient in recipients.iter().filter(|d| did.ne(d)) {
-                if let Err(e) = this.request_key(community_id, recipient).await {
+                if let Err(e) = this.request_community_key(community_id, recipient).await {
                     tracing::warn!(%community_id, error = %e, %recipient, "Failed to send exchange request");
                 }
             }
