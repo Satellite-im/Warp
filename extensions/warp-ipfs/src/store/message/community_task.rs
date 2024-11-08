@@ -15,8 +15,8 @@ use std::borrow::BorrowMut;
 use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::pin::Pin;
-use std::task::{Context, Poll, Waker};
 use std::str::FromStr;
+use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 use uuid::Uuid;
 use warp::constellation::directory::Directory;
@@ -51,7 +51,8 @@ use crate::store::ds_key::DataStoreKey;
 use crate::store::event_subscription::EventSubscription;
 use crate::store::topics::PeerTopic;
 use crate::store::{
-    document, ecdh_shared_key, verify_serde_sig, CommunityUpdateKind, ConversationEvents, MAX_COMMUNITY_CHANNELS, MAX_COMMUNITY_DESCRIPTION, SHUTTLE_TIMEOUT
+    document, ecdh_shared_key, verify_serde_sig, CommunityUpdateKind, ConversationEvents,
+    MAX_COMMUNITY_CHANNELS, MAX_COMMUNITY_DESCRIPTION, SHUTTLE_TIMEOUT,
 };
 use crate::utils::{ByteCollection, ExtensionType};
 use crate::{
@@ -1322,7 +1323,9 @@ impl CommunityTask {
 
         self.document.members.insert(own_did.clone());
         if let Some(target_user) = &invite_doc.target_user {
-            self.document.invites.swap_remove(&invite_doc.id.to_string());
+            self.document
+                .invites
+                .swap_remove(&invite_doc.id.to_string());
         }
         self.set_document().await?;
 
@@ -2333,7 +2336,11 @@ impl CommunityTask {
 
         let recipients = self.document.participants().clone();
 
-        for recipient in recipients.iter().filter(|did| own_did.ne(did)).filter(|did| !exclude.contains(did)) {
+        for recipient in recipients
+            .iter()
+            .filter(|did| own_did.ne(did))
+            .filter(|did| !exclude.contains(did))
+        {
             let peer_id = recipient.to_peer_id()?;
 
             // We want to confirm that there is atleast one peer subscribed before attempting to send a message
@@ -2483,7 +2490,6 @@ async fn message_event(
                 CommunityUpdateKind::CreateCommunityInvite { invite } => {
                     this.replace_document(community).await?;
                     if let Some(did) = &invite.target_user {
-                        
                         if !this.discovery.contains(did).await {
                             let _ = this.discovery.insert(did).await;
                         }
@@ -2822,7 +2828,7 @@ async fn message_event(
                 }
             }
         }
-        _ => {},
+        _ => {}
     }
 
     Ok(())

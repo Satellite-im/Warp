@@ -78,7 +78,7 @@ impl CommunityInvite {
     }
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct Community {
     id: Uuid,
     name: String,
