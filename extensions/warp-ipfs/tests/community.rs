@@ -79,8 +79,16 @@ mod test {
             }
         );
 
-        let invite_list = instance_b.list_communities_invited_to().await?;
-        assert!(invite_list.len() == 1);
+        let invite_list = crate::common::timeout(Duration::from_secs(60), async {
+            loop {
+                let invite_list = instance_b.list_communities_invited_to().await.unwrap();
+                if invite_list.len() == 1 {
+                    return invite_list;
+                }
+            }
+        })
+        .await?;
+
         let mut stream_b = instance_b.get_community_stream(community.id()).await?;
         for (community_id, invite) in invite_list {
             instance_b
@@ -111,15 +119,24 @@ mod test {
         )
         .await?;
 
-        let invite_list = instance_c.list_communities_invited_to().await?;
-        assert!(invite_list.len() == 1);
+        let invite_list = crate::common::timeout(Duration::from_secs(60), async {
+            loop {
+                let invite_list = instance_c.list_communities_invited_to().await.unwrap();
+                if invite_list.len() == 1 {
+                    return invite_list;
+                }
+            }
+        })
+        .await?;
+
+        let mut stream_c = instance_c.get_community_stream(community.id()).await?;
         for (community_id, invite) in invite_list {
             instance_c
                 .accept_community_invite(community_id, invite.id())
                 .await?;
         }
         assert_next_event(
-            vec![&mut stream_a, &mut stream_b],
+            vec![&mut stream_a, &mut stream_b, &mut stream_c],
             Duration::from_secs(60),
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
