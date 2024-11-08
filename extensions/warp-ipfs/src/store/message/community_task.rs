@@ -1522,6 +1522,9 @@ impl CommunityTask {
         {
             return Err(Error::Unauthorized);
         }
+        if !self.document.members().contains(&user) {
+            return Err(Error::InvalidCommunityMember)
+        }
 
         self.document
             .roles
