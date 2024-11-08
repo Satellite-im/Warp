@@ -747,7 +747,12 @@ impl Conversation {
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
 pub enum GroupPermission {
     AddParticipants,
-    SetGroupName,
+    RemoveParticipants,
+    EditGroupInfo,
+}
+
+impl GroupPermission {
+    pub const VALUES: [Self; 3] = [Self::AddParticipants, Self::RemoveParticipants, Self::EditGroupInfo];
 }
 
 #[derive(Default, Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq, Display)]
