@@ -19,22 +19,16 @@ use std::str::FromStr;
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 use uuid::Uuid;
-use warp::constellation::directory::Directory;
-use warp::constellation::{ConstellationProgressStream, Progression};
 use warp::crypto::DID;
 use warp::raygun::community::{
     CommunityChannel, CommunityChannelPermission, CommunityChannelType, CommunityInvite,
     CommunityPermission, CommunityRole, RoleId,
 };
-use warp::raygun::{
-    AttachmentEventStream, AttachmentKind, ConversationImage, Location, LocationKind, MessageEvent,
-    MessageOptions, MessageReference, MessageStatus, MessageType, Messages, MessagesType,
-    RayGunEventKind,
-};
+use warp::raygun::{ConversationImage, Location, MessageEvent, RayGunEventKind};
 use warp::{
     crypto::{cipher::Cipher, generate},
     error::Error,
-    raygun::{MessageEventKind, PinState, ReactionState},
+    raygun::MessageEventKind,
 };
 use web_time::Instant;
 
@@ -45,16 +39,13 @@ use crate::store::community::{
 };
 use crate::store::conversation::message::MessageDocument;
 use crate::store::discovery::Discovery;
-use crate::store::document::files::FileDocument;
-use crate::store::document::image_dag::ImageDag;
 use crate::store::ds_key::DataStoreKey;
 use crate::store::event_subscription::EventSubscription;
 use crate::store::topics::PeerTopic;
 use crate::store::{
-    document, ecdh_shared_key, verify_serde_sig, CommunityUpdateKind, ConversationEvents,
-    MAX_COMMUNITY_CHANNELS, MAX_COMMUNITY_DESCRIPTION, SHUTTLE_TIMEOUT,
+    CommunityUpdateKind, ConversationEvents, MAX_COMMUNITY_CHANNELS, MAX_COMMUNITY_DESCRIPTION,
+    SHUTTLE_TIMEOUT,
 };
-use crate::utils::{ByteCollection, ExtensionType};
 use crate::{
     // rt::LocalExecutor,
     store::{
@@ -65,14 +56,11 @@ use crate::{
         keystore::Keystore,
         payload::{PayloadBuilder, PayloadMessage},
         CommunityMessagingEvents, ConversationRequestKind, ConversationRequestResponse,
-        ConversationResponseKind, DidExt, PeerIdExt, MAX_MESSAGE_SIZE, MAX_REACTIONS,
-        MIN_MESSAGE_SIZE,
+        ConversationResponseKind, DidExt, PeerIdExt,
     },
 };
 
 type AttachmentOneshot = (MessageDocument, oneshot::Sender<Result<(), Error>>);
-
-use super::DownloadStream;
 
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -1322,7 +1310,7 @@ impl CommunityTask {
         }
 
         self.document.members.insert(own_did.clone());
-        if let Some(target_user) = &invite_doc.target_user {
+        if let Some(_) = &invite_doc.target_user {
             self.document
                 .invites
                 .swap_remove(&invite_doc.id.to_string());
@@ -1522,8 +1510,8 @@ impl CommunityTask {
         {
             return Err(Error::Unauthorized);
         }
-        if !self.document.members().contains(&user) {
-            return Err(Error::InvalidCommunityMember)
+        if !self.document.members.contains(&user) {
+            return Err(Error::InvalidCommunityMember);
         }
 
         self.document
@@ -2438,46 +2426,46 @@ impl CommunityTask {
 
 async fn message_event(
     this: &mut CommunityTask,
-    sender: &DID,
+    _sender: &DID,
     events: CommunityMessagingEvents,
 ) -> Result<(), Error> {
     let community_id = this.community_id;
 
-    let keypair = this.root.keypair();
-    let own_did = this.identity.did_key();
+    let _keypair = this.root.keypair();
+    let _own_did = this.identity.did_key();
 
-    let keystore = pubkey_or_keystore(&*this)?;
+    let _keystore = pubkey_or_keystore(&*this)?;
 
     match events {
-        CommunityMessagingEvents::New { message } => todo!(),
+        CommunityMessagingEvents::New { message: _ } => todo!(),
         CommunityMessagingEvents::Edit {
-            community_id,
-            community_channel_id,
-            message_id,
-            modified,
-            lines,
-            nonce,
-            signature,
+            community_id: _,
+            community_channel_id: _,
+            message_id: _,
+            modified: _,
+            lines: _,
+            nonce: _,
+            signature: _,
         } => todo!(),
         CommunityMessagingEvents::Delete {
-            community_id,
-            community_channel_id,
-            message_id,
+            community_id: _,
+            community_channel_id: _,
+            message_id: _,
         } => todo!(),
         CommunityMessagingEvents::Pin {
-            community_id,
-            community_channel_id,
-            member,
-            message_id,
-            state,
+            community_id: _,
+            community_channel_id: _,
+            member: _,
+            message_id: _,
+            state: _,
         } => todo!(),
         CommunityMessagingEvents::React {
-            community_id,
-            community_channel_id,
-            reactor,
-            message_id,
-            state,
-            emoji,
+            community_id: _,
+            community_channel_id: _,
+            reactor: _,
+            message_id: _,
+            state: _,
+            emoji: _,
         } => todo!(),
         CommunityMessagingEvents::UpdateCommunity { community, kind } => {
             match kind {

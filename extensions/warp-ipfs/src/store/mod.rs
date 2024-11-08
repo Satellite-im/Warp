@@ -88,9 +88,9 @@ pub(super) mod topics {
             format!("/id/{self}/messaging")
         }
 
-        fn invites(&self) -> String {
-            format!("/id/{self}/messaging/invites")
-        }
+        // fn invites(&self) -> String {
+        //     format!("/id/{self}/messaging/invites")
+        // }
     }
 
     impl PeerTopic for DID {}
@@ -303,13 +303,6 @@ pub enum ConversationEvents {
         community_id: Uuid,
         community_document: CommunityDocument,
     },
-}
-
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case", tag = "type")]
-pub enum CommunityEvents {
-    NewCommunity { community: CommunityDocument },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

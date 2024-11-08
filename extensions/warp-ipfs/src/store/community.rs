@@ -165,8 +165,8 @@ impl CommunityDocument {
 impl CommunityDocument {
     pub async fn insert_message_document(
         &mut self,
-        ipfs: &Ipfs,
-        message_document: &MessageDocument,
+        _ipfs: &Ipfs,
+        _message_document: &MessageDocument,
     ) -> Result<Cid, Error> {
         // let mut list = self.message_reference_list(ipfs).await?;
         // let cid = list.insert(ipfs, message_document).await?;
@@ -177,8 +177,8 @@ impl CommunityDocument {
 
     pub async fn update_message_document(
         &mut self,
-        ipfs: &Ipfs,
-        message_document: &MessageDocument,
+        _ipfs: &Ipfs,
+        _message_document: &MessageDocument,
     ) -> Result<Cid, Error> {
         // let mut list = self.message_reference_list(ipfs).await?;
         // let cid = list.update(ipfs, message_document).await?;
@@ -189,15 +189,15 @@ impl CommunityDocument {
 
     pub async fn get_message_document(
         &self,
-        ipfs: &Ipfs,
-        message_id: Uuid,
+        _ipfs: &Ipfs,
+        _message_id: Uuid,
     ) -> Result<MessageDocument, Error> {
         // let refs = self.message_reference_list(ipfs).await?;
         // refs.get(ipfs, message_id).await
         Err(Error::Unimplemented)
     }
 
-    pub async fn contains(&self, ipfs: &Ipfs, message_id: Uuid) -> Result<bool, Error> {
+    pub async fn contains(&self, _ipfs: &Ipfs, _message_id: Uuid) -> Result<bool, Error> {
         // let list = self.message_reference_list(ipfs).await?;
         // Ok(list.contains(ipfs, message_id).await)
         Err(Error::Unimplemented)

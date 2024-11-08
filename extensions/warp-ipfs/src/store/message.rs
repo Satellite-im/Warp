@@ -51,7 +51,7 @@ use crate::{
 
 use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
 
-use crate::store::{community::CommunityDocument, CommunityEvents};
+use crate::store::community::CommunityDocument;
 use chrono::{DateTime, Utc};
 use warp::raygun::community::{
     Community, CommunityChannel, CommunityChannelPermission, CommunityChannelType, CommunityInvite,
@@ -2569,63 +2569,10 @@ impl ConversationInner {
     pub async fn list_community_stream(&self) -> impl Stream<Item = CommunityDocument> + Unpin {
         self.root.list_community_document().await
     }
-    pub async fn broadcast_community_event(
-        &mut self,
-        community: &CommunityDocument,
-        event: ConversationEvents,
-        override_targets: IndexSet<DID>,
-    ) -> Result<(), Error> {
-        let targets = if override_targets.len() > 0 {
-            override_targets
-        } else {
-            let mut members = community.members.clone();
-            members.insert(community.creator.clone());
-            members
-        };
-
-        for target in &targets {
-            if !self.discovery.contains(target).await {
-                self.discovery.insert(target).await?;
-            }
-
-            let bytes = ecdh_encrypt(
-                self.root.keypair(),
-                Some(target),
-                serde_json::to_vec(&event)?,
-            )?;
-
-            let payload = PayloadBuilder::new(self.root.keypair(), bytes)
-                .from_ipfs(&self.ipfs)
-                .await?;
-
-            let peers = self.ipfs.pubsub_peers(Some(target.messaging())).await?;
-
-            let peer_id = target.to_peer_id()?;
-
-            if !peers.contains(&peer_id)
-                || (peers.contains(&peer_id)
-                    && self
-                        .ipfs
-                        .pubsub_publish(target.messaging(), payload.to_bytes()?)
-                        .await
-                        .is_err())
-            {
-                tracing::warn!(community_id = %community.id, "Unable to publish to topic. Queuing event");
-                self.queue_event(
-                    target.clone(),
-                    Queue::direct(peer_id, target.messaging(), payload.message().to_vec()),
-                )
-                .await;
-            }
-        }
-        Ok(())
-    }
 }
 
 impl ConversationInner {
     pub async fn create_community(&mut self, mut name: &str) -> Result<Community, Error> {
-        let own_did = &self.identity.did_key();
-
         name = name.trim();
         if name.len() < 1 || name.len() > 255 {
             return Err(Error::InvalidLength {
@@ -2645,10 +2592,6 @@ impl ConversationInner {
         self.create_community_task(community_id).await?;
 
         let community = self.get_community_document(community_id).await?;
-
-        let event = serde_json::to_vec(&CommunityEvents::NewCommunity {
-            community: community.clone(),
-        })?;
 
         self.event
             .emit(RayGunEventKind::CommunityCreated { community_id })
@@ -2755,7 +2698,6 @@ async fn process_conversation(
                 .await;
         }
         ConversationEvents::NewGroupConversation { mut conversation } => {
-            let keypair = this.root.keypair();
             let did = this.identity.did_key();
 
             let conversation_id = conversation.id;
@@ -2859,7 +2801,6 @@ async fn process_conversation(
             invite,
             community_document,
         } => {
-            let keypair = this.root.keypair();
             let did = this.identity.did_key();
 
             if this.contains_community(community_id).await {
