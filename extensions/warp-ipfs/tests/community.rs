@@ -1473,7 +1473,7 @@ mod test {
 
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::RemovedCommunityMember{
+            MessageEventKind::RemovedCommunityMember {
                 community_id: community.id(),
                 member: did_c.clone()
             }
