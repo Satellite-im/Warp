@@ -106,7 +106,7 @@ mod test {
             Duration::from_secs(60),
             MessageEventKind::CreatedCommunityInvite {
                 community_id: community.id(),
-                invite: invite.clone()
+                invite: invite.clone(),
             },
         )
         .await?;
@@ -124,7 +124,7 @@ mod test {
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
-                user: did_c.clone()
+                user: did_c.clone(),
             },
         )
         .await?;
@@ -314,8 +314,10 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
-        instance_a.revoke_community_permission_for_all(community.id(), CommunityPermission::InviteMembers).await?;
-        
+        instance_a
+            .revoke_community_permission_for_all(community.id(), CommunityPermission::InviteMembers)
+            .await?;
+
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;

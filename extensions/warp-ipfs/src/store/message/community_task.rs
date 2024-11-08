@@ -1189,10 +1189,10 @@ impl CommunityTask {
         let own_did = &self.identity.did_key();
         if !self
             .document
-            .has_permission(own_did, &CommunityPermission::ManageInvites) &&
-            !self
-            .document
-            .has_permission(own_did, &CommunityPermission::InviteMembers)
+            .has_permission(own_did, &CommunityPermission::ManageInvites)
+            && !self
+                .document
+                .has_permission(own_did, &CommunityPermission::InviteMembers)
         {
             return Err(Error::Unauthorized);
         }
