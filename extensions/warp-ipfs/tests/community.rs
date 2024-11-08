@@ -54,13 +54,8 @@ mod test {
     #[async_test]
     async fn get_community_stream() -> anyhow::Result<()> {
         let context = Some("test::get_community_stream".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![
-            account_opts.clone(),
-            account_opts.clone(),
-            account_opts,
-        ])
-        .await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
         let (instance_c, did_c, _) = &mut accounts[2].clone();
@@ -195,8 +190,8 @@ mod test {
     #[async_test]
     async fn get_community_as_uninvited_user() -> anyhow::Result<()> {
         let context = Some("test::get_community_as_uninvited_user".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, _, _) = &mut accounts[1].clone();
 
@@ -212,8 +207,8 @@ mod test {
     #[async_test]
     async fn get_community_as_invited_user() -> anyhow::Result<()> {
         let context = Some("test::get_community_as_invited_user".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -233,8 +228,8 @@ mod test {
     #[async_test]
     async fn get_community_as_member() -> anyhow::Result<()> {
         let context = Some("test::get_community_as_member".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -255,8 +250,8 @@ mod test {
     #[async_test]
     async fn list_community_joined() -> anyhow::Result<()> {
         let context = Some("test::list_communites_joined".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -278,8 +273,8 @@ mod test {
     #[async_test]
     async fn list_community_invited_to() -> anyhow::Result<()> {
         let context = Some("test::list_communites_invited_to".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -325,8 +320,8 @@ mod test {
     #[async_test]
     async fn unauthorized_create_community_invite() -> anyhow::Result<()> {
         let context = Some("test::unauthorized_create_community_invite".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -364,13 +359,8 @@ mod test {
     #[async_test]
     async fn authorized_create_community_invite() -> anyhow::Result<()> {
         let context = Some("test::authorized_create_community_invite".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![
-            account_opts.clone(),
-            account_opts.clone(),
-            account_opts,
-        ])
-        .await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
         let (instance_c, did_c, _) = &mut accounts[2].clone();
@@ -408,22 +398,16 @@ mod test {
         instance_a
             .grant_community_role(community.id(), role.id(), did_b.clone())
             .await?;
-        assert_eq!(
-            next_event(&mut stream_b, Duration::from_secs(60)).await?,
+        assert_next_event(
+            vec![&mut stream_a, &mut stream_b],
+            Duration::from_secs(60),
             MessageEventKind::GrantedCommunityRole {
                 community_id: community.id(),
                 role_id: role.id(),
-                user: did_b.clone()
-            }
-        );
-        assert_eq!(
-            next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::GrantedCommunityRole {
-                community_id: community.id(),
-                role_id: role.id(),
-                user: did_b.clone()
-            }
-        );
+                user: did_b.clone(),
+            },
+        )
+        .await?;
 
         let invite_for_c = instance_b
             .create_community_invite(community.id(), Some(did_c.clone()), None)
@@ -452,8 +436,8 @@ mod test {
     #[async_test]
     async fn unauthorized_delete_community_invite() -> anyhow::Result<()> {
         let context = Some("test::unauthorized_delete_community_invite".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -491,8 +475,8 @@ mod test {
     #[async_test]
     async fn authorized_delete_community_invite() -> anyhow::Result<()> {
         let context = Some("test::authorized_delete_community_invite".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -542,8 +526,8 @@ mod test {
     #[async_test]
     async fn get_community_invite() -> anyhow::Result<()> {
         let context = Some("test::get_community_invite".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -561,8 +545,8 @@ mod test {
     #[async_test]
     async fn unauthorized_edit_community_invite() -> anyhow::Result<()> {
         let context = Some("test::unauthorized_edit_community_invite".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -599,8 +583,8 @@ mod test {
     #[async_test]
     async fn authorized_edit_community_invite() -> anyhow::Result<()> {
         let context = Some("test::authorized_edit_community_invite".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -652,8 +636,8 @@ mod test {
     #[async_test]
     async fn accept_valid_community_invite() -> anyhow::Result<()> {
         let context = Some("test::accept_valid_community_invite".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -678,13 +662,8 @@ mod test {
     #[async_test]
     async fn try_accept_wrong_target_community_invite() -> anyhow::Result<()> {
         let context = Some("test::try_accept_wrong_target_community_invite".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![
-            account_opts.clone(),
-            account_opts.clone(),
-            account_opts,
-        ])
-        .await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, _, _) = &mut accounts[1].clone();
         let (_, did_c, _) = &mut accounts[2].clone();
@@ -705,8 +684,8 @@ mod test {
     #[async_test]
     async fn try_accept_expired_community_invite() -> anyhow::Result<()> {
         let context = Some("test::try_accept_expired_community_invite".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -734,8 +713,8 @@ mod test {
     #[async_test]
     async fn unauthorized_get_community_channel() -> anyhow::Result<()> {
         let context = Some("test::unauthorized_get_community_channel".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -779,8 +758,8 @@ mod test {
     #[async_test]
     async fn authorized_get_community_channel() -> anyhow::Result<()> {
         let context = Some("test::authorized_get_community_channel".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -815,8 +794,8 @@ mod test {
     #[async_test]
     async fn unauthorized_create_community_channel() -> anyhow::Result<()> {
         let context = Some("test::unauthorized_create_community_channel".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -849,8 +828,8 @@ mod test {
     #[async_test]
     async fn authorized_create_community_channel() -> anyhow::Result<()> {
         let context = Some("test::authorized_create_community_channel".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -899,8 +878,8 @@ mod test {
     #[async_test]
     async fn unauthorized_delete_community_channel() -> anyhow::Result<()> {
         let context = Some("test::unauthorized_delete_community_channel".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -936,8 +915,8 @@ mod test {
     #[async_test]
     async fn authorized_delete_community_channel() -> anyhow::Result<()> {
         let context = Some("test::authorized_delete_community_channel".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -989,8 +968,8 @@ mod test {
     #[async_test]
     async fn unauthorized_edit_community_name() -> anyhow::Result<()> {
         let context = Some("test::unauthorized_edit_community_name".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -1023,8 +1002,8 @@ mod test {
     #[async_test]
     async fn authorized_edit_community_name() -> anyhow::Result<()> {
         let context = Some("test::authorized_edit_community_name".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -1066,8 +1045,8 @@ mod test {
     #[async_test]
     async fn unauthorized_edit_community_description() -> anyhow::Result<()> {
         let context = Some("test::unauthorized_edit_community_description".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -1100,8 +1079,8 @@ mod test {
     #[async_test]
     async fn authorized_edit_community_description() -> anyhow::Result<()> {
         let context = Some("test::authorized_edit_community_description".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -1144,8 +1123,8 @@ mod test {
     #[async_test]
     async fn edit_community_description_as_creator() -> anyhow::Result<()> {
         let context = Some("test::edit_community_description_as_creator".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
 
         let community = instance_a.create_community("Community0").await?;
@@ -1161,8 +1140,8 @@ mod test {
     #[async_test]
     async fn unauthorized_edit_community_role_name() -> anyhow::Result<()> {
         let context = Some("test::unauthorized_edit_community_role_name".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -1199,8 +1178,8 @@ mod test {
     #[async_test]
     async fn authorized_edit_community_role_name() -> anyhow::Result<()> {
         let context = Some("test::authorized_edit_community_role_name".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -1244,8 +1223,8 @@ mod test {
     #[async_test]
     async fn unauthorized_edit_community_permissions() -> anyhow::Result<()> {
         let context = Some("test::unauthorized_edit_community_permissions".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -1281,8 +1260,8 @@ mod test {
     #[async_test]
     async fn authorized_edit_community_permissions() -> anyhow::Result<()> {
         let context = Some("test::authorized_edit_community_permissions".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -1331,13 +1310,8 @@ mod test {
     #[async_test]
     async fn unauthorized_remove_community_member() -> anyhow::Result<()> {
         let context = Some("test::unauthorized_remove_community_member".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![
-            account_opts.clone(),
-            account_opts.clone(),
-            account_opts,
-        ])
-        .await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
         let (instance_c, did_c, _) = &mut accounts[2].clone();
@@ -1388,13 +1362,8 @@ mod test {
     #[async_test]
     async fn authorized_remove_community_member() -> anyhow::Result<()> {
         let context = Some("test::authorized_remove_community_member".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![
-            account_opts.clone(),
-            account_opts.clone(),
-            account_opts,
-        ])
-        .await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
         let (instance_c, did_c, _) = &mut accounts[2].clone();
@@ -1431,59 +1400,43 @@ mod test {
         instance_a
             .grant_community_role(community.id(), role.id(), did_b.clone())
             .await?;
-        assert_eq!(
-            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+        assert_next_event(
+            vec![&mut stream_a, &mut stream_b],
+            Duration::from_secs(60),
             MessageEventKind::GrantedCommunityRole {
                 community_id: community.id(),
                 role_id: role.id(),
-                user: did_b.clone()
-            }
-        );
-        assert_eq!(
-            next_event(&mut stream_b, Duration::from_secs(60)).await?,
-            MessageEventKind::GrantedCommunityRole {
-                community_id: community.id(),
-                role_id: role.id(),
-                user: did_b.clone()
-            }
-        );
+                user: did_b.clone(),
+            },
+        )
+        .await?;
+
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_c.clone()), None)
             .await?;
-        assert_eq!(
-            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+        assert_next_event(
+            vec![&mut stream_a, &mut stream_b],
+            Duration::from_secs(60),
             MessageEventKind::CreatedCommunityInvite {
                 community_id: community.id(),
                 invite: invite.clone(),
-            }
-        );
-        assert_eq!(
-            next_event(&mut stream_b, Duration::from_secs(60)).await?,
-            MessageEventKind::CreatedCommunityInvite {
-                community_id: community.id(),
-                invite: invite.clone(),
-            }
-        );
+            },
+        )
+        .await?;
 
         instance_c
             .accept_community_invite(community.id(), invite.id())
             .await?;
-        assert_eq!(
-            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+        assert_next_event(
+            vec![&mut stream_a, &mut stream_b],
+            Duration::from_secs(60),
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
-                user: did_c.clone()
-            }
-        );
-        assert_eq!(
-            next_event(&mut stream_b, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
-                community_id: community.id(),
-                invite_id: invite.id(),
-                user: did_c.clone()
-            }
-        );
+                user: did_c.clone(),
+            },
+        )
+        .await?;
 
         instance_b
             .remove_community_member(community.id(), did_c.clone())
@@ -1505,8 +1458,8 @@ mod test {
     #[async_test]
     async fn unauthorized_edit_community_channel_name() -> anyhow::Result<()> {
         let context = Some("test::unauthorized_edit_community_channel_name".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -1543,8 +1496,8 @@ mod test {
     #[async_test]
     async fn authorized_edit_community_channel_name() -> anyhow::Result<()> {
         let context = Some("test::authorized_edit_community_channel_name".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -1597,8 +1550,8 @@ mod test {
     #[async_test]
     async fn unauthorized_edit_community_channel_description() -> anyhow::Result<()> {
         let context = Some("test::unauthorized_edit_community_channel_description".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -1639,8 +1592,8 @@ mod test {
     #[async_test]
     async fn authorized_edit_community_channel_description() -> anyhow::Result<()> {
         let context = Some("test::authorized_edit_community_channel_description".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -1697,8 +1650,8 @@ mod test {
     #[async_test]
     async fn unauthorized_edit_community_channel_permissions() -> anyhow::Result<()> {
         let context = Some("test::unauthorized_edit_community_channel_permissions".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
@@ -1750,8 +1703,8 @@ mod test {
     #[async_test]
     async fn authorized_edit_community_channel_permissions() -> anyhow::Result<()> {
         let context = Some("test::authorized_edit_community_channel_permissions".into());
-        let account_opts = (None, None, context);
-        let accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
