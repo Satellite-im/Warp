@@ -1414,6 +1414,14 @@ mod test {
             .grant_community_role(community.id(), role.id(), did_b.clone())
             .await?;
         assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::GrantedCommunityRole {
+                community_id: community.id(),
+                role_id: role.id(),
+                user: did_b.clone()
+            }
+        );
+        assert_eq!(
             next_event(&mut stream_b, Duration::from_secs(60)).await?,
             MessageEventKind::GrantedCommunityRole {
                 community_id: community.id(),
@@ -1424,6 +1432,13 @@ mod test {
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_c.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::CreatedCommunityInvite {
+                community_id: community.id(),
+                invite: invite.clone(),
+            }
+        );
         assert_eq!(
             next_event(&mut stream_b, Duration::from_secs(60)).await?,
             MessageEventKind::CreatedCommunityInvite {
@@ -1436,6 +1451,14 @@ mod test {
             .accept_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id(),
+                user: did_c.clone()
+            }
+        );
+        assert_eq!(
             next_event(&mut stream_b, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
@@ -1447,6 +1470,14 @@ mod test {
         instance_b
             .remove_community_member(community.id(), did_c.clone())
             .await?;
+
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::RemovedCommunityMember{
+                community_id: community.id(),
+                member: did_c.clone()
+            }
+        );
         let community = instance_a.get_community(community.id()).await?;
 
         assert!(!community.members().contains(&did_c.clone()));
