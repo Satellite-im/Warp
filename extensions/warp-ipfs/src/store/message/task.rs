@@ -920,7 +920,7 @@ impl ConversationTask {
 
         self.ping_duration.insert(identity.clone(), Instant::now());
         self.pending_ping_response
-            .insert(identity.clone(), Delay::new(Duration::from_millis(15)));
+            .insert(identity.clone(), Delay::new(Duration::from_secs(15)));
 
         Ok(())
     }
