@@ -24,7 +24,7 @@ use warp::raygun::community::{
     CommunityChannel, CommunityChannelPermission, CommunityChannelType, CommunityInvite,
     CommunityPermission, CommunityRole, RoleId,
 };
-use warp::raygun::{ConversationImage, Location, MessageEvent, RayGunEventKind};
+use warp::raygun::{ConversationImage, Location, RayGunEventKind};
 use warp::{
     crypto::{cipher::Cipher, generate},
     error::Error,
@@ -229,7 +229,7 @@ pub struct CommunityTask {
     community_id: Uuid,
     ipfs: Ipfs,
     root: RootDocumentMap,
-    file: FileStore,
+    _file: FileStore,
     identity: IdentityStore,
     discovery: Discovery,
     pending_key_exchange: IndexMap<DID, Vec<(Vec<u8>, bool)>>,
@@ -240,11 +240,11 @@ pub struct CommunityTask {
     event_stream: SubscriptionStream,
     request_stream: SubscriptionStream,
 
-    attachment_tx: futures::channel::mpsc::Sender<AttachmentOneshot>,
+    _attachment_tx: futures::channel::mpsc::Sender<AttachmentOneshot>,
     attachment_rx: futures::channel::mpsc::Receiver<AttachmentOneshot>,
     message_command: futures::channel::mpsc::Sender<MessageCommand>,
     event_broadcast: tokio::sync::broadcast::Sender<MessageEventKind>,
-    event_subscription: EventSubscription<RayGunEventKind>,
+    _event_subscription: EventSubscription<RayGunEventKind>,
 
     command_rx: futures::channel::mpsc::Receiver<CommunityTaskCommand>,
 
@@ -292,7 +292,7 @@ impl CommunityTask {
         discovery: &Discovery,
         command_rx: futures::channel::mpsc::Receiver<CommunityTaskCommand>,
         message_command: futures::channel::mpsc::Sender<MessageCommand>,
-        event_subscription: EventSubscription<RayGunEventKind>,
+        _event_subscription: EventSubscription<RayGunEventKind>,
     ) -> Result<Self, Error> {
         let document = root.get_community_document(community_id).await?;
         let main_topic = document.topic();
@@ -311,7 +311,7 @@ impl CommunityTask {
             community_id,
             ipfs: ipfs.clone(),
             root: root.clone(),
-            file: file.clone(),
+            _file: file.clone(),
             identity: identity.clone(),
             discovery: discovery.clone(),
             pending_key_exchange: Default::default(),
@@ -322,10 +322,10 @@ impl CommunityTask {
             request_stream,
             event_stream,
 
-            attachment_tx: atx,
+            _attachment_tx: atx,
             attachment_rx: arx,
             event_broadcast: btx,
-            event_subscription,
+            _event_subscription,
             message_command,
             command_rx,
             queue: Default::default(),
@@ -1066,69 +1066,69 @@ impl CommunityTask {
         Ok(())
     }
 
-    pub async fn send_event(
-        &self,
-        community_channel_id: Uuid,
-        event: MessageEvent,
-    ) -> Result<(), Error> {
-        let community_id = self.community_id;
-        let member = self.identity.did_key();
+    // pub async fn send_event(
+    //     &self,
+    //     community_channel_id: Uuid,
+    //     event: MessageEvent,
+    // ) -> Result<(), Error> {
+    //     let community_id = self.community_id;
+    //     let member = self.identity.did_key();
 
-        let event = CommunityMessagingEvents::Event {
-            community_id,
-            community_channel_id,
-            member,
-            event,
-            cancelled: false,
-        };
-        self.send_message_event(event).await
-    }
+    //     let event = CommunityMessagingEvents::Event {
+    //         community_id,
+    //         community_channel_id,
+    //         member,
+    //         event,
+    //         cancelled: false,
+    //     };
+    //     self.send_message_event(event).await
+    // }
 
-    pub async fn cancel_event(
-        &self,
-        community_channel_id: Uuid,
-        event: MessageEvent,
-    ) -> Result<(), Error> {
-        let community_id = self.community_id;
-        let member = self.identity.did_key();
+    // pub async fn cancel_event(
+    //     &self,
+    //     community_channel_id: Uuid,
+    //     event: MessageEvent,
+    // ) -> Result<(), Error> {
+    //     let community_id = self.community_id;
+    //     let member = self.identity.did_key();
 
-        let event = CommunityMessagingEvents::Event {
-            community_id,
-            community_channel_id,
-            member,
-            event,
-            cancelled: true,
-        };
-        self.send_message_event(event).await
-    }
+    //     let event = CommunityMessagingEvents::Event {
+    //         community_id,
+    //         community_channel_id,
+    //         member,
+    //         event,
+    //         cancelled: true,
+    //     };
+    //     self.send_message_event(event).await
+    // }
 
-    pub async fn send_message_event(&self, event: CommunityMessagingEvents) -> Result<(), Error> {
-        let event = serde_json::to_vec(&event)?;
+    // pub async fn send_message_event(&self, event: CommunityMessagingEvents) -> Result<(), Error> {
+    //     let event = serde_json::to_vec(&event)?;
 
-        let key = self.community_key(None)?;
+    //     let key = self.community_key(None)?;
 
-        let bytes = Cipher::direct_encrypt(&event, &key)?;
+    //     let bytes = Cipher::direct_encrypt(&event, &key)?;
 
-        let payload = PayloadBuilder::new(self.root.keypair(), bytes)
-            .from_ipfs(&self.ipfs)
-            .await?;
+    //     let payload = PayloadBuilder::new(self.root.keypair(), bytes)
+    //         .from_ipfs(&self.ipfs)
+    //         .await?;
 
-        let peers = self
-            .ipfs
-            .pubsub_peers(Some(self.document.event_topic()))
-            .await?;
+    //     let peers = self
+    //         .ipfs
+    //         .pubsub_peers(Some(self.document.event_topic()))
+    //         .await?;
 
-        if !peers.is_empty() {
-            if let Err(e) = self
-                .ipfs
-                .pubsub_publish(self.document.event_topic(), payload.to_bytes()?)
-                .await
-            {
-                tracing::error!(id=%self.community_id, "Unable to send event: {e}");
-            }
-        }
-        Ok(())
-    }
+    //     if !peers.is_empty() {
+    //         if let Err(e) = self
+    //             .ipfs
+    //             .pubsub_publish(self.document.event_topic(), payload.to_bytes()?)
+    //             .await
+    //         {
+    //             tracing::error!(id=%self.community_id, "Unable to send event: {e}");
+    //         }
+    //     }
+    //     Ok(())
+    // }
 
     pub async fn leave_community(&mut self) -> Result<(), Error> {
         let own_did = &self.identity.did_key();

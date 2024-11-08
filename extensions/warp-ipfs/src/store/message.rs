@@ -1759,7 +1759,7 @@ struct ConversationInnerMeta {
 #[derive(Clone)]
 struct CommunityInnerMeta {
     pub command_tx: mpsc::Sender<CommunityTaskCommand>,
-    pub handle: AbortableJoinHandle<()>,
+    pub _handle: AbortableJoinHandle<()>,
 }
 
 struct ConversationInner {
@@ -2527,7 +2527,7 @@ impl ConversationInner {
 
         let inner_meta = CommunityInnerMeta {
             command_tx: ctx,
-            handle,
+            _handle: handle,
         };
 
         self.community_task.insert(community_id, inner_meta);

@@ -1201,8 +1201,8 @@ async fn message_event_handle<M: MultiPass, R: RayGun>(
                     None => writeln!(stdout, ">>> Conversation description removed")?,
                 }
             }
-        },
-        _ => {},
+        }
+        _ => {}
     }
 
     Ok(())
