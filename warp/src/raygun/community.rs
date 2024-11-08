@@ -233,6 +233,7 @@ pub enum CommunityPermission {
     EditInfo,
     ManageRoles,
     ManagePermissions,
+    InviteMembers,
     ManageMembers,
     ManageChannels,
     ManageInvites,
