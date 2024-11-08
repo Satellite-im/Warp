@@ -882,7 +882,7 @@ where
         message: &str,
     ) -> Result<(), Error> {
         self.raygun
-            .send_community_channel_message(community_id, channel_id, &message)
+            .send_community_channel_message(community_id, channel_id, message)
             .await
     }
     async fn delete_community_channel_message(

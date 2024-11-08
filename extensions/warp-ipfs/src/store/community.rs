@@ -229,7 +229,7 @@ impl CommunityDocument {
             members,
             channels: IndexMap::new(),
             roles: IndexMap::new(),
-            permissions: permissions,
+            permissions,
             invites: IndexMap::new(),
             deleted: false,
             signature: None,
@@ -252,14 +252,14 @@ impl From<CommunityDocument> for Community {
             value
                 .channels
                 .iter()
-                .map(|(k, _)| RoleId::parse_str(&k).expect("should be valid uuid"))
+                .map(|(k, _)| RoleId::parse_str(k).expect("should be valid uuid"))
                 .collect(),
         );
         community.set_roles(
             value
                 .roles
                 .iter()
-                .map(|(k, _)| RoleId::parse_str(&k).expect("should be valid uuid"))
+                .map(|(k, _)| RoleId::parse_str(k).expect("should be valid uuid"))
                 .collect(),
         );
         community.set_permissions(value.permissions);
@@ -267,7 +267,7 @@ impl From<CommunityDocument> for Community {
             value
                 .invites
                 .iter()
-                .map(|(k, _)| RoleId::parse_str(&k).expect("should be valid uuid"))
+                .map(|(k, _)| RoleId::parse_str(k).expect("should be valid uuid"))
                 .collect(),
         );
         community
@@ -282,7 +282,7 @@ impl CommunityDocument {
                 participants.insert(target.clone());
             }
         }
-        return participants;
+        participants
     }
     pub fn has_valid_invite(&self, user: &DID) -> bool {
         for (_, invite) in &self.invites {

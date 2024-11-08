@@ -1310,7 +1310,7 @@ impl CommunityTask {
         }
 
         self.document.members.insert(own_did.clone());
-        if let Some(_) = &invite_doc.target_user {
+        if invite_doc.target_user.is_some() {
             self.document
                 .invites
                 .swap_remove(&invite_doc.id.to_string());
@@ -2290,7 +2290,7 @@ impl CommunityTask {
                         .send(MessageCommand::InsertMessage {
                             peer_id,
                             conversation_id,
-                            recipients: recipients.iter().map(|r| r.clone()).collect(),
+                            recipients: recipients.iter().cloned().collect(),
                             message_id,
                             message_cid,
                         })

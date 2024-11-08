@@ -988,7 +988,7 @@ impl MessageStore {
             .command_tx
             .clone()
             .send(CommunityTaskCommand::EditCommunityIcon {
-                location: location,
+                location,
                 response: tx,
             })
             .await;
@@ -1009,7 +1009,7 @@ impl MessageStore {
             .command_tx
             .clone()
             .send(CommunityTaskCommand::EditCommunityBanner {
-                location: location,
+                location,
                 response: tx,
             })
             .await;
@@ -2574,7 +2574,7 @@ impl ConversationInner {
 impl ConversationInner {
     pub async fn create_community(&mut self, mut name: &str) -> Result<Community, Error> {
         name = name.trim();
-        if name.len() < 1 || name.len() > 255 {
+        if name.is_empty() || name.len() > 255 {
             return Err(Error::InvalidLength {
                 context: "name".into(),
                 current: name.len(),
