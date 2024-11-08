@@ -358,25 +358,6 @@ mod test {
         let (instance_c, did_c, _) = &mut accounts[2].clone();
 
         let community = instance_a.create_community("Community0").await?;
-
-        let invite_for_b = instance_a
-            .create_community_invite(community.id(), Some(did_b.clone()), None)
-            .await?;
-
-        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite_for_b.id())
-            .await?;
-
-        assert_eq!(
-            next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
-                community_id: community.id(),
-                invite_id: invite_for_b.id(),
-                user: did_b.clone()
-            }
-        );
-
         let role = instance_a
             .create_community_role(community.id(), "Role0")
             .await?;
@@ -387,25 +368,47 @@ mod test {
                 role.id(),
             )
             .await?;
+
+        let invite_for_b = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+        instance_b
+            .accept_community_invite(community.id(), invite_for_b.id())
+            .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite_for_b.id(),
+                user: did_b.clone()
+            }
+        );
+
         instance_a
             .grant_community_role(community.id(), role.id(), did_b.clone())
             .await?;
-
-        let role_as_seen_by_a = instance_a
-            .get_community_role(community.id(), role.id())
-            .await?;
-
-        let role_as_seen_by_b = instance_b
-            .get_community_role(community.id(), role.id())
-            .await?;
-
-        assert_eq!(role_as_seen_by_a, role_as_seen_by_b);
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::GrantedCommunityRole {
+                community_id: community.id(),
+                role_id: role.id(),
+                user: did_b.clone()
+            }
+        );
 
         let invite_for_c = instance_b
             .create_community_invite(community.id(), Some(did_c.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::CreatedCommunityInvite {
+                community_id: community.id(),
+                invite: invite_for_c.clone(),
+            }
+        );
 
-        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_c
             .accept_community_invite(community.id(), invite_for_c.id())
             .await?;
