@@ -1084,10 +1084,6 @@ impl ConversationInner {
         //     return Err(Error::ConversationLimitReached);
         // }
 
-        if !self.discovery.contains(did).await {
-            self.discovery.insert(did).await?;
-        }
-
         let mut conversation =
             ConversationDocument::new_direct(self.root.keypair(), [own_did.clone(), did.clone()])?;
 
