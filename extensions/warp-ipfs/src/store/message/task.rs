@@ -447,19 +447,19 @@ impl ConversationTask {
                 },
                 _ = &mut queue_timer => {
                     _ = process_queue(this).await;
-                    queue_timer.reset(Duration::from_secs(1));
+                    queue_timer.reset(Duration::from_secs(5));
                 }
                 _ = &mut pending_exchange_timer => {
                     _ = process_pending_payload(this).await;
-                    pending_exchange_timer.reset(Duration::from_secs(1));
+                    pending_exchange_timer.reset(Duration::from_secs(5));
                 }
                 _ = &mut check_mailbox => {
                     _ = this.load_from_mailbox().await;
-                    check_mailbox.reset(Duration::from_secs(60));
+                    check_mailbox.reset(Duration::from_secs(30));
                 }
                 _ = &mut ping_timer => {
                     _ = this.ping_all().await;
-                    ping_timer.reset(Duration::from_secs(60));
+                    ping_timer.reset(Duration::from_secs(30));
                 }
             }
         }
