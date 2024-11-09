@@ -1960,6 +1960,10 @@ impl ConversationTask {
             recipient: did_key.clone(),
         });
 
+        if !self.discovery.contains(did_key).await {
+            let _ = self.discovery.insert(did_key).await;
+        }
+
         self.publish(None, event, true).await?;
 
         let new_event = ConversationEvents::NewGroupConversation {

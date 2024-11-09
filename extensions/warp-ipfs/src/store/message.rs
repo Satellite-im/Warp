@@ -1177,12 +1177,6 @@ impl ConversationInner {
         //     return Err(Error::ConversationLimitReached);
         // }
 
-        for recipient in &recipients {
-            if !self.discovery.contains(recipient).await {
-                let _ = self.discovery.insert(recipient).await.ok();
-            }
-        }
-
         let restricted = self.root.get_blocks().await.unwrap_or_default();
 
         let permissions = match permissions.into() {
@@ -1686,12 +1680,6 @@ async fn process_conversation(
             if !conversation.recipients.contains(&did) {
                 tracing::warn!(%conversation_id, "was added to conversation but never was apart of the conversation.");
                 return Ok(());
-            }
-
-            for recipient in conversation.recipients.iter() {
-                if !this.discovery.contains(recipient).await {
-                    let _ = this.discovery.insert(recipient).await;
-                }
             }
 
             tracing::info!(%conversation_id, "Creating group conversation");
