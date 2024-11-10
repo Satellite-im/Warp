@@ -42,7 +42,7 @@ pub struct Discovery {
 
 impl Discovery {
     pub async fn new(ipfs: &Ipfs, config: &DiscoveryConfig, relays: &[Multiaddr]) -> Self {
-        let executor = LocalExecutor::default();
+        let executor = LocalExecutor;
         let (command_tx, command_rx) = futures::channel::mpsc::channel(0);
         let (broadcast_tx, _) = broadcast::channel(2048);
         let task = DiscoveryTask::new(
@@ -322,10 +322,7 @@ impl Discovery {
             })
             .await;
 
-        match rx.await {
-            Ok(value) => value,
-            _ => false,
-        }
+        rx.await.unwrap_or_default()
     }
 
     pub async fn list(&self) -> HashSet<DiscoveryRecord> {
