@@ -655,10 +655,12 @@ impl Future for DiscoveryTask {
                             continue;
                         }
 
-                        let mut task = DiscoveryPeerTask::new(&self.ipfs, peer_id)
-                            .set_addresses(self.relays.clone());
+                        let mut task = DiscoveryPeerTask::new(&self.ipfs, peer_id);
+                        if !self.relays.is_empty() {
+                            task = task.set_addresses(self.relays.clone());
+                            task.dial();
+                        }
 
-                        task.dial();
                         self.peers.insert(peer_id, task);
                         let _ = response.send(Ok(()));
                     }
