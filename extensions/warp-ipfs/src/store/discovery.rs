@@ -1,9 +1,22 @@
+use futures::{FutureExt, StreamExt};
+use rust_ipfs::{
+    libp2p::swarm::dial_opts::DialOpts, ConnectionEvents, Ipfs, Multiaddr, PeerConnectionEvents,
+    PeerId,
+};
+use std::cmp::Ordering;
 use std::{collections::HashSet, fmt::Debug, hash::Hash, sync::Arc, time::Duration};
 
-use futures::StreamExt;
-use rust_ipfs::{libp2p::swarm::dial_opts::DialOpts, Ipfs, Multiaddr, PeerId};
-
+use futures::channel::oneshot;
+use futures::future::BoxFuture;
+use futures::stream::BoxStream;
+use indexmap::IndexSet;
+use pollable_map::futures::FutureMap;
+use rust_ipfs::libp2p::swarm::ConnectionId;
 use std::collections::{hash_map::Entry, HashMap};
+use std::future::Future;
+use std::hash::Hasher;
+use std::pin::Pin;
+use std::task::{Context, Poll, Waker};
 use tokio::sync::{broadcast, RwLock};
 
 use rust_ipfs::p2p::MultiaddrExt;
@@ -313,6 +326,56 @@ impl Discovery {
     }
 }
 
+enum DiscoveryCommand {
+    Insert {
+        peer_id: PeerId,
+        response: oneshot::Sender<Result<(), Error>>,
+    },
+    Remove {
+        peer_id: PeerId,
+        response: oneshot::Sender<Result<(), Error>>,
+    },
+    Contains {
+        peer_id: PeerId,
+        response: oneshot::Sender<bool>,
+    },
+    List {
+        response: oneshot::Sender<IndexSet<()>>,
+    },
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct DiscoveryRecord {
+    peer_id: PeerId,
+    addresses: HashSet<Multiaddr>,
+}
+
+impl Hash for DiscoveryRecord {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.peer_id.hash(state)
+    }
+}
+
+impl PartialOrd for DiscoveryRecord {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.peer_id.partial_cmp(&other.peer_id)
+    }
+}
+
+impl DiscoveryRecord {
+    pub fn peer_id(&self) -> &PeerId {
+        &self.peer_id
+    }
+
+    pub fn did_key(&self) -> DID {
+        self.peer_id.to_did().unwrap()
+    }
+
+    pub fn addresses(&self) -> &HashSet<Multiaddr> {
+        &self.addresses
+    }
+}
+
 #[derive(Clone)]
 pub struct DiscoveryEntry {
     ipfs: Ipfs,
@@ -333,6 +396,255 @@ impl PartialEq for DiscoveryEntry {
 impl Hash for DiscoveryEntry {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.peer_id.hash(state);
+    }
+}
+
+enum DiscoveryPeerStatus {
+    Initial {
+        fut: BoxFuture<'static, Result<BoxStream<'static, PeerConnectionEvents>, anyhow::Error>>,
+    },
+    Status {
+        stream: BoxStream<'static, PeerConnectionEvents>,
+    },
+}
+
+struct DiscoveryPeerTask {
+    peer_id: PeerId,
+    ipfs: Ipfs,
+    addresses: HashSet<Multiaddr>,
+    connections: HashMap<ConnectionId, Multiaddr>,
+    status: DiscoveryPeerStatus,
+    dialing_task: Option<BoxFuture<'static, Result<(), Error>>>,
+    waker: Option<Waker>,
+}
+
+impl DiscoveryPeerTask {
+    pub fn new(ipfs: &Ipfs, peer_id: PeerId) -> Self {
+        let status = DiscoveryPeerStatus::Initial {
+            fut: {
+                let ipfs = ipfs.clone();
+                async move { ipfs.peer_connection_events(peer_id).await }.boxed()
+            },
+        };
+
+        Self {
+            peer_id,
+            ipfs: ipfs.clone(),
+            addresses: HashSet::new(),
+            connections: HashMap::new(),
+            status,
+            dialing_task: None,
+            waker: None,
+        }
+    }
+
+    pub fn set_connection(mut self, connection_id: ConnectionId, addr: Multiaddr) -> Self {
+        self.addresses.insert(addr.clone());
+        self.connections.insert(connection_id, addr);
+        self
+    }
+}
+
+impl DiscoveryPeerTask {
+    pub fn addresses(&self) -> &HashSet<Multiaddr> {
+        &self.addresses
+    }
+
+    pub fn is_connected(&self) -> bool {
+        !self.connections.is_empty()
+    }
+
+    pub fn dial(&mut self) {
+        if !self.connections.is_empty() {
+            return;
+        }
+
+        if self.dialing_task.is_some() {
+            return;
+        }
+
+        let peer_id = self.peer_id;
+        let ipfs = self.ipfs.clone();
+
+        let opt = match self.addresses.is_empty() {
+            true => DialOpts::peer_id(peer_id).build(),
+            false => DialOpts::peer_id(peer_id)
+                .addresses(Vec::from_iter(self.addresses.clone()))
+                .build(),
+        };
+
+        let fut = async move { ipfs.connect(opt).await.map_err(Error::from) };
+
+        self.dialing_task = Some(Box::pin(fut));
+
+        if let Some(waker) = self.waker.take() {
+            waker.wake();
+        }
+    }
+}
+
+impl Future for DiscoveryPeerTask {
+    type Output = ();
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        if let Some(fut) = self.dialing_task.as_mut() {
+            match fut.poll_unpin(cx) {
+                Poll::Ready(result) => {
+                    if let Err(e) = result {
+                        tracing::error!(error = %e, "dialing failed");
+                    }
+                    self.dialing_task.take();
+                }
+                Poll::Pending => {}
+            }
+        }
+
+        loop {
+            match self.status {
+                DiscoveryPeerStatus::Initial { ref mut fut } => match fut.poll_unpin(cx) {
+                    Poll::Ready(result) => {
+                        let stream = result.expect("instance is valid");
+                        self.status = DiscoveryPeerStatus::Status { stream };
+                    }
+                    Poll::Pending => break,
+                },
+                DiscoveryPeerStatus::Status { ref mut stream } => {
+                    match stream.poll_next_unpin(cx) {
+                        Poll::Ready(Some(event)) => match event {
+                            PeerConnectionEvents::IncomingConnection {
+                                connection_id,
+                                addr,
+                            }
+                            | PeerConnectionEvents::OutgoingConnection {
+                                connection_id,
+                                addr,
+                            } => {
+                                self.addresses.insert(addr.clone());
+                                self.connections.insert(connection_id, addr);
+                            }
+                            PeerConnectionEvents::ClosedConnection { connection_id } => {
+                                self.connections.remove(&connection_id);
+                            }
+                        },
+                        Poll::Ready(None) => unreachable!(),
+                        Poll::Pending => break,
+                    }
+                }
+            }
+        }
+        self.waker = Some(cx.waker().clone());
+        Poll::Pending
+    }
+}
+
+pub struct DiscoveryTask {
+    ipfs: Ipfs,
+    config: DiscoveryConfig,
+    relays: Vec<Multiaddr>,
+    peers: FutureMap<PeerId, DiscoveryPeerTask>,
+    command_rx: futures::channel::mpsc::Receiver<DiscoveryCommand>,
+    connection_event: BoxStream<'static, ConnectionEvents>,
+
+    discovery_fut: Option<()>,
+
+    waker: Option<Waker>,
+}
+
+enum DiscoverySelect {}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum DiscoveryType {
+    RzPoint,
+    Shuttle,
+    DHT,
+}
+
+impl DiscoveryTask {
+    pub async fn new(
+        ipfs: &Ipfs,
+        command_rx: futures::channel::mpsc::Receiver<DiscoveryCommand>,
+        config: DiscoveryConfig,
+        relays: Vec<Multiaddr>,
+    ) -> Self {
+        let connection_event = ipfs.connection_events().await.expect("should not fail");
+
+        Self {
+            ipfs: ipfs.clone(),
+            config,
+            relays,
+            peers: FutureMap::new(),
+            command_rx,
+            connection_event,
+            discovery_fut: None,
+            waker: None,
+        }
+    }
+}
+
+impl DiscoveryTask {
+    pub fn dht_discovery(&self, namespace: String) {
+        let ipfs = self.ipfs.clone();
+        let _fut = async move {
+            let bytes = namespace.as_bytes();
+            let stream = ipfs.dht_get_providers(bytes.to_vec()).await?;
+            // We collect instead of passing the stream through and polling there is to try to maintain compatibility in discovery
+            // Note: This may change in the future where we would focus on a single discovery method
+            let peers = stream.collect::<Vec<_>>().await;
+            Ok(peers)
+        };
+    }
+}
+
+impl Future for DiscoveryTask {
+    type Output = ();
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        loop {
+            match self.command_rx.poll_next_unpin(cx) {
+                Poll::Ready(Some(command)) => match command {
+                    DiscoveryCommand::Insert { .. } => {}
+                    DiscoveryCommand::Remove { .. } => {}
+                    DiscoveryCommand::Contains { .. } => {}
+                    DiscoveryCommand::List { .. } => {}
+                },
+                Poll::Ready(None) => unreachable!(),
+                Poll::Pending => break,
+            }
+        }
+
+        loop {
+            match self.connection_event.poll_next_unpin(cx) {
+                Poll::Ready(Some(event)) => match event {
+                    ConnectionEvents::IncomingConnection {
+                        peer_id,
+                        connection_id,
+                        addr,
+                    }
+                    | ConnectionEvents::OutgoingConnection {
+                        peer_id,
+                        connection_id,
+                        addr,
+                    } => {
+                        if self.peers.contains_key(&peer_id) {
+                            continue;
+                        }
+
+                        let task = DiscoveryPeerTask::new(&self.ipfs, peer_id)
+                            .set_connection(connection_id, addr);
+
+                        self.peers.insert(peer_id, task);
+                    }
+                    ConnectionEvents::ClosedConnection { .. } => {
+                        // Note: Since we are handling individual peers connection tracking, we can ignore this event
+                    }
+                },
+                Poll::Ready(None) => unreachable!(),
+                Poll::Pending => break,
+            }
+        }
+
+        let _ = self.peers.poll_next_unpin(cx);
+        self.waker = Some(cx.waker().clone());
+
+        Poll::Pending
     }
 }
 
