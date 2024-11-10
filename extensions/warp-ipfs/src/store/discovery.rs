@@ -1,34 +1,29 @@
-use futures::{FutureExt, StreamExt};
+use futures::{FutureExt, SinkExt, Stream, StreamExt};
 use rust_ipfs::{
     libp2p::swarm::dial_opts::DialOpts, ConnectionEvents, Ipfs, Multiaddr, PeerConnectionEvents,
     PeerId,
 };
 use std::cmp::Ordering;
-use std::{collections::HashSet, fmt::Debug, hash::Hash, sync::Arc, time::Duration};
+use std::{collections::HashSet, fmt::Debug, hash::Hash};
 
 use futures::channel::oneshot;
 use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 use indexmap::IndexSet;
-use pollable_map::futures::FutureMap;
+use pollable_map::stream::StreamMap;
 use rust_ipfs::libp2p::swarm::ConnectionId;
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::hash::Hasher;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
-use tokio::sync::{broadcast, RwLock};
-
-use rust_ipfs::p2p::MultiaddrExt;
+use tokio::sync::broadcast;
 
 use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
 
 use warp::{crypto::DID, error::Error};
 
-use crate::{
-    config::{Discovery as DiscoveryConfig, DiscoveryType},
-    store::topics::PeerTopic,
-};
+use crate::config::Discovery as DiscoveryConfig;
 
 use super::{DidExt, PeerIdExt, PeerType};
 
@@ -39,200 +34,209 @@ use super::{DidExt, PeerIdExt, PeerType};
 pub struct Discovery {
     ipfs: Ipfs,
     config: DiscoveryConfig,
-    entries: Arc<RwLock<HashSet<DiscoveryEntry>>>,
-    task: Arc<RwLock<Option<AbortableJoinHandle<()>>>>,
-    events: broadcast::Sender<DID>,
-    relays: Vec<Multiaddr>,
+    command_tx: futures::channel::mpsc::Sender<DiscoveryCommand>,
+    broadcast_tx: broadcast::Sender<DID>,
+    handle: AbortableJoinHandle<()>,
     executor: LocalExecutor,
 }
 
 impl Discovery {
-    pub fn new(ipfs: &Ipfs, config: &DiscoveryConfig, relays: &[Multiaddr]) -> Self {
-        let (events, _) = tokio::sync::broadcast::channel(2048);
+    pub async fn new(ipfs: &Ipfs, config: &DiscoveryConfig, relays: &[Multiaddr]) -> Self {
+        let executor = LocalExecutor::default();
+        let (command_tx, command_rx) = futures::channel::mpsc::channel(0);
+        let (broadcast_tx, _) = broadcast::channel(2048);
+        let task = DiscoveryTask::new(
+            ipfs,
+            command_rx,
+            broadcast_tx.clone(),
+            config,
+            relays.to_vec(),
+        )
+        .await;
+        let handle = executor.spawn_abortable(task);
         Self {
+            command_tx,
             ipfs: ipfs.clone(),
             config: config.clone(),
-            entries: Arc::default(),
-            task: Arc::default(),
-            events,
-            relays: relays.to_vec(),
-            executor: LocalExecutor,
+            broadcast_tx,
+            handle,
+            executor,
         }
     }
 
     /// Start discovery task
     /// Note: This starting will only work across a provided namespace
-    pub async fn start(&self) -> Result<(), Error> {
-        match &self.config {
-            DiscoveryConfig::Namespace {
-                discovery_type: DiscoveryType::DHT,
-                namespace,
-            } => {
-                let namespace = namespace.clone().unwrap_or_else(|| "warp-mp-ipfs".into());
-                let cid = self.ipfs.put_dag(format!("discovery:{namespace}")).await?;
-
-                let task = self.executor.spawn_abortable({
-                    let discovery = self.clone();
-                    async move {
-                        let mut cached = HashSet::new();
-
-                        if let Err(e) = discovery.ipfs.provide(cid).await {
-                            //Maybe panic?
-                            tracing::error!("Error providing key: {e}");
-                            return;
-                        }
-
-                        loop {
-                            if let Ok(mut stream) = discovery.ipfs.get_providers(cid).await {
-                                while let Some(peer_id) = stream.next().await {
-                                    if discovery
-                                        .ipfs
-                                        .is_connected(peer_id)
-                                        .await
-                                        .unwrap_or_default()
-                                        && cached.insert(peer_id)
-                                        && !discovery.contains(peer_id).await
-                                    {
-                                        let entry = DiscoveryEntry::new(
-                                            &discovery.ipfs,
-                                            peer_id,
-                                            discovery.config.clone(),
-                                            discovery.events.clone(),
-                                            discovery.relays.clone(),
-                                        )
-                                        .await;
-                                        if discovery.entries.write().await.insert(entry.clone()) {
-                                            entry.start().await;
-                                        }
-                                    }
-                                }
-                            }
-                            futures_timer::Delay::new(Duration::from_secs(1)).await;
-                        }
-                    }
-                });
-
-                *self.task.write().await = Some(task);
-            }
-            DiscoveryConfig::Namespace {
-                discovery_type: DiscoveryType::RzPoint { addresses },
-                namespace,
-            } => {
-                let mut peers = vec![];
-                for mut addr in addresses.iter().cloned() {
-                    let Some(peer_id) = addr.extract_peer_id() else {
-                        continue;
-                    };
-
-                    if let Err(e) = self.ipfs.add_peer((peer_id, addr)).await {
-                        tracing::error!("Error adding peer to address book {e}");
-                        continue;
-                    }
-
-                    peers.push(peer_id);
-                }
-
-                let namespace = namespace.clone().unwrap_or_else(|| "warp-mp-ipfs".into());
-                let mut register_id = vec![];
-
-                for peer_id in &peers {
-                    if let Err(e) = self
-                        .ipfs
-                        .rendezvous_register_namespace(namespace.clone(), None, *peer_id)
-                        .await
-                    {
-                        tracing::error!("Error registering to namespace: {e}");
-                        continue;
-                    }
-
-                    register_id.push(*peer_id);
-                }
-
-                if register_id.is_empty() {
-                    return Err(Error::OtherWithContext(
-                        "Unable to register to any external nodes".into(),
-                    ));
-                }
-
-                let task = self.executor.spawn_abortable({
-                        let discovery = self.clone();
-                        let register_id = register_id;
-                        async move {
-                            let mut meshed_map: HashMap<PeerId, HashSet<Multiaddr>> =
-                                HashMap::new();
-
-                            loop {
-                                for peer_id in &register_id {
-                                    let map = match discovery
-                                        .ipfs
-                                        .rendezvous_namespace_discovery(
-                                            namespace.clone(),
-                                            None,
-                                            *peer_id,
-                                        )
-                                        .await
-                                    {
-                                        Ok(map) => map,
-                                        Err(e) => {
-                                            tracing::error!(namespace = %namespace, error = %e, "failed to perform discovery over given namespace");
-                                            continue;
-                                        }
-                                    };
-
-                                    for (peer_id, addrs) in map {
-                                        match meshed_map.entry(peer_id) {
-                                            Entry::Occupied(mut entry) => {
-                                                entry.get_mut().extend(addrs);
-                                            }
-                                            Entry::Vacant(entry) => {
-                                                entry.insert(HashSet::from_iter(
-                                                    addrs.iter().cloned(),
-                                                ));
-                                                if !discovery
-                                                    .ipfs
-                                                    .is_connected(peer_id)
-                                                    .await
-                                                    .unwrap_or_default()
-                                                    && discovery.ipfs.connect(peer_id).await.is_ok()
-                                                    && !discovery.contains(peer_id).await
-                                                {
-                                                    let entry = DiscoveryEntry::new(
-                                                        &discovery.ipfs,
-                                                        peer_id,
-                                                        discovery.config.clone(),
-                                                        discovery.events.clone(),
-                                                        discovery.relays.clone(),
-                                                    )
-                                                    .await;
-
-                                                    if discovery
-                                                        .entries
-                                                        .write()
-                                                        .await
-                                                        .insert(entry.clone())
-                                                    {
-                                                        entry.start().await;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                futures_timer::Delay::new(Duration::from_secs(5)).await;
-                            }
-                        }
-                    });
-
-                *self.task.write().await = Some(task);
-            }
-            DiscoveryConfig::Shuttle { addresses: _ } => {}
-            _ => {}
-        }
-        Ok(())
-    }
+    // pub async fn start(&self) -> Result<(), Error> {
+    //     match &self.config {
+    //         DiscoveryConfig::Namespace {
+    //             discovery_type: DiscoveryType::DHT,
+    //             namespace,
+    //         } => {
+    //             let namespace = namespace.clone().unwrap_or_else(|| "warp-mp-ipfs".into());
+    //             let cid = self.ipfs.put_dag(format!("discovery:{namespace}")).await?;
+    //
+    //             let task = self.executor.spawn_abortable({
+    //                 let discovery = self.clone();
+    //                 async move {
+    //                     let mut cached = HashSet::new();
+    //
+    //                     if let Err(e) = discovery.ipfs.provide(cid).await {
+    //                         //Maybe panic?
+    //                         tracing::error!("Error providing key: {e}");
+    //                         return;
+    //                     }
+    //
+    //                     loop {
+    //                         if let Ok(mut stream) = discovery.ipfs.get_providers(cid).await {
+    //                             while let Some(peer_id) = stream.next().await {
+    //                                 if discovery
+    //                                     .ipfs
+    //                                     .is_connected(peer_id)
+    //                                     .await
+    //                                     .unwrap_or_default()
+    //                                     && cached.insert(peer_id)
+    //                                     && !discovery.contains(peer_id).await
+    //                                 {
+    //                                     let entry = DiscoveryEntry::new(
+    //                                         &discovery.ipfs,
+    //                                         peer_id,
+    //                                         discovery.config.clone(),
+    //                                         discovery.events.clone(),
+    //                                         discovery.relays.clone(),
+    //                                     )
+    //                                     .await;
+    //                                     if discovery.entries.write().await.insert(entry.clone()) {
+    //                                         entry.start().await;
+    //                                     }
+    //                                 }
+    //                             }
+    //                         }
+    //                         futures_timer::Delay::new(Duration::from_secs(1)).await;
+    //                     }
+    //                 }
+    //             });
+    //
+    //             *self.task.write().await = Some(task);
+    //         }
+    //         DiscoveryConfig::Namespace {
+    //             discovery_type: DiscoveryType::RzPoint { addresses },
+    //             namespace,
+    //         } => {
+    //             let mut peers = vec![];
+    //             for mut addr in addresses.iter().cloned() {
+    //                 let Some(peer_id) = addr.extract_peer_id() else {
+    //                     continue;
+    //                 };
+    //
+    //                 if let Err(e) = self.ipfs.add_peer((peer_id, addr)).await {
+    //                     tracing::error!("Error adding peer to address book {e}");
+    //                     continue;
+    //                 }
+    //
+    //                 peers.push(peer_id);
+    //             }
+    //
+    //             let namespace = namespace.clone().unwrap_or_else(|| "warp-mp-ipfs".into());
+    //             let mut register_id = vec![];
+    //
+    //             for peer_id in &peers {
+    //                 if let Err(e) = self
+    //                     .ipfs
+    //                     .rendezvous_register_namespace(namespace.clone(), None, *peer_id)
+    //                     .await
+    //                 {
+    //                     tracing::error!("Error registering to namespace: {e}");
+    //                     continue;
+    //                 }
+    //
+    //                 register_id.push(*peer_id);
+    //             }
+    //
+    //             if register_id.is_empty() {
+    //                 return Err(Error::OtherWithContext(
+    //                     "Unable to register to any external nodes".into(),
+    //                 ));
+    //             }
+    //
+    //             let task = self.executor.spawn_abortable({
+    //                     let discovery = self.clone();
+    //                     let register_id = register_id;
+    //                     async move {
+    //                         let mut meshed_map: HashMap<PeerId, HashSet<Multiaddr>> =
+    //                             HashMap::new();
+    //
+    //                         loop {
+    //                             for peer_id in &register_id {
+    //                                 let map = match discovery
+    //                                     .ipfs
+    //                                     .rendezvous_namespace_discovery(
+    //                                         namespace.clone(),
+    //                                         None,
+    //                                         *peer_id,
+    //                                     )
+    //                                     .await
+    //                                 {
+    //                                     Ok(map) => map,
+    //                                     Err(e) => {
+    //                                         tracing::error!(namespace = %namespace, error = %e, "failed to perform discovery over given namespace");
+    //                                         continue;
+    //                                     }
+    //                                 };
+    //
+    //                                 for (peer_id, addrs) in map {
+    //                                     match meshed_map.entry(peer_id) {
+    //                                         Entry::Occupied(mut entry) => {
+    //                                             entry.get_mut().extend(addrs);
+    //                                         }
+    //                                         Entry::Vacant(entry) => {
+    //                                             entry.insert(HashSet::from_iter(
+    //                                                 addrs.iter().cloned(),
+    //                                             ));
+    //                                             if !discovery
+    //                                                 .ipfs
+    //                                                 .is_connected(peer_id)
+    //                                                 .await
+    //                                                 .unwrap_or_default()
+    //                                                 && discovery.ipfs.connect(peer_id).await.is_ok()
+    //                                                 && !discovery.contains(peer_id).await
+    //                                             {
+    //                                                 let entry = DiscoveryEntry::new(
+    //                                                     &discovery.ipfs,
+    //                                                     peer_id,
+    //                                                     discovery.config.clone(),
+    //                                                     discovery.events.clone(),
+    //                                                     discovery.relays.clone(),
+    //                                                 )
+    //                                                 .await;
+    //
+    //                                                 if discovery
+    //                                                     .entries
+    //                                                     .write()
+    //                                                     .await
+    //                                                     .insert(entry.clone())
+    //                                                 {
+    //                                                     entry.start().await;
+    //                                                 }
+    //                                             }
+    //                                         }
+    //                                     }
+    //                                 }
+    //                             }
+    //                             futures_timer::Delay::new(Duration::from_secs(5)).await;
+    //                         }
+    //                     }
+    //                 });
+    //
+    //             *self.task.write().await = Some(task);
+    //         }
+    //         DiscoveryConfig::Shuttle { addresses: _ } => {}
+    //         _ => {}
+    //     }
+    //     Ok(())
+    // }
 
     pub fn events(&self) -> broadcast::Receiver<DID> {
-        self.events.subscribe()
+        self.broadcast_tx.subscribe()
     }
 
     pub fn discovery_config(&self) -> &DiscoveryConfig {
@@ -246,62 +250,55 @@ impl Discovery {
             PeerType::DID(did_key) => did_key.to_peer_id()?,
         };
 
-        if self.get(peer_id).await.is_ok() {
-            return Ok(());
-        }
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = self
+            .command_tx
+            .clone()
+            .send(DiscoveryCommand::Insert {
+                peer_id,
+                response: tx,
+            })
+            .await;
 
-        let own_peer_id = self.ipfs.keypair().public().to_peer_id();
-
-        if peer_id == own_peer_id {
-            return Ok(());
-        }
-
-        let entry = DiscoveryEntry::new(
-            &self.ipfs,
-            peer_id,
-            self.config.clone(),
-            self.events.clone(),
-            self.relays.clone(),
-        )
-        .await;
-        entry.start().await;
-        let prev = self.entries.write().await.replace(entry);
-        if let Some(entry) = prev {
-            entry.cancel().await;
-        }
-
-        Ok(())
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn remove<P: Into<PeerType>>(&self, peer_type: P) -> Result<(), Error> {
-        let entry = self.get(peer_type).await?;
-
-        let removed = self.entries.write().await.remove(&entry);
-        if removed {
-            entry.cancel().await;
-            return Ok(());
-        }
-
-        Err(Error::ObjectNotFound)
-    }
-
-    pub async fn get<P: Into<PeerType>>(&self, peer_type: P) -> Result<DiscoveryEntry, Error> {
         let peer_id = match &peer_type.into() {
             PeerType::PeerId(peer_id) => *peer_id,
             PeerType::DID(did_key) => did_key.to_peer_id()?,
         };
 
-        if !self.contains(peer_id).await {
-            return Err(Error::ObjectNotFound);
-        }
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = self
+            .command_tx
+            .clone()
+            .send(DiscoveryCommand::Remove {
+                peer_id,
+                response: tx,
+            })
+            .await;
 
-        self.entries
-            .read()
-            .await
-            .iter()
-            .find(|entry| entry.peer_id() == peer_id)
-            .cloned()
-            .ok_or(Error::ObjectNotFound)
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn get<P: Into<PeerType>>(&self, peer_type: P) -> Result<DiscoveryRecord, Error> {
+        let peer_id = match &peer_type.into() {
+            PeerType::PeerId(peer_id) => *peer_id,
+            PeerType::DID(did_key) => did_key.to_peer_id()?,
+        };
+
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = self
+            .command_tx
+            .clone()
+            .send(DiscoveryCommand::Get {
+                peer_id,
+                response: tx,
+            })
+            .await;
+
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn contains<P: Into<PeerType>>(&self, peer_type: P) -> bool {
@@ -315,14 +312,35 @@ impl Discovery {
             }
         };
 
-        self.list()
-            .await
-            .iter()
-            .any(|entry| entry.peer_id().eq(&peer_id))
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = self
+            .command_tx
+            .clone()
+            .send(DiscoveryCommand::Contains {
+                peer_id,
+                response: tx,
+            })
+            .await;
+
+        match rx.await {
+            Ok(value) => value,
+            _ => false,
+        }
     }
 
-    pub async fn list(&self) -> HashSet<DiscoveryEntry> {
-        self.entries.read().await.clone()
+    pub async fn list(&self) -> HashSet<DiscoveryRecord> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = self
+            .command_tx
+            .clone()
+            .send(DiscoveryCommand::List { response: tx })
+            .await;
+
+        let Ok(list) = rx.await else {
+            return HashSet::new();
+        };
+
+        HashSet::from_iter(list)
     }
 }
 
@@ -330,6 +348,10 @@ enum DiscoveryCommand {
     Insert {
         peer_id: PeerId,
         response: oneshot::Sender<Result<(), Error>>,
+    },
+    Get {
+        peer_id: PeerId,
+        response: oneshot::Sender<Result<DiscoveryRecord, Error>>,
     },
     Remove {
         peer_id: PeerId,
@@ -340,7 +362,7 @@ enum DiscoveryCommand {
         response: oneshot::Sender<bool>,
     },
     List {
-        response: oneshot::Sender<IndexSet<()>>,
+        response: oneshot::Sender<IndexSet<DiscoveryRecord>>,
     },
 }
 
@@ -376,29 +398,6 @@ impl DiscoveryRecord {
     }
 }
 
-#[derive(Clone)]
-pub struct DiscoveryEntry {
-    ipfs: Ipfs,
-    peer_id: PeerId,
-    config: DiscoveryConfig,
-    drop_guard: Arc<RwLock<Option<AbortableJoinHandle<()>>>>,
-    sender: broadcast::Sender<DID>,
-    relays: Vec<Multiaddr>,
-    executor: LocalExecutor,
-}
-
-impl PartialEq for DiscoveryEntry {
-    fn eq(&self, other: &Self) -> bool {
-        self.peer_id.eq(&other.peer_id)
-    }
-}
-
-impl Hash for DiscoveryEntry {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.peer_id.hash(state);
-    }
-}
-
 enum DiscoveryPeerStatus {
     Initial {
         fut: BoxFuture<'static, Result<BoxStream<'static, PeerConnectionEvents>, anyhow::Error>>,
@@ -413,8 +412,10 @@ struct DiscoveryPeerTask {
     ipfs: Ipfs,
     addresses: HashSet<Multiaddr>,
     connections: HashMap<ConnectionId, Multiaddr>,
+    connected: bool,
     status: DiscoveryPeerStatus,
     dialing_task: Option<BoxFuture<'static, Result<(), Error>>>,
+    is_connected_fut: Option<BoxFuture<'static, bool>>,
     waker: Option<Waker>,
 }
 
@@ -427,12 +428,19 @@ impl DiscoveryPeerTask {
             },
         };
 
+        let is_connected_fut = Some({
+            let ipfs = ipfs.clone();
+            async move { ipfs.is_connected(peer_id).await.unwrap_or_default() }.boxed()
+        });
+
         Self {
             peer_id,
             ipfs: ipfs.clone(),
             addresses: HashSet::new(),
             connections: HashMap::new(),
+            connected: false,
             status,
+            is_connected_fut,
             dialing_task: None,
             waker: None,
         }
@@ -443,6 +451,11 @@ impl DiscoveryPeerTask {
         self.connections.insert(connection_id, addr);
         self
     }
+
+    pub fn set_addresses(mut self, addresses: impl IntoIterator<Item = Multiaddr>) -> Self {
+        self.addresses.extend(addresses);
+        self
+    }
 }
 
 impl DiscoveryPeerTask {
@@ -450,8 +463,9 @@ impl DiscoveryPeerTask {
         &self.addresses
     }
 
+    #[allow(dead_code)]
     pub fn is_connected(&self) -> bool {
-        !self.connections.is_empty()
+        !self.connections.is_empty() || self.connected
     }
 
     pub fn dial(&mut self) {
@@ -483,9 +497,29 @@ impl DiscoveryPeerTask {
     }
 }
 
-impl Future for DiscoveryPeerTask {
-    type Output = ();
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+enum DiscoveryPeerEvent {
+    Connected,
+    Disconnected,
+}
+
+impl Stream for DiscoveryPeerTask {
+    type Item = DiscoveryPeerEvent;
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        if let Some(fut) = self.is_connected_fut.as_mut() {
+            match fut.poll_unpin(cx) {
+                Poll::Ready(connected) => {
+                    self.connected = connected;
+                    self.is_connected_fut.take();
+                    let event = match connected {
+                        true => DiscoveryPeerEvent::Connected,
+                        false => DiscoveryPeerEvent::Disconnected,
+                    };
+                    return Poll::Ready(Some(event));
+                }
+                Poll::Pending => {}
+            }
+        }
+
         if let Some(fut) = self.dialing_task.as_mut() {
             match fut.poll_unpin(cx) {
                 Poll::Ready(result) => {
@@ -518,11 +552,21 @@ impl Future for DiscoveryPeerTask {
                                 connection_id,
                                 addr,
                             } => {
+                                let currently_connected =
+                                    !self.connections.is_empty() | self.connected;
                                 self.addresses.insert(addr.clone());
                                 self.connections.insert(connection_id, addr);
+                                self.connected = true;
+                                if !currently_connected {
+                                    return Poll::Ready(Some(DiscoveryPeerEvent::Connected));
+                                }
                             }
                             PeerConnectionEvents::ClosedConnection { connection_id } => {
                                 self.connections.remove(&connection_id);
+                                if self.connections.is_empty() {
+                                    self.connected = false;
+                                    return Poll::Ready(Some(DiscoveryPeerEvent::Disconnected));
+                                }
                             }
                         },
                         Poll::Ready(None) => unreachable!(),
@@ -536,42 +580,39 @@ impl Future for DiscoveryPeerTask {
     }
 }
 
-pub struct DiscoveryTask {
+#[allow(dead_code)]
+struct DiscoveryTask {
     ipfs: Ipfs,
+    pending_broadcast: VecDeque<PeerId>,
     config: DiscoveryConfig,
     relays: Vec<Multiaddr>,
-    peers: FutureMap<PeerId, DiscoveryPeerTask>,
+    peers: StreamMap<PeerId, DiscoveryPeerTask>,
     command_rx: futures::channel::mpsc::Receiver<DiscoveryCommand>,
     connection_event: BoxStream<'static, ConnectionEvents>,
 
     discovery_fut: Option<()>,
 
+    broadcast_tx: broadcast::Sender<DID>,
+
     waker: Option<Waker>,
-}
-
-enum DiscoverySelect {}
-
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub enum DiscoveryType {
-    RzPoint,
-    Shuttle,
-    DHT,
 }
 
 impl DiscoveryTask {
     pub async fn new(
         ipfs: &Ipfs,
         command_rx: futures::channel::mpsc::Receiver<DiscoveryCommand>,
-        config: DiscoveryConfig,
+        broadcast_tx: broadcast::Sender<DID>,
+        config: &DiscoveryConfig,
         relays: Vec<Multiaddr>,
     ) -> Self {
         let connection_event = ipfs.connection_events().await.expect("should not fail");
-
         Self {
             ipfs: ipfs.clone(),
-            config,
+            pending_broadcast: VecDeque::new(),
+            config: config.clone(),
             relays,
-            peers: FutureMap::new(),
+            peers: StreamMap::new(),
+            broadcast_tx,
             command_rx,
             connection_event,
             discovery_fut: None,
@@ -581,6 +622,7 @@ impl DiscoveryTask {
 }
 
 impl DiscoveryTask {
+    #[allow(dead_code)]
     pub fn dht_discovery(&self, namespace: String) {
         let ipfs = self.ipfs.clone();
         let _fut = async move {
@@ -589,7 +631,7 @@ impl DiscoveryTask {
             // We collect instead of passing the stream through and polling there is to try to maintain compatibility in discovery
             // Note: This may change in the future where we would focus on a single discovery method
             let peers = stream.collect::<Vec<_>>().await;
-            Ok(peers)
+            Ok::<_, Error>(peers)
         };
     }
 }
@@ -598,12 +640,64 @@ impl Future for DiscoveryTask {
     type Output = ();
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         loop {
+            if let Some(peer_id) = self.pending_broadcast.pop_front() {
+                if let Ok(did) = peer_id.to_did() {
+                    let _ = self.broadcast_tx.send(did);
+                }
+                continue;
+            }
+
             match self.command_rx.poll_next_unpin(cx) {
                 Poll::Ready(Some(command)) => match command {
-                    DiscoveryCommand::Insert { .. } => {}
-                    DiscoveryCommand::Remove { .. } => {}
-                    DiscoveryCommand::Contains { .. } => {}
-                    DiscoveryCommand::List { .. } => {}
+                    DiscoveryCommand::Insert { peer_id, response } => {
+                        if self.peers.contains_key(&peer_id) {
+                            let _ = response.send(Err(Error::IdentityExist));
+                            continue;
+                        }
+
+                        let mut task = DiscoveryPeerTask::new(&self.ipfs, peer_id)
+                            .set_addresses(self.relays.clone());
+
+                        task.dial();
+                        self.peers.insert(peer_id, task);
+                        let _ = response.send(Ok(()));
+                    }
+                    DiscoveryCommand::Remove { peer_id, response } => {
+                        if !self.peers.contains_key(&peer_id) {
+                            let _ = response.send(Err(Error::IdentityDoesntExist));
+                            continue;
+                        }
+                        let _ = self.peers.remove(&peer_id);
+                        let _ = response.send(Ok(()));
+                    }
+                    DiscoveryCommand::Contains { peer_id, response } => {
+                        let _ = response.send(self.peers.contains_key(&peer_id));
+                    }
+                    DiscoveryCommand::Get { peer_id, response } => {
+                        let Some(task) = self.peers.get(&peer_id) else {
+                            let _ = response.send(Err(Error::IdentityDoesntExist));
+                            continue;
+                        };
+
+                        let record = DiscoveryRecord {
+                            peer_id,
+                            addresses: task.addresses().clone(),
+                        };
+
+                        let _ = response.send(Ok(record));
+                    }
+                    DiscoveryCommand::List { response } => {
+                        let list = self
+                            .peers
+                            .iter()
+                            .map(|(peer_id, task)| DiscoveryRecord {
+                                peer_id: *peer_id,
+                                addresses: task.addresses().clone(),
+                            })
+                            .collect::<IndexSet<_>>();
+
+                        let _ = response.send(list);
+                    }
                 },
                 Poll::Ready(None) => unreachable!(),
                 Poll::Pending => break,
@@ -641,133 +735,26 @@ impl Future for DiscoveryTask {
             }
         }
 
+        loop {
+            match self.peers.poll_next_unpin(cx) {
+                Poll::Ready(Some((peer_id, event))) => match event {
+                    DiscoveryPeerEvent::Connected => {
+                        if !self.pending_broadcast.contains(&peer_id) {
+                            self.pending_broadcast.push_back(peer_id);
+                        }
+                    }
+                    DiscoveryPeerEvent::Disconnected => {
+                        self.pending_broadcast.retain(|p| *p == peer_id);
+                    }
+                },
+                Poll::Ready(None) => unreachable!(),
+                Poll::Pending => break,
+            }
+        }
+
         let _ = self.peers.poll_next_unpin(cx);
         self.waker = Some(cx.waker().clone());
 
         Poll::Pending
-    }
-}
-
-impl Eq for DiscoveryEntry {}
-
-impl DiscoveryEntry {
-    pub async fn new(
-        ipfs: &Ipfs,
-        peer_id: PeerId,
-        config: DiscoveryConfig,
-        sender: broadcast::Sender<DID>,
-        relays: Vec<Multiaddr>,
-    ) -> Self {
-        Self {
-            ipfs: ipfs.clone(),
-            peer_id,
-            config,
-            drop_guard: Arc::default(),
-            sender,
-            relays,
-            executor: LocalExecutor,
-        }
-    }
-
-    pub async fn start(&self) {
-        let holder = &mut *self.drop_guard.write().await;
-
-        if holder.is_some() {
-            return;
-        }
-
-        let fut = {
-            let entry = self.clone();
-            let ipfs = self.ipfs.clone();
-            let peer_id = self.peer_id;
-            async move {
-                let mut sent_initial_push = false;
-                if !entry.relays.is_empty() {
-                    //Adding relay for peer to address book in case we are connected over common relays
-                    for addr in entry.relays.clone() {
-                        let _ = ipfs.add_peer((entry.peer_id, addr)).await;
-                    }
-                }
-                loop {
-                    if ipfs.is_connected(entry.peer_id).await.unwrap_or_default() {
-                        if !sent_initial_push {
-                            if let Ok(did) = peer_id.to_did() {
-                                futures_timer::Delay::new(Duration::from_millis(500)).await;
-                                tracing::info!("Connected to {did}. Emitting initial event");
-                                let topic = did.events();
-                                let subscribed = ipfs
-                                    .pubsub_peers(Some(topic))
-                                    .await
-                                    .unwrap_or_default()
-                                    .contains(&entry.peer_id);
-
-                                if subscribed {
-                                    let _ = entry.sender.send(did);
-                                    sent_initial_push = true;
-                                }
-                            }
-                        }
-                        futures_timer::Delay::new(Duration::from_secs(10)).await;
-                        continue;
-                    }
-
-                    match entry.config {
-                        // Used for provider. Doesnt do anything right now
-                        // TODO: Maybe have separate provider query in case
-                        //       Discovery task isnt enabled?
-                        DiscoveryConfig::Namespace {
-                            discovery_type: DiscoveryType::DHT,
-                            ..
-                        } => {}
-                        DiscoveryConfig::Namespace {
-                            discovery_type: DiscoveryType::RzPoint { .. },
-                            ..
-                        } => {
-                            tracing::debug!("Dialing {peer_id}");
-
-                            if let Err(_e) = ipfs.connect(peer_id).await {
-                                tracing::error!("Error connecting to {peer_id}: {_e}");
-                                futures_timer::Delay::new(Duration::from_secs(10)).await;
-                                continue;
-                            }
-                        }
-                        //TODO: Possibly obtain peer records from external node
-                        //      of any connected peer, otherwise await on a response for
-                        //      those records to establish a connection
-                        DiscoveryConfig::Shuttle { .. } | DiscoveryConfig::None => {
-                            let opts = DialOpts::peer_id(peer_id)
-                                .addresses(entry.relays.clone())
-                                .build();
-
-                            tracing::debug!("Dialing {peer_id}");
-
-                            if let Err(_e) = ipfs.connect(opts).await {
-                                tracing::error!("Error connecting to {peer_id}: {_e}");
-                                futures_timer::Delay::new(Duration::from_secs(10)).await;
-                                continue;
-                            }
-                        }
-                    }
-
-                    futures_timer::Delay::new(Duration::from_secs(10)).await;
-                }
-            }
-        };
-
-        let guard = self.executor.spawn_abortable(fut);
-
-        *holder = Some(guard);
-    }
-
-    /// Returns a peer id
-    pub fn peer_id(&self) -> PeerId {
-        self.peer_id
-    }
-
-    pub async fn cancel(&self) {
-        let task = std::mem::take(&mut *self.drop_guard.write().await);
-        if let Some(guard) = task {
-            guard.abort();
-        }
     }
 }

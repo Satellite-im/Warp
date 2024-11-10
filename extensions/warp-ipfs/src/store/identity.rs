@@ -439,7 +439,7 @@ impl IdentityStore {
             }
         });
 
-        store.discovery.start().await?;
+        // store.discovery.start().await?;
 
         let mut discovery_rx = store.discovery.events();
 
