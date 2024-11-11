@@ -2179,7 +2179,7 @@ impl ConversationTask {
             if !&self
                 .document
                 .permissions
-                .has_permission(&own_did, GroupPermission::EditGroupInfo)
+                .has_permission(&own_did, GroupPermission::EditGroupVisual)
                 && own_did.ne(creator)
             {
                 return Err(Error::Unauthorized);
@@ -2321,7 +2321,7 @@ impl ConversationTask {
             if !&self
                 .document
                 .permissions
-                .has_permission(&own_did, GroupPermission::EditGroupInfo)
+                .has_permission(&own_did, GroupPermission::EditGroupVisual)
                 && own_did.ne(creator)
             {
                 return Err(Error::Unauthorized);
@@ -3525,7 +3525,7 @@ async fn message_event(
                         && !this
                             .document
                             .permissions
-                            .has_permission(sender, GroupPermission::EditGroupInfo)
+                            .has_permission(sender, GroupPermission::EditGroupVisual)
                     {
                         return Err(Error::Unauthorized);
                     }
@@ -3545,7 +3545,7 @@ async fn message_event(
                         && !this
                             .document
                             .permissions
-                            .has_permission(sender, GroupPermission::EditGroupInfo)
+                            .has_permission(sender, GroupPermission::EditGroupVisual)
                     {
                         return Err(Error::Unauthorized);
                     }

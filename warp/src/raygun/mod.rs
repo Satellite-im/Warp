@@ -749,6 +749,7 @@ pub enum GroupPermission {
     AddParticipants,
     RemoveParticipants,
     EditGroupInfo,
+    EditGroupVisual
 }
 
 impl GroupPermission {
