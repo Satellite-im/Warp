@@ -327,7 +327,7 @@ mod test {
 
         let community = instance_a.create_community("Community0").await?;
         instance_a
-            .revoke_community_permission_for_all(community.id(), CommunityPermission::InviteMembers)
+            .revoke_community_permission_for_all(community.id(), CommunityPermission::CreateInvites)
             .await?;
 
         let invite = instance_a
@@ -372,7 +372,7 @@ mod test {
         instance_a
             .grant_community_permission(
                 community.id(),
-                CommunityPermission::ManageInvites,
+                CommunityPermission::CreateInvites,
                 role.id(),
             )
             .await?;
@@ -507,7 +507,7 @@ mod test {
         instance_a
             .grant_community_permission(
                 community.id(),
-                CommunityPermission::ManageInvites,
+                CommunityPermission::DeleteInvites,
                 role.id(),
             )
             .await?;
@@ -614,7 +614,7 @@ mod test {
         instance_a
             .grant_community_permission(
                 community.id(),
-                CommunityPermission::ManageInvites,
+                CommunityPermission::EditInvites,
                 role.id(),
             )
             .await?;
@@ -859,7 +859,7 @@ mod test {
         instance_a
             .grant_community_permission(
                 community.id(),
-                CommunityPermission::ManageChannels,
+                CommunityPermission::CreateChannels,
                 role.id(),
             )
             .await?;
@@ -946,7 +946,7 @@ mod test {
         instance_a
             .grant_community_permission(
                 community.id(),
-                CommunityPermission::ManageChannels,
+                CommunityPermission::DeleteChannels,
                 role.id(),
             )
             .await?;
@@ -1031,7 +1031,7 @@ mod test {
             .grant_community_role(community.id(), role.id(), did_b.clone())
             .await?;
         instance_a
-            .grant_community_permission(community.id(), CommunityPermission::EditInfo, role.id())
+            .grant_community_permission(community.id(), CommunityPermission::EditName, role.id())
             .await?;
 
         let new_name = "Community1";
@@ -1108,7 +1108,7 @@ mod test {
             .grant_community_role(community.id(), role.id(), did_b.clone())
             .await?;
         instance_a
-            .grant_community_permission(community.id(), CommunityPermission::EditInfo, role.id())
+            .grant_community_permission(community.id(), CommunityPermission::EditDescription, role.id())
             .await?;
 
         let new_description = Some("description".to_string());
@@ -1207,7 +1207,7 @@ mod test {
             .grant_community_role(community.id(), role.id(), did_b.clone())
             .await?;
         instance_a
-            .grant_community_permission(community.id(), CommunityPermission::ManageRoles, role.id())
+            .grant_community_permission(community.id(), CommunityPermission::EditRoles, role.id())
             .await?;
 
         let new_name = "new_name".to_string();
@@ -1249,7 +1249,7 @@ mod test {
         );
 
         let result = instance_b
-            .grant_community_permission(community.id(), CommunityPermission::EditInfo, role.id())
+            .grant_community_permission(community.id(), CommunityPermission::EditName, role.id())
             .await;
         assert_eq!(
             format!("{:?}", result),
@@ -1291,18 +1291,18 @@ mod test {
         instance_a
             .grant_community_permission(
                 community.id(),
-                CommunityPermission::ManagePermissions,
+                CommunityPermission::GrantPermissions,
                 role.id(),
             )
             .await?;
 
         instance_b
-            .grant_community_permission(community.id(), CommunityPermission::EditInfo, role.id())
+            .grant_community_permission(community.id(), CommunityPermission::EditName, role.id())
             .await?;
         let community = instance_a.get_community(community.id()).await?;
         assert!(community
             .permissions()
-            .get(&CommunityPermission::EditInfo)
+            .get(&CommunityPermission::EditName)
             .unwrap()
             .contains(&role.id()));
         Ok(())
@@ -1375,7 +1375,7 @@ mod test {
         instance_a
             .grant_community_permission(
                 community.id(),
-                CommunityPermission::ManageMembers,
+                CommunityPermission::RemoveMembers,
                 role.id(),
             )
             .await?;
@@ -1531,7 +1531,7 @@ mod test {
         instance_a
             .grant_community_permission(
                 community.id(),
-                CommunityPermission::ManageChannels,
+                CommunityPermission::EditChannels,
                 role.id(),
             )
             .await?;
@@ -1627,7 +1627,7 @@ mod test {
         instance_a
             .grant_community_permission(
                 community.id(),
-                CommunityPermission::ManageChannels,
+                CommunityPermission::EditChannels,
                 role.id(),
             )
             .await?;
@@ -1745,7 +1745,7 @@ mod test {
         instance_a
             .grant_community_permission(
                 community.id(),
-                CommunityPermission::ManagePermissions,
+                CommunityPermission::GrantPermissions,
                 role.id(),
             )
             .await?;

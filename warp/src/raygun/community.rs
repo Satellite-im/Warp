@@ -230,13 +230,31 @@ pub enum CommunityChannelType {
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum CommunityPermission {
-    EditInfo,
-    ManageRoles,
-    ManagePermissions,
-    InviteMembers,
-    ManageMembers,
-    ManageChannels,
-    ManageInvites,
+    EditName,
+    EditDescription,
+    EditIcon,
+    EditBanner,
+
+    CreateRoles,
+    EditRoles,
+    DeleteRoles,
+    
+    GrantRoles,
+    RevokeRoles,
+
+    GrantPermissions,
+    RevokePermissions,
+
+    CreateInvites,
+    EditInvites,
+    DeleteInvites,
+
+    CreateChannels,
+    EditChannels,
+    DeleteChannels,
+
+    RemoveMembers,
+
     DeleteMessages,
 }
 

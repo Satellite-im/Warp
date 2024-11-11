@@ -208,12 +208,32 @@ impl CommunityDocument {
         let creator = keypair.to_did()?;
 
         let mut permissions = CommunityPermissions::new();
-        permissions.insert(CommunityPermission::EditInfo, IndexSet::new());
-        permissions.insert(CommunityPermission::ManageRoles, IndexSet::new());
-        permissions.insert(CommunityPermission::ManagePermissions, IndexSet::new());
-        permissions.insert(CommunityPermission::ManageMembers, IndexSet::new());
-        permissions.insert(CommunityPermission::ManageChannels, IndexSet::new());
-        permissions.insert(CommunityPermission::ManageInvites, IndexSet::new());
+        permissions.insert(CommunityPermission::EditName, IndexSet::new());
+        permissions.insert(CommunityPermission::EditDescription, IndexSet::new());
+        permissions.insert(CommunityPermission::EditIcon, IndexSet::new());
+        permissions.insert(CommunityPermission::EditBanner, IndexSet::new());
+
+        permissions.insert(CommunityPermission::CreateRoles, IndexSet::new());
+        permissions.insert(CommunityPermission::EditRoles, IndexSet::new());
+        permissions.insert(CommunityPermission::DeleteRoles, IndexSet::new());
+
+        permissions.insert(CommunityPermission::GrantRoles, IndexSet::new());
+        permissions.insert(CommunityPermission::RevokeRoles, IndexSet::new());
+
+        permissions.insert(CommunityPermission::GrantPermissions, IndexSet::new());
+        permissions.insert(CommunityPermission::RevokePermissions, IndexSet::new());
+
+        permissions.insert(CommunityPermission::CreateChannels, IndexSet::new());
+        permissions.insert(CommunityPermission::EditChannels, IndexSet::new());
+        permissions.insert(CommunityPermission::DeleteChannels, IndexSet::new());
+
+
+        //We don't add CreateInvites permission since by default we leave it unrestricted.
+        permissions.insert(CommunityPermission::EditInvites, IndexSet::new());
+        permissions.insert(CommunityPermission::DeleteInvites, IndexSet::new());
+
+        permissions.insert(CommunityPermission::RemoveMembers, IndexSet::new());
+
         permissions.insert(CommunityPermission::DeleteMessages, IndexSet::new());
 
         let mut members = IndexSet::new();

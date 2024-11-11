@@ -1164,7 +1164,7 @@ impl CommunityTask {
         let own_did = &self.identity.did_key();
         if !self
             .document
-            .has_permission(own_did, &CommunityPermission::EditInfo)
+            .has_permission(own_did, &CommunityPermission::EditIcon)
         {
             return Err(Error::Unauthorized);
         }
@@ -1174,7 +1174,7 @@ impl CommunityTask {
         let own_did = &self.identity.did_key();
         if !self
             .document
-            .has_permission(own_did, &CommunityPermission::EditInfo)
+            .has_permission(own_did, &CommunityPermission::EditBanner)
         {
             return Err(Error::Unauthorized);
         }
@@ -1189,10 +1189,7 @@ impl CommunityTask {
         let own_did = &self.identity.did_key();
         if !self
             .document
-            .has_permission(own_did, &CommunityPermission::ManageInvites)
-            && !self
-                .document
-                .has_permission(own_did, &CommunityPermission::InviteMembers)
+            .has_permission(own_did, &CommunityPermission::CreateInvites)
         {
             return Err(Error::Unauthorized);
         }
@@ -1258,7 +1255,7 @@ impl CommunityTask {
         if !is_targeting_self
             && !self
                 .document
-                .has_permission(own_did, &CommunityPermission::ManageInvites)
+                .has_permission(own_did, &CommunityPermission::DeleteInvites)
         {
             return Err(Error::Unauthorized);
         }
@@ -1350,7 +1347,7 @@ impl CommunityTask {
         let own_did = &self.identity.did_key();
         if !self
             .document
-            .has_permission(own_did, &CommunityPermission::ManageInvites)
+            .has_permission(own_did, &CommunityPermission::EditInvites)
         {
             return Err(Error::Unauthorized);
         }
@@ -1387,7 +1384,7 @@ impl CommunityTask {
         let own_did = &self.identity.did_key();
         if !self
             .document
-            .has_permission(own_did, &CommunityPermission::ManageRoles)
+            .has_permission(own_did, &CommunityPermission::CreateRoles)
         {
             return Err(Error::Unauthorized);
         }
@@ -1422,7 +1419,7 @@ impl CommunityTask {
         let own_did = &self.identity.did_key();
         if !self
             .document
-            .has_permission(own_did, &CommunityPermission::ManageRoles)
+            .has_permission(own_did, &CommunityPermission::DeleteRoles)
         {
             return Err(Error::Unauthorized);
         }
@@ -1475,7 +1472,7 @@ impl CommunityTask {
         let own_did = &self.identity.did_key();
         if !self
             .document
-            .has_permission(own_did, &CommunityPermission::ManageRoles)
+            .has_permission(own_did, &CommunityPermission::EditRoles)
         {
             return Err(Error::Unauthorized);
         }
@@ -1509,7 +1506,7 @@ impl CommunityTask {
         let own_did = &self.identity.did_key();
         if !self
             .document
-            .has_permission(own_did, &CommunityPermission::ManageRoles)
+            .has_permission(own_did, &CommunityPermission::GrantRoles)
         {
             return Err(Error::Unauthorized);
         }
@@ -1548,7 +1545,7 @@ impl CommunityTask {
         let own_did = &self.identity.did_key();
         if !self
             .document
-            .has_permission(own_did, &CommunityPermission::ManageRoles)
+            .has_permission(own_did, &CommunityPermission::RevokeRoles)
         {
             return Err(Error::Unauthorized);
         }
@@ -1589,7 +1586,7 @@ impl CommunityTask {
         let own_did = &self.identity.did_key();
         if !self
             .document
-            .has_permission(own_did, &CommunityPermission::ManageChannels)
+            .has_permission(own_did, &CommunityPermission::CreateChannels)
         {
             return Err(Error::Unauthorized);
         }
@@ -1630,7 +1627,7 @@ impl CommunityTask {
         let own_did = &self.identity.did_key();
         if !self
             .document
-            .has_permission(own_did, &CommunityPermission::ManageChannels)
+            .has_permission(own_did, &CommunityPermission::DeleteChannels)
         {
             return Err(Error::Unauthorized);
         }
@@ -1681,7 +1678,7 @@ impl CommunityTask {
         let own_did = &self.identity.did_key();
         if !self
             .document
-            .has_permission(own_did, &CommunityPermission::EditInfo)
+            .has_permission(own_did, &CommunityPermission::EditName)
         {
             return Err(Error::Unauthorized);
         }
@@ -1716,7 +1713,7 @@ impl CommunityTask {
         let own_did = &self.identity.did_key();
         if !self
             .document
-            .has_permission(own_did, &CommunityPermission::EditInfo)
+            .has_permission(own_did, &CommunityPermission::EditDescription)
         {
             return Err(Error::Unauthorized);
         }
@@ -1764,7 +1761,7 @@ impl CommunityTask {
         let own_did = &self.identity.did_key();
         if !self
             .document
-            .has_permission(own_did, &CommunityPermission::ManagePermissions)
+            .has_permission(own_did, &CommunityPermission::GrantPermissions)
         {
             return Err(Error::Unauthorized);
         }
@@ -1811,7 +1808,7 @@ impl CommunityTask {
         let own_did = &self.identity.did_key();
         if !self
             .document
-            .has_permission(own_did, &CommunityPermission::ManagePermissions)
+            .has_permission(own_did, &CommunityPermission::RevokePermissions)
         {
             return Err(Error::Unauthorized);
         }
@@ -1850,7 +1847,7 @@ impl CommunityTask {
         let own_did = &self.identity.did_key();
         if !self
             .document
-            .has_permission(own_did, &CommunityPermission::ManagePermissions)
+            .has_permission(own_did, &CommunityPermission::GrantPermissions)
         {
             return Err(Error::Unauthorized);
         }
@@ -1887,7 +1884,7 @@ impl CommunityTask {
         let own_did = &self.identity.did_key();
         if !self
             .document
-            .has_permission(own_did, &CommunityPermission::ManagePermissions)
+            .has_permission(own_did, &CommunityPermission::RevokePermissions)
         {
             return Err(Error::Unauthorized);
         }
@@ -1919,7 +1916,7 @@ impl CommunityTask {
         let own_did = &self.identity.did_key();
         if !self
             .document
-            .has_permission(own_did, &CommunityPermission::ManageMembers)
+            .has_permission(own_did, &CommunityPermission::RemoveMembers)
         {
             return Err(Error::Unauthorized);
         }
@@ -1957,7 +1954,7 @@ impl CommunityTask {
         let own_did = &self.identity.did_key();
         if !self
             .document
-            .has_permission(own_did, &CommunityPermission::ManageChannels)
+            .has_permission(own_did, &CommunityPermission::EditChannels)
         {
             return Err(Error::Unauthorized);
         }
@@ -2000,7 +1997,7 @@ impl CommunityTask {
         let own_did = &self.identity.did_key();
         if !self
             .document
-            .has_permission(own_did, &CommunityPermission::ManageChannels)
+            .has_permission(own_did, &CommunityPermission::EditChannels)
         {
             return Err(Error::Unauthorized);
         }
@@ -2044,7 +2041,7 @@ impl CommunityTask {
         let own_did = &self.identity.did_key();
         if !self
             .document
-            .has_permission(own_did, &CommunityPermission::ManagePermissions)
+            .has_permission(own_did, &CommunityPermission::GrantPermissions)
         {
             return Err(Error::Unauthorized);
         }
@@ -2099,7 +2096,7 @@ impl CommunityTask {
         let own_did = &self.identity.did_key();
         if !self
             .document
-            .has_permission(own_did, &CommunityPermission::ManagePermissions)
+            .has_permission(own_did, &CommunityPermission::RevokePermissions)
         {
             return Err(Error::Unauthorized);
         }
@@ -2146,7 +2143,7 @@ impl CommunityTask {
         let own_did = &self.identity.did_key();
         if !self
             .document
-            .has_permission(own_did, &CommunityPermission::ManagePermissions)
+            .has_permission(own_did, &CommunityPermission::GrantPermissions)
         {
             return Err(Error::Unauthorized);
         }
@@ -2193,7 +2190,7 @@ impl CommunityTask {
         let own_did = &self.identity.did_key();
         if !self
             .document
-            .has_permission(own_did, &CommunityPermission::ManagePermissions)
+            .has_permission(own_did, &CommunityPermission::RevokePermissions)
         {
             return Err(Error::Unauthorized);
         }
