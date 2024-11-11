@@ -2171,26 +2171,21 @@ impl ConversationTask {
             ConversationImageType::Banner => MAX_CONVERSATION_BANNER_SIZE,
             ConversationImageType::Icon => MAX_CONVERSATION_ICON_SIZE,
         };
-
-        let Some(creator) = self.document.creator.clone() else {
-            return Err(Error::InvalidConversation);
-        };
-
-        if self.document.conversation_type != ConversationType::Group {
-            return Err(Error::InvalidConversation);
-        }
-
-        let own_did = &self.identity.did_key();
-
-        if creator.ne(own_did)
-            && !&self
+        
+        if self.document.conversation_type() == ConversationType::Group {
+            let Some(creator) = self.document.creator.as_ref() else {
+                return Err(Error::InvalidConversation);
+            };
+            let own_did = self.identity.did_key();
+            if !&self
                 .document
                 .permissions
-                .has_permission(own_did, GroupPermission::EditGroupInfo)
-        {
-            return Err(Error::Unauthorized);
+                .has_permission(&own_did, GroupPermission::EditGroupInfo)
+                && own_did.ne(creator)
+            {
+                return Err(Error::Unauthorized);
+            }
         }
-
         let (cid, size, ext) = match location {
             Location::Constellation { path } => {
                 let file = self
@@ -2319,23 +2314,19 @@ impl ConversationTask {
         &mut self,
         image_type: ConversationImageType,
     ) -> Result<(), Error> {
-        let Some(creator) = self.document.creator.clone() else {
-            return Err(Error::InvalidConversation);
-        };
-
-        if self.document.conversation_type != ConversationType::Group {
-            return Err(Error::InvalidConversation);
-        }
-
-        let own_did = &self.identity.did_key();
-
-        if creator.ne(own_did)
-            && !&self
+        if self.document.conversation_type() == ConversationType::Group {
+            let Some(creator) = self.document.creator.as_ref() else {
+                return Err(Error::InvalidConversation);
+            };
+            let own_did = self.identity.did_key();
+            if !&self
                 .document
                 .permissions
-                .has_permission(own_did, GroupPermission::EditGroupInfo)
-        {
-            return Err(Error::Unauthorized);
+                .has_permission(&own_did, GroupPermission::EditGroupInfo)
+                && own_did.ne(creator)
+            {
+                return Err(Error::Unauthorized);
+            }
         }
 
         let cid = match image_type {
@@ -3530,10 +3521,8 @@ async fn message_event(
                     }
                 }
                 ConversationUpdateKind::AddedIcon | ConversationUpdateKind::RemovedIcon => {
-                    if this.document.conversation_type != ConversationType::Group {
-                        return Err(Error::InvalidConversation);
-                    }
-                    if !this.document.creator.as_ref().is_some_and(|c| c == sender)
+                    if this.document.conversation_type == ConversationType::Group
+                        && !this.document.creator.as_ref().is_some_and(|c| c == sender)
                         && !this
                             .document
                             .permissions
@@ -3552,10 +3541,8 @@ async fn message_event(
                 }
 
                 ConversationUpdateKind::AddedBanner | ConversationUpdateKind::RemovedBanner => {
-                    if this.document.conversation_type != ConversationType::Group {
-                        return Err(Error::InvalidConversation);
-                    }
-                    if !this.document.creator.as_ref().is_some_and(|c| c == sender)
+                    if this.document.conversation_type == ConversationType::Group
+                        && !this.document.creator.as_ref().is_some_and(|c| c == sender)
                         && !this
                             .document
                             .permissions
@@ -3573,7 +3560,8 @@ async fn message_event(
                     }
                 }
                 ConversationUpdateKind::ChangeDescription { description } => {
-                    if !this.document.creator.as_ref().is_some_and(|c| c == sender)
+                    if this.document.conversation_type == ConversationType::Group
+                        && !this.document.creator.as_ref().is_some_and(|c| c == sender)
                         && !this
                             .document
                             .permissions
