@@ -61,7 +61,7 @@ pub async fn run() -> Result<(), JsError> {
     ))?;
     body.append_p("")?;
 
-    account_a.send_request(&ident_b.did_key()).await?;
+    account_a.send_request(ident_b.did_key()).await?;
     let mut sent = false;
     let mut received = false;
     let mut seen_a = false;
@@ -111,10 +111,10 @@ pub async fn run() -> Result<(), JsError> {
     match coin {
         0 => {
             body.append_p(&format!("Denying {} friend request", username(&ident_a)))?;
-            account_b.deny_request(&ident_a.did_key()).await?;
+            account_b.deny_request(ident_a.did_key()).await?;
         }
         _ => {
-            account_b.accept_request(&ident_a.did_key()).await?;
+            account_b.accept_request(ident_a.did_key()).await?;
 
             body.append_p(&format!(
                 "{} accepted {} request",
@@ -141,8 +141,8 @@ pub async fn run() -> Result<(), JsError> {
             }
 
             if rand::random() {
-                account_a.remove_friend(&ident_b.did_key()).await?;
-                if account_a.has_friend(&ident_b.did_key()).await? {
+                account_a.remove_friend(ident_b.did_key()).await?;
+                if account_a.has_friend(ident_b.did_key()).await? {
                     body.append_p(&format!(
                         "{} is stuck with {} forever",
                         username(&ident_a),
@@ -156,8 +156,8 @@ pub async fn run() -> Result<(), JsError> {
                     ))?;
                 }
             } else {
-                account_b.remove_friend(&ident_a.did_key()).await?;
-                if account_b.has_friend(&ident_a.did_key()).await? {
+                account_b.remove_friend(ident_a.did_key()).await?;
+                if account_b.has_friend(ident_a.did_key()).await? {
                     body.append_p(&format!(
                         "{} is stuck with {} forever",
                         username(&ident_b),
