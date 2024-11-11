@@ -1941,10 +1941,11 @@ impl ConversationTask {
 
         let own_did = &self.identity.did_key();
 
-        if creator.ne(own_did) && !self
-            .document
-            .permissions
-            .has_permission(own_did, GroupPermission::RemoveParticipants)
+        if creator.ne(own_did)
+            && !self
+                .document
+                .permissions
+                .has_permission(own_did, GroupPermission::RemoveParticipants)
         {
             return Err(Error::Unauthorized);
         }
@@ -2181,10 +2182,11 @@ impl ConversationTask {
 
         let own_did = &self.identity.did_key();
 
-        if creator.ne(own_did) && !&self
-            .document
-            .permissions
-            .has_permission(own_did, GroupPermission::EditGroupInfo)
+        if creator.ne(own_did)
+            && !&self
+                .document
+                .permissions
+                .has_permission(own_did, GroupPermission::EditGroupInfo)
         {
             return Err(Error::Unauthorized);
         }
@@ -2327,10 +2329,11 @@ impl ConversationTask {
 
         let own_did = &self.identity.did_key();
 
-        if creator.ne(own_did) && !&self
-            .document
-            .permissions
-            .has_permission(own_did, GroupPermission::EditGroupInfo)
+        if creator.ne(own_did)
+            && !&self
+                .document
+                .permissions
+                .has_permission(own_did, GroupPermission::EditGroupInfo)
         {
             return Err(Error::Unauthorized);
         }
@@ -2378,9 +2381,9 @@ impl ConversationTask {
             let Some(creator) = self.document.creator.as_ref() else {
                 return Err(Error::InvalidConversation);
             };
-    
+
             let own_did = self.identity.did_key();
-    
+
             if !&self
                 .document
                 .permissions

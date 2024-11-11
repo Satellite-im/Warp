@@ -753,7 +753,11 @@ pub enum GroupPermission {
 
 impl GroupPermission {
     pub fn values() -> Vec<GroupPermission> {
-        vec![Self::AddParticipants, Self::RemoveParticipants, Self::EditGroupInfo]
+        vec![
+            Self::AddParticipants,
+            Self::RemoveParticipants,
+            Self::EditGroupInfo,
+        ]
     }
 }
 
