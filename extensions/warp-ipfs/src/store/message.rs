@@ -2611,9 +2611,7 @@ impl ConversationInner {
     pub async fn get_community(&mut self, community_id: Uuid) -> Result<Community, Error> {
         let doc = self.get_community_document(community_id).await?;
         let own_did = &self.identity.did_key();
-        if own_did != &doc.owner
-            && !doc.has_valid_invite(own_did)
-            && !doc.members.contains(own_did)
+        if own_did != &doc.owner && !doc.has_valid_invite(own_did) && !doc.members.contains(own_did)
         {
             return Err(Error::Unauthorized);
         }
