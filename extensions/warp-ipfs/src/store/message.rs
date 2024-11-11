@@ -2547,7 +2547,7 @@ impl ConversationInner {
         let keypair = self.root.keypair();
 
         let did = keypair.to_did()?;
-        if document.creator.eq(&did) {
+        if document.owner.eq(&did) {
             document.sign(keypair)?;
         }
 
