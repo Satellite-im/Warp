@@ -238,7 +238,7 @@ pub enum CommunityPermission {
     CreateRoles,
     EditRoles,
     DeleteRoles,
-    
+
     GrantRoles,
     RevokeRoles,
 

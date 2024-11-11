@@ -612,11 +612,7 @@ mod test {
             .grant_community_role(community.id(), role.id(), did_b.clone())
             .await?;
         instance_a
-            .grant_community_permission(
-                community.id(),
-                CommunityPermission::EditInvites,
-                role.id(),
-            )
+            .grant_community_permission(community.id(), CommunityPermission::EditInvites, role.id())
             .await?;
 
         let mut invite = instance_a
@@ -1108,7 +1104,11 @@ mod test {
             .grant_community_role(community.id(), role.id(), did_b.clone())
             .await?;
         instance_a
-            .grant_community_permission(community.id(), CommunityPermission::EditDescription, role.id())
+            .grant_community_permission(
+                community.id(),
+                CommunityPermission::EditDescription,
+                role.id(),
+            )
             .await?;
 
         let new_description = Some("description".to_string());

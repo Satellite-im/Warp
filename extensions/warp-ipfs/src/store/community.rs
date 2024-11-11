@@ -227,7 +227,6 @@ impl CommunityDocument {
         permissions.insert(CommunityPermission::EditChannels, IndexSet::new());
         permissions.insert(CommunityPermission::DeleteChannels, IndexSet::new());
 
-
         //We don't add CreateInvites permission since by default we leave it unrestricted.
         permissions.insert(CommunityPermission::EditInvites, IndexSet::new());
         permissions.insert(CommunityPermission::DeleteInvites, IndexSet::new());
