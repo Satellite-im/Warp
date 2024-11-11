@@ -8,7 +8,8 @@ mod test {
         constellation::Progression,
         multipass::MultiPassEventKind,
         raygun::{
-            AttachmentKind, ConversationType, GroupPermission, GroupPermissions, Location, MessageEvent, MessageEventKind, MessageType, PinState, RayGunEventKind, ReactionState
+            AttachmentKind, ConversationType, GroupPermission, GroupPermissions, Location,
+            MessageEvent, MessageEventKind, MessageType, PinState, RayGunEventKind, ReactionState,
         },
     };
 
@@ -987,8 +988,13 @@ mod test {
         let mut chat_subscribe_b = instance_b.raygun_subscribe().await?;
 
         let mut perms = GroupPermissions::new();
-        perms.insert(did_b.clone(), [GroupPermission::EditGroupInfo].into_iter().collect());
-        instance_a.create_group_conversation(None, vec![did_b.clone()], perms).await?;
+        perms.insert(
+            did_b.clone(),
+            [GroupPermission::EditGroupInfo].into_iter().collect(),
+        );
+        instance_a
+            .create_group_conversation(None, vec![did_b.clone()], perms)
+            .await?;
 
         let id_a = crate::common::timeout(Duration::from_secs(60), async {
             loop {
@@ -1454,8 +1460,13 @@ mod test {
         let mut chat_subscribe_b = instance_b.raygun_subscribe().await?;
 
         let mut perms = GroupPermissions::new();
-        perms.insert(did_b.clone(), [GroupPermission::EditGroupInfo].into_iter().collect());
-        instance_a.create_group_conversation(None, vec![did_b.clone()], perms).await?;
+        perms.insert(
+            did_b.clone(),
+            [GroupPermission::EditGroupInfo].into_iter().collect(),
+        );
+        instance_a
+            .create_group_conversation(None, vec![did_b.clone()], perms)
+            .await?;
 
         let conversation_id = crate::common::timeout(Duration::from_secs(60), async {
             let mut id_a = None;
@@ -1603,8 +1614,13 @@ mod test {
         let mut chat_subscribe_b = instance_b.raygun_subscribe().await?;
 
         let mut perms = GroupPermissions::new();
-        perms.insert(did_b.clone(), [GroupPermission::EditGroupInfo].into_iter().collect());
-        instance_a.create_group_conversation(None, vec![did_b.clone()], perms).await?;
+        perms.insert(
+            did_b.clone(),
+            [GroupPermission::EditGroupInfo].into_iter().collect(),
+        );
+        instance_a
+            .create_group_conversation(None, vec![did_b.clone()], perms)
+            .await?;
 
         let conversation_id = crate::common::timeout(Duration::from_secs(60), async {
             let mut id_a = None;
@@ -1672,7 +1688,6 @@ mod test {
 
 
         }).await??;
-
 
         instance_b
             .update_conversation_banner(
