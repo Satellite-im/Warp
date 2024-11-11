@@ -1941,17 +1941,12 @@ impl ConversationTask {
 
         let own_did = &self.identity.did_key();
 
-        if !self
+        if creator.ne(own_did) && !self
             .document
             .permissions
             .has_permission(own_did, GroupPermission::RemoveParticipants)
-            && creator.ne(own_did)
         {
             return Err(Error::Unauthorized);
-        }
-
-        if creator.ne(own_did) {
-            return Err(Error::PublicKeyInvalid);
         }
 
         if creator.eq(did_key) {
@@ -2180,13 +2175,16 @@ impl ConversationTask {
             return Err(Error::InvalidConversation);
         };
 
+        if self.document.conversation_type != ConversationType::Group {
+            return Err(Error::InvalidConversation);
+        }
+
         let own_did = &self.identity.did_key();
 
-        if !&self
+        if creator.ne(own_did) && !&self
             .document
             .permissions
             .has_permission(own_did, GroupPermission::EditGroupInfo)
-            && creator.ne(own_did)
         {
             return Err(Error::Unauthorized);
         }
@@ -2323,13 +2321,16 @@ impl ConversationTask {
             return Err(Error::InvalidConversation);
         };
 
+        if self.document.conversation_type != ConversationType::Group {
+            return Err(Error::InvalidConversation);
+        }
+
         let own_did = &self.identity.did_key();
 
-        if !&self
+        if creator.ne(own_did) && !&self
             .document
             .permissions
             .has_permission(own_did, GroupPermission::EditGroupInfo)
-            && creator.ne(own_did)
         {
             return Err(Error::Unauthorized);
         }
@@ -2374,17 +2375,17 @@ impl ConversationTask {
     pub async fn set_description(&mut self, desc: Option<&str>) -> Result<(), Error> {
         let conversation_id = self.conversation_id;
         if self.document.conversation_type() == ConversationType::Group {
-            let Some(creator) = self.document.creator.clone() else {
+            let Some(creator) = self.document.creator.as_ref() else {
                 return Err(Error::InvalidConversation);
             };
     
-            let own_did = &self.identity.did_key();
+            let own_did = self.identity.did_key();
     
             if !&self
                 .document
                 .permissions
-                .has_permission(own_did, GroupPermission::EditGroupInfo)
-                && creator.ne(own_did)
+                .has_permission(&own_did, GroupPermission::EditGroupInfo)
+                && own_did.ne(creator)
             {
                 return Err(Error::Unauthorized);
             }
@@ -3526,6 +3527,9 @@ async fn message_event(
                     }
                 }
                 ConversationUpdateKind::AddedIcon | ConversationUpdateKind::RemovedIcon => {
+                    if this.document.conversation_type != ConversationType::Group {
+                        return Err(Error::InvalidConversation);
+                    }
                     if !this.document.creator.as_ref().is_some_and(|c| c == sender)
                         && !this
                             .document
@@ -3545,6 +3549,9 @@ async fn message_event(
                 }
 
                 ConversationUpdateKind::AddedBanner | ConversationUpdateKind::RemovedBanner => {
+                    if this.document.conversation_type != ConversationType::Group {
+                        return Err(Error::InvalidConversation);
+                    }
                     if !this.document.creator.as_ref().is_some_and(|c| c == sender)
                         && !this
                             .document

@@ -472,7 +472,7 @@ async fn main() -> anyhow::Result<()> {
                             let mut permissions = GroupPermissions::new();
                             if open {
                                 for did in &did_keys {
-                                    permissions.insert(did.clone(), GroupPermission::VALUES.into_iter().collect());
+                                    permissions.insert(did.clone(), GroupPermission::values());
                                 }
                             }
                             if let Err(e) = instance.create_group_conversation(
