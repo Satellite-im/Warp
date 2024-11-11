@@ -153,7 +153,7 @@ impl MessageDocument {
 
         let data = match key {
             Either::Right(keystore) => {
-                let key = keystore.get_latest(keypair, &sender)?;
+                let key = keystore.get_latest(keypair, sender)?;
                 Cipher::direct_encrypt(&bytes, &key)?.into()
             }
             Either::Left(key) => ecdh_encrypt(keypair, Some(key), &bytes)?.into(),
@@ -161,7 +161,7 @@ impl MessageDocument {
 
         let message = Some(data);
 
-        let sender = DIDEd25519Reference::from_did(&sender);
+        let sender = DIDEd25519Reference::from_did(sender);
 
         let document = MessageDocument {
             id,
