@@ -75,7 +75,7 @@ pub struct CommunityDocument {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    pub creator: DID,
+    pub owner: DID,
     pub created: DateTime<Utc>,
     pub modified: DateTime<Utc>,
     pub members: IndexSet<DID>,
@@ -126,7 +126,7 @@ impl CommunityDocument {
         let construct = warp::crypto::hash::sha256_iter(
             [
                 Some(self.id().into_bytes().to_vec()),
-                Some(self.creator.to_string().as_bytes().to_vec()),
+                Some(self.owner.to_string().as_bytes().to_vec()),
             ]
             .into_iter(),
             None,
@@ -139,7 +139,7 @@ impl CommunityDocument {
     }
 
     pub fn verify(&self) -> Result<(), Error> {
-        let creator_pk = self.creator.to_public_key()?;
+        let creator_pk = self.owner.to_public_key()?;
 
         let Some(signature) = &self.signature else {
             return Err(Error::InvalidSignature);
@@ -150,7 +150,7 @@ impl CommunityDocument {
         let construct = warp::crypto::hash::sha256_iter(
             [
                 Some(self.id().into_bytes().to_vec()),
-                Some(self.creator.to_string().as_bytes().to_vec()),
+                Some(self.owner.to_string().as_bytes().to_vec()),
             ]
             .into_iter(),
             None,
@@ -242,7 +242,7 @@ impl CommunityDocument {
             id: Uuid::new_v4(),
             name,
             description: None,
-            creator,
+            owner: creator,
             created: Utc::now(),
             modified: Utc::now(),
             members,
@@ -263,7 +263,7 @@ impl From<CommunityDocument> for Community {
         community.set_id(value.id);
         community.set_name(value.name);
         community.set_description(value.description);
-        community.set_creator(value.creator);
+        community.set_creator(value.owner);
         community.set_created(value.created);
         community.set_modified(value.modified);
         community.set_members(value.members);
@@ -295,7 +295,7 @@ impl From<CommunityDocument> for Community {
 impl CommunityDocument {
     pub fn participants(&self) -> IndexSet<DID> {
         let mut participants = self.members.clone();
-        participants.insert(self.creator.clone());
+        participants.insert(self.owner.clone());
         for (_, invite) in &self.invites {
             if let Some(target) = &invite.target_user {
                 participants.insert(target.clone());
@@ -320,7 +320,7 @@ impl CommunityDocument {
         false
     }
     pub fn has_permission(&self, user: &DID, has_permission: &CommunityPermission) -> bool {
-        if &self.creator == user {
+        if &self.owner == user {
             return true;
         }
         if self.members.contains(user) {
@@ -345,7 +345,7 @@ impl CommunityDocument {
         has_permission: &CommunityChannelPermission,
         channel_id: Uuid,
     ) -> bool {
-        if &self.creator == user {
+        if &self.owner == user {
             return true;
         }
         if self.members.contains(user) {

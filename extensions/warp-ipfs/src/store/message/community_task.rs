@@ -884,7 +884,7 @@ impl CommunityTask {
     pub async fn set_document(&mut self) -> Result<(), Error> {
         let keypair = self.root.keypair();
         let did = keypair.to_did()?;
-        if self.document.creator.eq(&did) {
+        if self.document.owner.eq(&did) {
             self.document.sign(keypair)?;
         }
 
@@ -898,7 +898,7 @@ impl CommunityTask {
     pub async fn replace_document(&mut self, mut document: CommunityDocument) -> Result<(), Error> {
         let keypair = self.root.keypair();
         let did = keypair.to_did()?;
-        if self.document.creator.eq(&did) {
+        if self.document.owner.eq(&did) {
             document.sign(keypair)?;
         }
 

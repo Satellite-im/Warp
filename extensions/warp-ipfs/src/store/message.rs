@@ -2602,7 +2602,7 @@ impl ConversationInner {
     pub async fn delete_community(&mut self, community_id: Uuid) -> Result<(), Error> {
         let document = self.get_community_document(community_id).await?;
         let own_did = &self.identity.did_key();
-        if &document.creator != own_did {
+        if &document.owner != own_did {
             return Err(Error::Unauthorized);
         }
 
@@ -2611,7 +2611,7 @@ impl ConversationInner {
     pub async fn get_community(&mut self, community_id: Uuid) -> Result<Community, Error> {
         let doc = self.get_community_document(community_id).await?;
         let own_did = &self.identity.did_key();
-        if own_did != &doc.creator
+        if own_did != &doc.owner
             && !doc.has_valid_invite(own_did)
             && !doc.members.contains(own_did)
         {
@@ -2627,7 +2627,7 @@ impl ConversationInner {
             .await
             .iter()
             .filter_map(|c| {
-                if &c.creator == own_did || c.members.contains(own_did) {
+                if &c.owner == own_did || c.members.contains(own_did) {
                     Some(c.id)
                 } else {
                     None
