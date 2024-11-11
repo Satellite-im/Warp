@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::env::temp_dir;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -273,7 +274,7 @@ async fn main() -> anyhow::Result<()> {
                     warp::multipass::MultiPassEventKind::FriendRequestReceived { from: did, .. } => {
                         let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .map(|ident| ident.username())
+                            .map(|ident| ident.username().to_owned())
                             .unwrap_or_else(|_| did.to_string());
                         if !opt.autoaccept_friend {
                             writeln!(stdout, "> Pending request from {username}. Do \"/accept-request {did}\" to accept.")?;
@@ -284,7 +285,7 @@ async fn main() -> anyhow::Result<()> {
                     warp::multipass::MultiPassEventKind::FriendRequestSent { to: did, .. } => {
                         let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .map(|ident| ident.username())
+                            .map(|ident| ident.username().to_owned())
                             .unwrap_or_else(|_| did.to_string());
 
                         writeln!(stdout, "> A request has been sent to {username}. Do \"/close-request {did}\" to if you wish to close the request")?;
@@ -292,7 +293,7 @@ async fn main() -> anyhow::Result<()> {
                     warp::multipass::MultiPassEventKind::IncomingFriendRequestRejected { did } => {
                         let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .map(|ident| ident.username())
+                            .map(|ident| ident.username().to_owned())
                             .unwrap_or_else(|_| did.to_string());
 
                         writeln!(stdout, "> You've rejected {username} request")?;
@@ -300,7 +301,7 @@ async fn main() -> anyhow::Result<()> {
                     warp::multipass::MultiPassEventKind::OutgoingFriendRequestRejected { did } => {
                         let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .map(|ident| ident.username())
+                            .map(|ident| ident.username().to_owned())
                             .unwrap_or_else(|_| did.to_string());
 
                         writeln!(stdout, "> {username} rejected your request")?;
@@ -308,7 +309,7 @@ async fn main() -> anyhow::Result<()> {
                     warp::multipass::MultiPassEventKind::IncomingFriendRequestClosed { did } => {
                         let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .map(|ident| ident.username())
+                            .map(|ident| ident.username().to_owned())
                             .unwrap_or_else(|_| did.to_string());
 
                         writeln!(stdout, "> {username} has retracted their request")?;
@@ -316,7 +317,7 @@ async fn main() -> anyhow::Result<()> {
                     warp::multipass::MultiPassEventKind::OutgoingFriendRequestClosed { did } => {
                         let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .map(|ident| ident.username())
+                            .map(|ident| ident.username().to_owned())
                             .unwrap_or_else(|_| did.to_string());
 
                         writeln!(stdout, "> Request for {username} has been retracted")?;
@@ -324,7 +325,7 @@ async fn main() -> anyhow::Result<()> {
                     warp::multipass::MultiPassEventKind::FriendAdded { did } => {
                         let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .map(|ident| ident.username())
+                            .map(|ident| ident.username().to_owned())
                             .unwrap_or_else(|_| did.to_string());
 
                         writeln!(stdout, "> You are now friends with {username}")?;
@@ -332,7 +333,7 @@ async fn main() -> anyhow::Result<()> {
                     warp::multipass::MultiPassEventKind::FriendRemoved { did } => {
                         let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .map(|ident| ident.username())
+                            .map(|ident| ident.username().to_owned())
                             .unwrap_or_else(|_| did.to_string());
 
                         writeln!(stdout, "> {username} has been removed from friends list")?;
@@ -340,7 +341,7 @@ async fn main() -> anyhow::Result<()> {
                     warp::multipass::MultiPassEventKind::IdentityOnline { did } => {
                         let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .map(|ident| ident.username())
+                            .map(|ident| ident.username().to_owned())
                             .unwrap_or_else(|_| did.to_string());
 
                         writeln!(stdout, "> {username} has came online")?;
@@ -348,7 +349,7 @@ async fn main() -> anyhow::Result<()> {
                     warp::multipass::MultiPassEventKind::IdentityOffline { did } => {
                         let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .map(|ident| ident.username())
+                            .map(|ident| ident.username().to_owned())
                             .unwrap_or_else(|_| did.to_string());
 
                         writeln!(stdout, "> {username} went offline")?;
@@ -356,7 +357,7 @@ async fn main() -> anyhow::Result<()> {
                     warp::multipass::MultiPassEventKind::Blocked { did } => {
                         let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .map(|ident| ident.username())
+                            .map(|ident| ident.username().to_owned())
                             .unwrap_or_else(|_| did.to_string());
 
                         writeln!(stdout, "> {username} was blocked")?;
@@ -364,14 +365,14 @@ async fn main() -> anyhow::Result<()> {
                     warp::multipass::MultiPassEventKind::Unblocked { did } => {
                         let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .map(|ident| ident.username())
+                            .map(|ident| ident.username().to_owned())
                             .unwrap_or_else(|_| did.to_string());
                         writeln!(stdout, "> {username} was unblocked")?;
                     },
                     warp::multipass::MultiPassEventKind::UnblockedBy { did } => {
                         let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .map(|ident| ident.username())
+                            .map(|ident| ident.username().to_owned())
                             .unwrap_or_else(|_| did.to_string());
 
                         writeln!(stdout, "> {username} unblocked you")?;
@@ -379,7 +380,7 @@ async fn main() -> anyhow::Result<()> {
                     warp::multipass::MultiPassEventKind::BlockedBy { did } => {
                         let username = instance
                             .get_identity(Identifier::did_key(did.clone())).await
-                            .map(|ident| ident.username())
+                            .map(|ident| ident.username().to_owned())
                             .unwrap_or_else(|_| did.to_string());
 
                         writeln!(stdout, "> {username} blocked you")?;
@@ -516,7 +517,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                                 let created = convo.created();
                                 let modified = convo.modified();
-                                table.add_row(vec![convo.name().unwrap_or_default(), convo.id().to_string(), created.to_string(), modified.to_string(), recipients.join(",").to_string()]);
+                                table.add_row(vec![convo.name().map(ToOwned::to_owned).unwrap_or_default(), convo.id().to_string(), created.to_string(), modified.to_string(), recipients.join(",").to_string()]);
                             }
                             writeln!(stdout, "{table}")?;
                         },
@@ -530,7 +531,7 @@ async fn main() -> anyhow::Result<()> {
                                 Ok(conversation) => {
                                     let mut permissions = GroupPermissions::new();
                                     if open {
-                                        for did in conversation.recipients() {
+                                        for did in conversation.recipients().to_owned() {
                                             permissions.insert(did, vec![GroupPermission::AddParticipants, GroupPermission::SetGroupName].into_iter().collect());
                                         }
                                     }
@@ -967,11 +968,11 @@ async fn main() -> anyhow::Result<()> {
                                 let modified = identity.modified();
 
                                 table.add_row(vec![
-                                    identity.username(),
+                                    identity.username().to_owned(),
                                     identity.did_key().to_string(),
                                     created.to_string(),
                                     modified.to_string(),
-                                    identity.status_message().unwrap_or_default(),
+                                    identity.status_message().map(ToOwned::to_owned).unwrap_or_default(),
                                     (!profile_banner.data().is_empty()).to_string(),
                                     (!profile_picture.data().is_empty()).to_string(),
                                     platform.to_string(),
@@ -993,9 +994,10 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn get_username<M: MultiPass>(account: &M, did: DID) -> String {
+async fn get_username<M: MultiPass>(account: &M, did: impl Borrow<DID>) -> String {
+    let did = did.borrow();
     account
-        .get_identity(Identifier::did_key(did.clone()))
+        .get_identity(did)
         .await
         .map(|id| format!("{}#{}", id.username(), id.short_id()))
         .unwrap_or(did.to_string())

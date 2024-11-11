@@ -657,12 +657,12 @@ impl Conversation {
         self.id
     }
 
-    pub fn name(&self) -> Option<String> {
-        self.name.clone()
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
     }
 
-    pub fn creator(&self) -> Option<DID> {
-        self.creator.clone()
+    pub fn creator(&self) -> Option<&DID> {
+        self.creator.as_ref()
     }
 
     pub fn created(&self) -> DateTime<Utc> {
@@ -681,12 +681,12 @@ impl Conversation {
         self.conversation_type
     }
 
-    pub fn permissions(&self) -> GroupPermissions {
-        self.permissions.clone()
+    pub fn permissions(&self) -> &GroupPermissions {
+        &self.permissions
     }
 
-    pub fn recipients(&self) -> Vec<DID> {
-        self.recipients.clone()
+    pub fn recipients(&self) -> &[DID] {
+        &self.recipients
     }
 
     pub fn description(&self) -> Option<&str> {
@@ -817,8 +817,8 @@ impl MessageReference {
         self.conversation_id
     }
 
-    pub fn sender(&self) -> DID {
-        self.sender.clone()
+    pub fn sender(&self) -> &DID {
+        &self.sender
     }
 
     pub fn date(&self) -> DateTime<Utc> {
@@ -975,8 +975,8 @@ impl Message {
         self.conversation_id
     }
 
-    pub fn sender(&self) -> DID {
-        self.sender.clone()
+    pub fn sender(&self) -> &DID {
+        &self.sender
     }
 
     pub fn date(&self) -> DateTime<Utc> {
@@ -991,24 +991,24 @@ impl Message {
         self.pinned
     }
 
-    pub fn reactions(&self) -> IndexMap<String, Vec<DID>> {
-        self.reactions.clone()
+    pub fn reactions(&self) -> &IndexMap<String, Vec<DID>> {
+        &self.reactions
     }
 
     pub fn mentions(&self) -> &[DID] {
         &self.mentions
     }
 
-    pub fn lines(&self) -> Vec<String> {
-        self.lines.clone()
+    pub fn lines(&self) -> &[String] {
+        &self.lines
     }
 
-    pub fn attachments(&self) -> Vec<File> {
-        self.attachment.clone()
+    pub fn attachments(&self) -> &[File] {
+        &self.attachment
     }
 
-    pub fn metadata(&self) -> IndexMap<String, String> {
-        self.metadata.clone()
+    pub fn metadata(&self) -> &IndexMap<String, String> {
+        &self.metadata
     }
 
     pub fn replied(&self) -> Option<Uuid> {

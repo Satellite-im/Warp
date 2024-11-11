@@ -101,7 +101,7 @@ impl MessageDocument {
         let modified = message.modified();
         let replied = message.replied();
         let lines = message.lines();
-        let reactions = message.reactions();
+        let reactions = message.reactions().to_owned();
         let attachments = message.attachments();
 
         if attachments.len() > MAX_ATTACHMENT {
@@ -255,7 +255,7 @@ impl MessageDocument {
 
         if message.id() != self.id
             || message.conversation_id() != self.conversation_id
-            || message.sender() != sender
+            || message.sender() != &sender
         {
             tracing::error!(id = %self.conversation_id, message_id = %self.id, "Message does not exist, is invalid or has invalid sender");
             //TODO: Maybe remove message from this point?
@@ -275,7 +275,7 @@ impl MessageDocument {
             });
         }
 
-        self.reactions = reactions;
+        self.reactions = reactions.to_owned();
 
         if message.lines() != old_message.lines() {
             let lines = message.lines();

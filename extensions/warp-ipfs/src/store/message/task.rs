@@ -3119,10 +3119,10 @@ async fn message_event(
                 });
             }
 
-            let sender = message.sender();
-
             *message.lines_mut() = lines;
             message.set_modified(modified);
+
+            let sender = message.sender().to_owned();
 
             message_document
                 .update(

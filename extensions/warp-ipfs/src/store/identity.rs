@@ -1281,7 +1281,7 @@ impl IdentityStore {
                 identity.verify()?;
 
                 if let Ok(own_id) = self.own_identity().await {
-                    if own_id.did_key() == identity.did {
+                    if own_id.did_key() == &identity.did {
                         tracing::warn!(did = %identity.did, "Cannot accept own identity");
                         return Ok(());
                     }
@@ -2253,7 +2253,7 @@ impl IdentityStore {
         let own_did = self
             .own_identity()
             .await
-            .map(|identity| identity.did_key())
+            .map(|identity| identity.did_key().to_owned())
             .map_err(|_| Error::OtherWithContext("Identity store may not be initialized".into()))?;
 
         if own_did.eq(did) {
