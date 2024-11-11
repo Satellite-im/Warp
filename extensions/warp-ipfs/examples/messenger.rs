@@ -59,8 +59,6 @@ struct Opt {
     #[clap(long)]
     bootstrap: Option<bool>,
     #[clap(long)]
-    provide_platform_info: bool,
-    #[clap(long)]
     wait: Option<u64>,
     #[clap(long)]
     phrase: Option<String>,
@@ -112,8 +110,6 @@ async fn setup<P: AsRef<Path>>(
     if opt.upnp {
         config.ipfs_setting_mut().portmapping = true;
     }
-
-    config.store_setting_mut().share_platform = opt.provide_platform_info;
 
     if let Some(oride) = opt.r#override {
         config.store_setting_mut().fetch_over_bitswap = oride;
