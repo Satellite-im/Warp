@@ -2572,8 +2572,8 @@ impl ConversationInner {
 }
 
 impl ConversationInner {
-    pub async fn create_community(&mut self, mut name: &str) -> Result<Community, Error> {
-        name = name.trim();
+    pub async fn create_community(&mut self, name: &str) -> Result<Community, Error> {
+        let name = name.trim();
         if name.is_empty() || name.len() > 255 {
             return Err(Error::InvalidLength {
                 context: "name".into(),
