@@ -339,17 +339,15 @@ impl ConversationTask {
 
         task.keystore = match task.document.conversation_type() {
             ConversationType::Direct => Keystore::new(),
-            ConversationType::Group => {
-                match root.get_conversation_keystore(conversation_id).await {
-                    Ok(store) => store,
-                    Err(_) => {
-                        let mut store = Keystore::new();
-                        store.insert(root.keypair(), &identity.did_key(), generate::<64>())?;
-                        task.set_keystore(Some(&store)).await?;
-                        store
-                    }
+            ConversationType::Group => match root.get_keystore(conversation_id).await {
+                Ok(store) => store,
+                Err(_) => {
+                    let mut store = Keystore::new();
+                    store.insert(root.keypair(), &identity.did_key(), generate::<64>())?;
+                    task.set_keystore(Some(&store)).await?;
+                    store
                 }
-            }
+            },
         };
 
         let key = format!("{}/{}", ipfs.messaging_queue(), conversation_id);
@@ -821,9 +819,9 @@ impl ConversationTask {
         self.document.messages.take();
         self.document.deleted = true;
         self.set_document().await?;
-        if let Ok(mut ks_map) = self.root.get_conversation_keystore_map().await {
+        if let Ok(mut ks_map) = self.root.get_keystore_map().await {
             if ks_map.remove(&self.conversation_id.to_string()).is_some() {
-                if let Err(e) = self.root.set_conversation_keystore_map(ks_map).await {
+                if let Err(e) = self.root.set_keystore_map(ks_map).await {
                     tracing::warn!(conversation_id = %self.conversation_id, error = %e, "failed to remove keystore");
                 }
             }
@@ -833,7 +831,7 @@ impl ConversationTask {
     }
 
     pub async fn set_keystore(&mut self, keystore: Option<&Keystore>) -> Result<(), Error> {
-        let mut map = self.root.get_conversation_keystore_map().await?;
+        let mut map = self.root.get_keystore_map().await?;
 
         let id = self.conversation_id.to_string();
 
@@ -843,7 +841,7 @@ impl ConversationTask {
 
         map.insert(id, cid);
 
-        self.root.set_conversation_keystore_map(map).await
+        self.root.set_keystore_map(map).await
     }
 
     pub async fn set_document(&mut self) -> Result<(), Error> {

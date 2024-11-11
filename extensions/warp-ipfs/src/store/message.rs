@@ -2074,7 +2074,7 @@ impl ConversationInner {
             return Err(Error::InvalidConversation);
         }
 
-        self.root.get_conversation_keystore(id).await
+        self.root.get_keystore(id).await
     }
 
     pub async fn delete(&mut self, id: Uuid) -> Result<ConversationDocument, Error> {

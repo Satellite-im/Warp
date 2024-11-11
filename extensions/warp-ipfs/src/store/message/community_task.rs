@@ -332,7 +332,7 @@ impl CommunityTask {
             terminate: CommunityTermination::default(),
         };
 
-        task.keystore = match root.get_community_keystore(community_id).await {
+        task.keystore = match root.get_keystore(community_id).await {
             Ok(store) => store,
             Err(_) => {
                 let mut store = Keystore::new();
@@ -857,9 +857,9 @@ impl CommunityTask {
         //self.document.messages.take();
         self.document.deleted = true;
         self.set_document().await?;
-        if let Ok(mut ks_map) = self.root.get_community_keystore_map().await {
+        if let Ok(mut ks_map) = self.root.get_keystore_map().await {
             if ks_map.remove(&self.community_id.to_string()).is_some() {
-                if let Err(e) = self.root.set_community_keystore_map(ks_map).await {
+                if let Err(e) = self.root.set_keystore_map(ks_map).await {
                     tracing::warn!(community_id = %self.community_id, error = %e, "failed to remove keystore");
                 }
             }
@@ -868,7 +868,7 @@ impl CommunityTask {
         Ok(())
     }
     pub async fn set_keystore(&mut self, keystore: Option<&Keystore>) -> Result<(), Error> {
-        let mut map = self.root.get_community_keystore_map().await?;
+        let mut map = self.root.get_keystore_map().await?;
 
         let id = self.community_id.to_string();
 
@@ -878,7 +878,7 @@ impl CommunityTask {
 
         map.insert(id, cid);
 
-        self.root.set_community_keystore_map(map).await
+        self.root.set_keystore_map(map).await
     }
 
     pub async fn set_document(&mut self) -> Result<(), Error> {

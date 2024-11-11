@@ -171,13 +171,9 @@ impl RootDocumentMap {
         inner.export_bytes().await
     }
 
-    pub async fn get_conversation_keystore_map(&self) -> Result<BTreeMap<String, Cid>, Error> {
+    pub async fn get_keystore_map(&self) -> Result<BTreeMap<String, Cid>, Error> {
         let inner = &*self.inner.read().await;
-        inner.get_conversation_keystore_map().await
-    }
-    pub async fn get_community_keystore_map(&self) -> Result<BTreeMap<String, Cid>, Error> {
-        let inner = &*self.inner.read().await;
-        inner.get_community_keystore_map().await
+        inner.get_keystore_map().await
     }
 
     pub async fn list_conversation_document(&self) -> BoxStream<'static, ConversationDocument> {
@@ -215,29 +211,14 @@ impl RootDocumentMap {
         inner.set_community_document(document).await
     }
 
-    pub async fn get_conversation_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
+    pub async fn get_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
         let inner = &*self.inner.read().await;
-        inner.get_conversation_keystore(id).await
+        inner.get_keystore(id).await
     }
 
-    pub async fn get_community_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
-        let inner = &*self.inner.read().await;
-        inner.get_community_keystore(id).await
-    }
-
-    pub async fn set_conversation_keystore_map(
-        &self,
-        document: BTreeMap<String, Cid>,
-    ) -> Result<(), Error> {
+    pub async fn set_keystore_map(&self, document: BTreeMap<String, Cid>) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
-        inner.set_conversation_keystore(document).await
-    }
-    pub async fn set_community_keystore_map(
-        &self,
-        document: BTreeMap<String, Cid>,
-    ) -> Result<(), Error> {
-        let inner = &mut *self.inner.write().await;
-        inner.set_community_keystore(document).await
+        inner.set_keystore(document).await
     }
 
     pub async fn get_directory_index(&self) -> Result<Directory, Error> {
@@ -905,36 +886,16 @@ impl RootDocumentInner {
         Ok(())
     }
 
-    async fn set_conversation_keystore(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
+    async fn set_keystore(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
         let mut document = self.get_root_document().await?;
-        document.conversations_keystore = Some(self.ipfs.put_dag(map).await?);
-        self.set_root_document(document).await
-    }
-    async fn set_community_keystore(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
-        let mut document = self.get_root_document().await?;
-        document.communities_keystore = Some(self.ipfs.put_dag(map).await?);
+        document.keystore = Some(self.ipfs.put_dag(map).await?);
         self.set_root_document(document).await
     }
 
-    async fn get_conversation_keystore_map(&self) -> Result<BTreeMap<String, Cid>, Error> {
+    async fn get_keystore_map(&self) -> Result<BTreeMap<String, Cid>, Error> {
         let document = self.get_root_document().await?;
 
-        let cid = match document.conversations_keystore {
-            Some(cid) => cid,
-            None => return Ok(BTreeMap::new()),
-        };
-
-        self.ipfs
-            .get_dag(cid)
-            .local()
-            .deserialized()
-            .await
-            .map_err(Error::from)
-    }
-    async fn get_community_keystore_map(&self) -> Result<BTreeMap<String, Cid>, Error> {
-        let document = self.get_root_document().await?;
-
-        let cid = match document.communities_keystore {
+        let cid = match document.keystore {
             Some(cid) => cid,
             None => return Ok(BTreeMap::new()),
         };
@@ -947,27 +908,10 @@ impl RootDocumentInner {
             .map_err(Error::from)
     }
 
-    async fn get_conversation_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
+    async fn get_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
         let document = self.get_root_document().await?;
 
-        let cid = match document.conversations_keystore {
-            Some(cid) => cid,
-            None => return Err(Error::ObjectNotFound),
-        };
-
-        let path = IpfsPath::from(cid).sub_path(&id.to_string())?;
-        self.ipfs
-            .get_dag(path)
-            .local()
-            .deserialized()
-            .await
-            .map_err(Error::from)
-    }
-
-    async fn get_community_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
-        let document = self.get_root_document().await?;
-
-        let cid = match document.communities_keystore {
+        let cid = match document.keystore {
             Some(cid) => cid,
             None => return Err(Error::ObjectNotFound),
         };
