@@ -547,11 +547,12 @@ impl IdentityStore {
                             //       that the addresses are from a valid peer and that the peer is reachable through one of
                             //       addresses provided.
                             // TODO: Uncomment in the future
-                            // for addr in payload.addresses() {
-                            //     if let Err(e) = store.ipfs.add_peer(*peer_id, addr.clone()).await {
-                            //         error!("Failed to add peer {peer_id} address {addr}: {e}");
-                            //     }
-                            // }
+
+                            let addresses = payload.addresses().to_vec();
+
+                            if let Err(e) = store.ipfs.add_peer((*peer_id, addresses)).await {
+                                error!("Failed to addresses to {peer_id}: {e}");
+                            }
 
                             //Ignore requesting images if there is a change for now.
                             if let Err(e) = store.process_message(&from_did, event, false).await {
@@ -916,16 +917,6 @@ impl IdentityStore {
     }
 
     pub async fn push_to_all(&self) {
-        //TODO: Possibly announce only to mesh, though this *might* require changing the logic to establish connection
-        //      if profile pictures and banners are supplied in this push too.
-        let list = self
-            .discovery
-            .list()
-            .await
-            .iter()
-            .filter_map(|entry| entry.peer_id().to_did().ok())
-            .collect::<Vec<_>>();
-        self.push_iter(list).await;
         let _ = self.announce_identity_to_mesh().await;
     }
 
@@ -993,54 +984,15 @@ impl IdentityStore {
 
         let mut identity = self.own_identity_document().await?;
 
-        let is_friend = self.is_friend(out_did).await.unwrap_or_default();
-
-        let is_blocked = self.is_blocked(out_did).await.unwrap_or_default();
-
-        let is_blocked_by = self.is_blocked_by(out_did).await.unwrap_or_default();
-
-        let share_platform = self.config.store_setting().share_platform;
-
-        let platform =
-            (share_platform && (!is_blocked || !is_blocked_by)).then_some(self.own_platform());
-
-        identity.metadata.platform = platform;
-
-        let mut metadata = identity.metadata;
-        metadata.platform = platform;
-
-        identity.metadata = Default::default();
-
-        /*
-        (matches!(
-            self.config.store_setting().update_events,
-            UpdateEvents::Enabled
-        ) || matches!(
-            self.config.store_setting().update_events,
-            UpdateEvents::FriendsOnly
-        ) && is_friend)
-            &&  */
-
-        let include_meta = is_friend || (!is_blocked && !is_blocked_by);
-
-        tracing::debug!(?metadata, included = include_meta);
-        if include_meta {
-            identity.metadata = metadata;
-        }
-
-        let kp_did = self.root_document.keypair();
-
-        let payload = identity.sign(kp_did)?;
-
         let event = IdentityEvent::Receive {
-            option: ResponseOption::Identity { identity: payload },
+            option: ResponseOption::Identity { identity },
         };
 
         let payload_bytes = serde_json::to_vec(&event)?;
 
         let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
 
-        tracing::info!(to = %out_did, event = ?event, payload_size = bytes.len(), "Sending event");
+        tracing::info!(to = %out_did, event = ?event, payload_size = bytes.len(), "sending event");
 
         if self
             .ipfs
