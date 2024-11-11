@@ -2171,7 +2171,6 @@ impl ConversationTask {
             ConversationImageType::Banner => MAX_CONVERSATION_BANNER_SIZE,
             ConversationImageType::Icon => MAX_CONVERSATION_ICON_SIZE,
         };
-        
         if self.document.conversation_type() == ConversationType::Group {
             let Some(creator) = self.document.creator.as_ref() else {
                 return Err(Error::InvalidConversation);
