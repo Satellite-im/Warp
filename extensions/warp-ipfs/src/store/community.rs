@@ -126,7 +126,8 @@ impl CommunityDocument {
         let construct = warp::crypto::hash::sha256_iter(
             [
                 Some(self.id().into_bytes().to_vec()),
-                Some(self.owner.to_string().as_bytes().to_vec()),
+                Some(self.owner.to_string().into_bytes()),
+                Some(self.created.to_string().into_bytes()),
             ]
             .into_iter(),
             None,
@@ -150,7 +151,8 @@ impl CommunityDocument {
         let construct = warp::crypto::hash::sha256_iter(
             [
                 Some(self.id().into_bytes().to_vec()),
-                Some(self.owner.to_string().as_bytes().to_vec()),
+                Some(self.owner.to_string().into_bytes()),
+                Some(self.created.to_string().into_bytes()),
             ]
             .into_iter(),
             None,
