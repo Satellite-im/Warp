@@ -854,7 +854,7 @@ impl CommunityTask {
 impl CommunityTask {
     pub async fn delete(&mut self) -> Result<(), Error> {
         // TODO: Maybe announce to network of the local node removal here
-        
+
         // TODO: implement messaging in channels and call something like this but on the channels:
         //self.document.messages.take();
 

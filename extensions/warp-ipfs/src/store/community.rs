@@ -323,17 +323,17 @@ impl CommunityDocument {
         if &self.owner == user {
             return true;
         }
-        if self.members.contains(user) {
-            if let Some(authorized_roles) = self.permissions.get(has_permission) {
-                for authorized_role in authorized_roles {
-                    if let Some(role) = self.roles.get(&authorized_role.to_string()) {
-                        if role.members.contains(user) {
-                            return true;
-                        }
-                    }
+        if !self.members.contains(user) {
+            return false;
+        }
+        let Some(authorized_roles) = self.permissions.get(has_permission) else {
+            return true;
+        };
+        for authorized_role in authorized_roles {
+            if let Some(role) = self.roles.get(&authorized_role.to_string()) {
+                if role.members.contains(user) {
+                    return true;
                 }
-            } else {
-                return true;
             }
         }
         false
@@ -348,17 +348,18 @@ impl CommunityDocument {
         if &self.owner == user {
             return true;
         }
-        if self.members.contains(user) {
-            if let Some(channel) = self.channels.get(&channel_id.to_string()) {
-                if let Some(authorized_roles) = channel.permissions.get(has_permission) {
-                    for authorized_role in authorized_roles {
-                        if let Some(role) = self.roles.get(&authorized_role.to_string()) {
-                            if role.members.contains(user) {
-                                return true;
-                            }
-                        }
-                    }
-                } else {
+        if !self.members.contains(user) {
+            return false;
+        }
+        let Some(channel) = self.channels.get(&channel_id.to_string()) else {
+            return false;
+        };
+        let Some(authorized_roles) = channel.permissions.get(has_permission) else {
+            return true;
+        };
+        for authorized_role in authorized_roles {
+            if let Some(role) = self.roles.get(&authorized_role.to_string()) {
+                if role.members.contains(user) {
                     return true;
                 }
             }
