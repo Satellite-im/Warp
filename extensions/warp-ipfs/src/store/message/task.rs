@@ -2194,7 +2194,7 @@ impl ConversationTask {
                     });
                 }
 
-                let document = FileDocument::new(&self.ipfs, &file).await?;
+                let document = FileDocument::new(&self.ipfs, &file).await;
                 let cid = document
                     .reference
                     .as_ref()

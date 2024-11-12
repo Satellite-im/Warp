@@ -34,7 +34,7 @@ pub struct DirectoryDocument {
 
 impl DirectoryDocument {
     #[async_recursion::async_recursion]
-    pub async fn new(ipfs: &Ipfs, root: &Directory) -> Result<DirectoryDocument, Error> {
+    pub async fn new(ipfs: &Ipfs, root: &Directory) -> DirectoryDocument {
         let mut document = DirectoryDocument {
             name: root.name(),
             description: root.description(),
@@ -54,9 +54,16 @@ impl DirectoryDocument {
         .collect::<Vec<_>>()
         .await;
 
-        let cid = ipfs.put_dag(items).await?;
-
-        document.items = Some(cid);
+        if !items.is_empty() {
+            match ipfs.put_dag(items).await {
+                Ok(cid) => {
+                    document.items = Some(cid);
+                }
+                Err(_e) => {
+                    // TODO: Maybe log error?
+                }
+            }
+        }
 
         if let Some(cid) = root
             .thumbnail_reference()
@@ -71,7 +78,7 @@ impl DirectoryDocument {
                 .then_some(cid)
         }
 
-        Ok(document)
+        document
     }
 
     #[async_recursion::async_recursion]
@@ -141,12 +148,12 @@ impl ItemDocument {
     pub async fn new(ipfs: &Ipfs, item: &Item) -> Result<ItemDocument, Error> {
         let document = match item {
             Item::File(file) => {
-                let document = FileDocument::new(ipfs, file).await?;
+                let document = FileDocument::new(ipfs, file).await;
                 let cid = ipfs.put_dag(document).await?;
                 ItemDocument::File(cid)
             }
             Item::Directory(directory) => {
-                let document = DirectoryDocument::new(ipfs, directory).await?;
+                let document = DirectoryDocument::new(ipfs, directory).await;
                 let cid = ipfs.put_dag(document).await?;
                 ItemDocument::Directory(cid)
             }
@@ -198,7 +205,7 @@ pub struct FileDocument {
 }
 
 impl FileDocument {
-    pub async fn new(ipfs: &Ipfs, file: &File) -> Result<FileDocument, Error> {
+    pub async fn new(ipfs: &Ipfs, file: &File) -> FileDocument {
         let mut document = FileDocument {
             name: file.name(),
             size: file.size(),
@@ -238,7 +245,7 @@ impl FileDocument {
                 .then_some(cid)
         }
 
-        Ok(document)
+        document
     }
 
     pub fn to_attachment(&self) -> Result<FileAttachmentDocument, Error> {
@@ -351,7 +358,7 @@ mod test {
             .get_item_by_path("/storage/image.png")
             .and_then(|i| i.get_file())?;
 
-        let document = DirectoryDocument::new(&ipfs, &directory).await?;
+        let document = DirectoryDocument::new(&ipfs, &directory).await;
         let resolved_document = document.resolve(&ipfs, true).await?;
 
         let resolved_file = resolved_document

@@ -635,7 +635,7 @@ impl RootDocumentInner {
     async fn set_root_index(&mut self, root: Directory) -> Result<(), Error> {
         let mut document = self.get_root_document().await?;
 
-        let index_document = DirectoryDocument::new(&self.ipfs, &root).await?;
+        let index_document = DirectoryDocument::new(&self.ipfs, &root).await;
 
         let cid = self.ipfs.put_dag(index_document).await?;
 

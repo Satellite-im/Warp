@@ -389,14 +389,11 @@ impl RootDocument {
         }
 
         if let Some(root) = data.file_index {
-            let cid = DirectoryDocument::new(ipfs, &root)
-                .and_then(|document| async move {
-                    let cid = ipfs.put_dag(document).await?;
-                    Ok(cid)
-                })
-                .await
-                .ok();
-            root_document.file_index = cid;
+            let document = DirectoryDocument::new(ipfs, &root).await;
+
+            if let Ok(cid) = ipfs.put_dag(document).await {
+                root_document.file_index = Some(cid);
+            }
         }
 
         let root_document = root_document.sign(keypair)?;
@@ -421,7 +418,7 @@ pub struct FileAttachmentDocument {
 
 impl FileAttachmentDocument {
     pub async fn new(ipfs: &Ipfs, file: &File) -> Result<Self, Error> {
-        let file_document = FileDocument::new(ipfs, file).await?;
+        let file_document = FileDocument::new(ipfs, file).await;
         file_document.to_attachment()
     }
 
