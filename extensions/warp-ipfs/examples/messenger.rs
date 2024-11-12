@@ -411,6 +411,7 @@ async fn main() -> anyhow::Result<()> {
                                 writeln!(stdout, "Conversation {conversation_id} has been deleted")?;
                             }
                         },
+                        _ => {},
                     }
                 }
             }
@@ -1201,6 +1202,7 @@ async fn message_event_handle<M: MultiPass, R: RayGun>(
                 }
             }
         }
+        _ => {}
     }
 
     Ok(())
