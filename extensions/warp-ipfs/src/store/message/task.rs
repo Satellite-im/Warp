@@ -378,6 +378,12 @@ impl ConversationTask {
             task.queue = data;
         }
 
+        for participant in task.document.recipients.iter() {
+            if !task.discovery.contains(participant).await {
+                let _ = task.discovery.insert(participant).await;
+            }
+        }
+
         tracing::info!(%conversation_id, "conversation task created");
         Ok(task)
     }
@@ -1901,6 +1907,10 @@ impl ConversationTask {
             conversation_id: self.conversation_id,
             recipient: did_key.clone(),
         });
+
+        if !self.discovery.contains(did_key).await {
+            let _ = self.discovery.insert(did_key).await;
+        }
 
         self.publish(None, event, true).await?;
 
