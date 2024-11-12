@@ -222,6 +222,7 @@ impl CommunityChannel {
 }
 
 #[derive(Default, Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum CommunityChannelType {
     #[default]
     Standard,
@@ -229,6 +230,7 @@ pub enum CommunityChannelType {
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
 pub enum CommunityPermission {
     EditName,
     EditDescription,
@@ -259,6 +261,7 @@ pub enum CommunityPermission {
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
 pub enum CommunityChannelPermission {
     ViewChannel,
     SendMessages,
