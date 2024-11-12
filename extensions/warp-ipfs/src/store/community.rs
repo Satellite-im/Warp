@@ -296,14 +296,12 @@ impl From<CommunityDocument> for Community {
 }
 impl CommunityDocument {
     pub fn participants(&self) -> IndexSet<DID> {
-        let mut participants = self.members.clone();
-        participants.insert(self.owner.clone());
-        for (_, invite) in &self.invites {
-            if let Some(target) = &invite.target_user {
-                participants.insert(target.clone());
-            }
-        }
-        participants
+        self.invites
+            .iter()
+            .filter_map(|(_, invite)| invite.target_user.clone())
+            .chain(self.members.clone())
+            .chain(std::iter::once(self.owner.clone()))
+            .collect::<IndexSet<_>>()
     }
     pub fn has_valid_invite(&self, user: &DID) -> bool {
         for (_, invite) in &self.invites {
