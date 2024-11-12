@@ -17,9 +17,9 @@ use warp::{
 };
 
 use crate::store::{
-    conversation::ConversationDocument, ds_key::DataStoreKey, ecdh_decrypt, ecdh_encrypt,
-    identity::Request, keystore::Keystore, VecExt, MAX_METADATA_ENTRIES, MAX_METADATA_KEY_LENGTH,
-    MAX_METADATA_VALUE_LENGTH,
+    community::CommunityDocument, conversation::ConversationDocument, ds_key::DataStoreKey,
+    ecdh_decrypt, ecdh_encrypt, identity::Request, keystore::Keystore, VecExt,
+    MAX_METADATA_ENTRIES, MAX_METADATA_KEY_LENGTH, MAX_METADATA_VALUE_LENGTH,
 };
 
 use super::{
@@ -171,14 +171,18 @@ impl RootDocumentMap {
         inner.export_bytes().await
     }
 
-    pub async fn get_conversation_keystore_map(&self) -> Result<BTreeMap<String, Cid>, Error> {
+    pub async fn get_keystore_map(&self) -> Result<BTreeMap<String, Cid>, Error> {
         let inner = &*self.inner.read().await;
-        inner.get_conversation_keystore_map().await
+        inner.get_keystore_map().await
     }
 
     pub async fn list_conversation_document(&self) -> BoxStream<'static, ConversationDocument> {
         let inner = &*self.inner.read().await;
         inner.list_conversation_stream().await
+    }
+    pub async fn list_community_document(&self) -> BoxStream<'static, CommunityDocument> {
+        let inner = &*self.inner.read().await;
+        inner.list_community_stream().await
     }
 
     pub async fn get_conversation_document(&self, id: Uuid) -> Result<ConversationDocument, Error> {
@@ -194,17 +198,27 @@ impl RootDocumentMap {
         inner.set_conversation_document(document).await
     }
 
-    pub async fn get_conversation_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
+    pub async fn get_community_document(&self, id: Uuid) -> Result<CommunityDocument, Error> {
         let inner = &*self.inner.read().await;
-        inner.get_conversation_keystore(id).await
+        inner.get_community_document(id).await
     }
 
-    pub async fn set_conversation_keystore_map(
+    pub async fn set_community_document<B: Borrow<CommunityDocument>>(
         &self,
-        document: BTreeMap<String, Cid>,
+        document: B,
     ) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
-        inner.set_conversation_keystore(document).await
+        inner.set_community_document(document).await
+    }
+
+    pub async fn get_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
+        let inner = &*self.inner.read().await;
+        inner.get_keystore(id).await
+    }
+
+    pub async fn set_keystore_map(&self, document: BTreeMap<String, Cid>) -> Result<(), Error> {
+        let inner = &mut *self.inner.write().await;
+        inner.set_keystore(document).await
     }
 
     pub async fn get_directory_index(&self) -> Result<Directory, Error> {
@@ -872,16 +886,16 @@ impl RootDocumentInner {
         Ok(())
     }
 
-    async fn set_conversation_keystore(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
+    async fn set_keystore(&mut self, map: BTreeMap<String, Cid>) -> Result<(), Error> {
         let mut document = self.get_root_document().await?;
-        document.conversations_keystore = Some(self.ipfs.put_dag(map).await?);
+        document.keystore = Some(self.ipfs.put_dag(map).await?);
         self.set_root_document(document).await
     }
 
-    async fn get_conversation_keystore_map(&self) -> Result<BTreeMap<String, Cid>, Error> {
+    async fn get_keystore_map(&self) -> Result<BTreeMap<String, Cid>, Error> {
         let document = self.get_root_document().await?;
 
-        let cid = match document.conversations_keystore {
+        let cid = match document.keystore {
             Some(cid) => cid,
             None => return Ok(BTreeMap::new()),
         };
@@ -894,10 +908,10 @@ impl RootDocumentInner {
             .map_err(Error::from)
     }
 
-    async fn get_conversation_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
+    async fn get_keystore(&self, id: Uuid) -> Result<Keystore, Error> {
         let document = self.get_root_document().await?;
 
-        let cid = match document.conversations_keystore {
+        let cid = match document.keystore {
             Some(cid) => cid,
             None => return Err(Error::ObjectNotFound),
         };
@@ -1008,6 +1022,105 @@ impl RootDocumentInner {
         };
 
         stream.boxed()
+    }
+
+    pub async fn list_community_stream(&self) -> BoxStream<'static, CommunityDocument> {
+        let document = match self.get_root_document().await.ok() {
+            Some(document) => document,
+            None => return futures::stream::empty().boxed(),
+        };
+
+        let cid = match document.communities {
+            Some(cid) => cid,
+            None => return futures::stream::empty().boxed(),
+        };
+
+        let ipfs = self.ipfs.clone();
+
+        let stream = async_stream::stream! {
+            let community_map: BTreeMap<String, Cid> = ipfs
+                .get_dag(cid)
+                .local()
+                .deserialized()
+                .await
+                .unwrap_or_default();
+
+            let unordered = FuturesUnordered::from_iter(
+                community_map
+                    .values()
+                    .map(|cid| ipfs.get_dag(*cid).local().deserialized().into_future()),
+            )
+            .filter_map(|result: Result<CommunityDocument, _>| async move { result.ok() })
+            .filter(|document| {
+                let deleted = document.deleted;
+                async move { !deleted }
+            });
+
+            for await community in unordered {
+                yield community;
+            }
+        };
+
+        stream.boxed()
+    }
+
+    async fn get_community_document(&self, id: Uuid) -> Result<CommunityDocument, Error> {
+        let document = self.get_root_document().await?;
+
+        let cid = match document.communities {
+            Some(cid) => cid,
+            None => return Err(Error::InvalidCommunity),
+        };
+
+        let path = IpfsPath::from(cid).sub_path(&id.to_string())?;
+        let document: CommunityDocument = self
+            .ipfs
+            .get_dag(path)
+            .local()
+            .deserialized()
+            .await
+            .map_err(Error::from)?;
+
+        document.verify()?;
+
+        if document.deleted {
+            return Err(Error::InvalidCommunity);
+        }
+
+        Ok(document)
+    }
+
+    async fn set_community_document<B: Borrow<CommunityDocument>>(
+        &mut self,
+        community_document: B,
+    ) -> Result<(), Error> {
+        let community_document = community_document.borrow();
+        community_document.verify()?;
+        let mut document = self.get_root_document().await?;
+
+        let mut list = match document.communities {
+            Some(cid) => self
+                .ipfs
+                .get_dag(cid)
+                .local()
+                .deserialized()
+                .await
+                .unwrap_or_default(),
+            None => BTreeMap::new(),
+        };
+
+        let id = community_document.id().to_string();
+        let cid = self.ipfs.put_dag(community_document).await?;
+
+        list.insert(id, cid);
+
+        let cid = self.ipfs.put_dag(list).await?;
+
+        document.communities.replace(cid);
+
+        self.set_root_document(document).await?;
+
+        Ok(())
     }
 
     async fn export(&self) -> Result<ResolvedRootDocument, Error> {
