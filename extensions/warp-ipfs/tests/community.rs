@@ -1,14 +1,14 @@
 mod common;
 #[cfg(test)]
 mod test {
-    use futures::StreamExt;
+    use futures::{stream::FuturesUnordered, FutureExt, Stream, StreamExt, TryStreamExt};
     use std::time::Duration;
     use warp::raygun::{
         community::{
             Community, CommunityChannelPermission, CommunityChannelType, CommunityInvite,
             CommunityPermission, RayGunCommunity,
         },
-        MessageEventKind, MessageEventStream, RayGunEventKind, RayGunEventStream, RayGunStream,
+        MessageEventKind, MessageEventStream, RayGunEventKind, RayGunStream,
     };
 
     #[cfg(target_arch = "wasm32")]
@@ -29,39 +29,27 @@ mod test {
         timeout: Duration,
         expected_event: MessageEventKind,
     ) -> Result<(), std::io::Error> {
-        let mut events = vec![];
-        for stream in streams {
-            events.push(next_msg_event(stream, timeout.clone()).await?);
-        }
-        for event in events {
-            assert_eq!(event, expected_event);
-        }
-        Ok(())
-    }
-    async fn next_msg_event(
-        stream: &mut MessageEventStream,
-        timeout: Duration,
-    ) -> Result<MessageEventKind, std::io::Error> {
-        crate::common::timeout(timeout, async {
-            loop {
-                if let Some(event) = stream.next().await {
-                    return event;
-                }
-            }
+        FuturesUnordered::from_iter(
+            streams
+                .into_iter()
+                .map(|st| next_event(st, timeout).boxed()),
+        )
+        .try_for_each(|ev| {
+            assert_eq!(ev, expected_event);
+            futures::future::ok(())
         })
         .await
     }
-    async fn next_raygun_event(
-        stream: &mut RayGunEventStream,
+    async fn next_event<S: Stream + Unpin>(
+        stream: &mut S,
         timeout: Duration,
-    ) -> Result<RayGunEventKind, std::io::Error> {
-        crate::common::timeout(timeout, async {
-            loop {
-                if let Some(event) = stream.next().await {
-                    return event;
-                }
-            }
-        })
+    ) -> Result<S::Item, std::io::Error> {
+        crate::common::timeout(
+            timeout,
+            stream
+                .next()
+                .map(|item| item.expect("stream not to terminate")),
+        )
         .await
     }
     #[async_test]
@@ -81,14 +69,14 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::CreatedCommunityInvite {
                 community_id: community.id(),
                 invite: invite.clone()
             }
         );
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -129,7 +117,7 @@ mod test {
         )
         .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_c, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_c, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -237,7 +225,7 @@ mod test {
             )
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -262,7 +250,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -292,7 +280,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -323,7 +311,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -382,7 +370,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -394,7 +382,7 @@ mod test {
             .accept_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
@@ -437,7 +425,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite_for_b.id()
@@ -449,7 +437,7 @@ mod test {
             .accept_community_invite(community.id(), invite_for_b.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite_for_b.id(),
@@ -477,14 +465,14 @@ mod test {
             .create_community_invite(community.id(), Some(did_c.clone()), None)
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::CreatedCommunityInvite {
                 community_id: community.id(),
                 invite: invite_for_c.clone(),
             }
         );
         assert_eq!(
-            next_raygun_event(&mut rg_stream_c, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_c, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite_for_c.id()
@@ -495,7 +483,7 @@ mod test {
             .accept_community_invite(community.id(), invite_for_c.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite_for_c.id(),
@@ -518,7 +506,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite_for_b.id()
@@ -530,7 +518,7 @@ mod test {
             .accept_community_invite(community.id(), invite_for_b.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite_for_b.id(),
@@ -566,7 +554,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite_for_b.id()
@@ -578,7 +566,7 @@ mod test {
             .accept_community_invite(community.id(), invite_for_b.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite_for_b.id(),
@@ -625,7 +613,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -652,7 +640,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite_for_b.id()
@@ -664,7 +652,7 @@ mod test {
             .accept_community_invite(community.id(), invite_for_b.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite_for_b.id(),
@@ -699,7 +687,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite_for_b.id()
@@ -711,7 +699,7 @@ mod test {
             .accept_community_invite(community.id(), invite_for_b.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite_for_b.id(),
@@ -757,7 +745,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite_for_b.id()
@@ -769,7 +757,7 @@ mod test {
             .accept_community_invite(community.id(), invite_for_b.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite_for_b.id(),
@@ -793,7 +781,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_c.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_c, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_c, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite_for_b.id()
@@ -827,7 +815,7 @@ mod test {
             )
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite_for_b.id()
@@ -872,7 +860,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -884,7 +872,7 @@ mod test {
             .accept_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
@@ -919,7 +907,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -931,7 +919,7 @@ mod test {
             .accept_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
@@ -960,7 +948,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -972,7 +960,7 @@ mod test {
             .accept_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
@@ -1003,7 +991,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -1015,7 +1003,7 @@ mod test {
             .accept_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
@@ -1062,7 +1050,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -1074,7 +1062,7 @@ mod test {
             .accept_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
@@ -1108,7 +1096,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -1120,7 +1108,7 @@ mod test {
             .accept_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
@@ -1170,7 +1158,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -1182,7 +1170,7 @@ mod test {
             .accept_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
@@ -1213,7 +1201,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -1225,7 +1213,7 @@ mod test {
             .accept_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
@@ -1265,7 +1253,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -1277,7 +1265,7 @@ mod test {
             .accept_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
@@ -1308,7 +1296,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -1320,7 +1308,7 @@ mod test {
             .accept_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
@@ -1386,7 +1374,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -1398,7 +1386,7 @@ mod test {
             .accept_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
@@ -1429,7 +1417,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -1441,7 +1429,7 @@ mod test {
             .accept_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
@@ -1487,7 +1475,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -1499,7 +1487,7 @@ mod test {
             .accept_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
@@ -1530,7 +1518,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -1542,7 +1530,7 @@ mod test {
             .accept_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
@@ -1590,7 +1578,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -1602,7 +1590,7 @@ mod test {
             .accept_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
@@ -1615,7 +1603,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_c.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_c, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_c, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -1627,7 +1615,7 @@ mod test {
             .accept_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut stream_b, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
@@ -1670,7 +1658,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -1682,7 +1670,7 @@ mod test {
             .accept_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
@@ -1719,7 +1707,7 @@ mod test {
         )
         .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_c, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_c, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -1745,7 +1733,7 @@ mod test {
             .await?;
 
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::RemovedCommunityMember {
                 community_id: community.id(),
                 member: did_c.clone()
@@ -1775,7 +1763,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -1787,7 +1775,7 @@ mod test {
             .accept_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
@@ -1822,7 +1810,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -1834,7 +1822,7 @@ mod test {
             .accept_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
@@ -1885,7 +1873,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -1897,7 +1885,7 @@ mod test {
             .accept_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
@@ -1936,7 +1924,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -1948,7 +1936,7 @@ mod test {
             .accept_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
@@ -2014,7 +2002,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -2026,7 +2014,7 @@ mod test {
             .accept_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
@@ -2072,7 +2060,7 @@ mod test {
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
-            next_raygun_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
             RayGunEventKind::CommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id()
@@ -2084,7 +2072,7 @@ mod test {
             .accept_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(
-            next_msg_event(&mut stream_a, Duration::from_secs(60)).await?,
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
             MessageEventKind::AcceptedCommunityInvite {
                 community_id: community.id(),
                 invite_id: invite.id(),
