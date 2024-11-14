@@ -8,7 +8,11 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-pub enum JoinHandle<T> {
+pub struct JoinHandle<T> {
+    inner: InnerJoinHandle<T>,
+}
+
+enum InnerJoinHandle<T> {
     #[cfg(not(target_arch = "wasm32"))]
     TokioHandle(tokio::task::JoinHandle<T>),
     #[allow(dead_code)]
@@ -21,19 +25,22 @@ pub enum JoinHandle<T> {
 impl<T> JoinHandle<T> {
     #[allow(dead_code)]
     pub fn abort(&self) {
-        match self {
+        match self.inner {
             #[cfg(not(target_arch = "wasm32"))]
-            JoinHandle::TokioHandle(handle) => handle.abort(),
-            JoinHandle::CustomHandle { handle, .. } => handle.abort(),
+            InnerJoinHandle::TokioHandle(ref handle) => handle.abort(),
+            InnerJoinHandle::CustomHandle { ref handle, .. } => handle.abort(),
         }
     }
 
     #[allow(dead_code)]
     pub fn is_finished(&self) -> bool {
-        match self {
+        match self.inner {
             #[cfg(not(target_arch = "wasm32"))]
-            JoinHandle::TokioHandle(handle) => handle.is_finished(),
-            JoinHandle::CustomHandle { handle, inner } => handle.is_aborted() || inner.is_none(),
+            InnerJoinHandle::TokioHandle(ref handle) => handle.is_finished(),
+            InnerJoinHandle::CustomHandle {
+                ref handle,
+                ref inner,
+            } => handle.is_aborted() || inner.is_none(),
         }
     }
 }
@@ -41,9 +48,10 @@ impl<T> JoinHandle<T> {
 impl<T> Future for JoinHandle<T> {
     type Output = std::io::Result<T>;
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match &mut *self {
+        let inner = &mut self.inner;
+        match inner {
             #[cfg(not(target_arch = "wasm32"))]
-            JoinHandle::TokioHandle(handle) => {
+            InnerJoinHandle::TokioHandle(handle) => {
                 let fut = futures::ready!(Pin::new(handle).poll(cx));
 
                 match fut {
@@ -54,7 +62,7 @@ impl<T> Future for JoinHandle<T> {
                     }
                 }
             }
-            JoinHandle::CustomHandle { inner, .. } => {
+            InnerJoinHandle::CustomHandle { inner, .. } => {
                 let Some(this) = inner.as_mut() else {
                     unreachable!("cannot poll completed future");
                 };
@@ -80,7 +88,7 @@ impl<T> Future for JoinHandle<T> {
 
 #[derive(Clone)]
 pub struct AbortableJoinHandle<T> {
-    handle: Arc<InnerJoinHandle<T>>,
+    handle: Arc<InnerHandle<T>>,
 }
 
 impl<T> Debug for AbortableJoinHandle<T> {
@@ -92,7 +100,7 @@ impl<T> Debug for AbortableJoinHandle<T> {
 impl<T> From<JoinHandle<T>> for AbortableJoinHandle<T> {
     fn from(handle: JoinHandle<T>) -> Self {
         AbortableJoinHandle {
-            handle: Arc::new(InnerJoinHandle {
+            handle: Arc::new(InnerHandle {
                 inner: parking_lot::Mutex::new(handle),
             }),
         }
@@ -111,11 +119,11 @@ impl<T> AbortableJoinHandle<T> {
     }
 }
 
-struct InnerJoinHandle<T> {
+struct InnerHandle<T> {
     pub inner: parking_lot::Mutex<JoinHandle<T>>,
 }
 
-impl<T> Drop for InnerJoinHandle<T> {
+impl<T> Drop for InnerHandle<T> {
     fn drop(&mut self) {
         self.inner.lock().abort();
     }
@@ -173,7 +181,8 @@ impl Executor for LocalExecutor {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let handle = tokio::task::spawn(future);
-            JoinHandle::TokioHandle(handle)
+            let inner = InnerJoinHandle::TokioHandle(handle);
+            JoinHandle { inner }
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -186,10 +195,11 @@ impl Executor for LocalExecutor {
             };
 
             wasm_bindgen_futures::spawn_local(fut);
-            JoinHandle::CustomHandle {
+            let inner = InnerJoinHandle::CustomHandle {
                 inner: Some(rx),
                 handle: abort_handle,
-            }
+            };
+            JoinHandle { inner }
         }
     }
 }
@@ -242,10 +252,12 @@ fn custom_abortable_task() {
             };
 
             self.pool.spawn_ok(fut);
-            JoinHandle::CustomHandle {
+            let inner = InnerJoinHandle::CustomHandle {
                 inner: Some(rx),
                 handle: abort_handle,
-            }
+            };
+
+            JoinHandle { inner }
         }
     }
 
