@@ -274,20 +274,20 @@ impl Identity {
 }
 
 impl Identity {
-    pub fn username(&self) -> String {
-        self.username.clone()
+    pub fn username(&self) -> &str {
+        &self.username
     }
 
-    pub fn status_message(&self) -> Option<String> {
-        self.status_message.clone()
+    pub fn status_message(&self) -> Option<&str> {
+        self.status_message.as_deref()
     }
 
     pub fn short_id(&self) -> ShortId {
         self.short_id
     }
 
-    pub fn did_key(&self) -> DID {
-        self.did_key.clone()
+    pub fn did_key(&self) -> &DID {
+        &self.did_key
     }
 
     pub fn created(&self) -> DateTime<Utc> {
