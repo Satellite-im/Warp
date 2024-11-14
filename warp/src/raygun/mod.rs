@@ -891,6 +891,7 @@ impl GroupPermission {
             Self::AddParticipants,
             Self::RemoveParticipants,
             Self::EditGroupInfo,
+            Self::EditGroupVisual,
         ]
     }
 }
