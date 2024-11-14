@@ -882,7 +882,7 @@ pub enum GroupPermission {
     AddParticipants,
     RemoveParticipants,
     EditGroupInfo,
-    EditGroupVisual,
+    EditGroupImages,
 }
 
 impl GroupPermission {
@@ -891,7 +891,7 @@ impl GroupPermission {
             Self::AddParticipants,
             Self::RemoveParticipants,
             Self::EditGroupInfo,
-            Self::EditGroupVisual,
+            Self::EditGroupImages,
         ]
     }
 }
