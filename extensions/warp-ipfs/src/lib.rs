@@ -1164,6 +1164,7 @@ impl MultiPassImportExport for WarpIpfs {
             return Err(Error::TesseractLocked);
         }
         match option {
+            #[cfg(not(target_arch = "wasm32"))]
             IdentityImportOption::Locate {
                 location: ImportLocation::Local { path },
                 passphrase,
@@ -1259,6 +1260,7 @@ impl MultiPassImportExport for WarpIpfs {
         let store = self.identity_store(true).await?;
 
         match location {
+            #[cfg(not(target_arch = "wasm32"))]
             ImportLocation::Local { path } => {
                 let bundle = store.root_document().export_bytes().await?;
                 fs::write(path, bundle).await?;

@@ -5,7 +5,6 @@ use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::future::Future;
-use std::path::PathBuf;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -48,8 +47,9 @@ pub enum ImportLocation<'a> {
     /// Remote location where the identity is stored
     Remote,
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Local path where the identity is stored
-    Local { path: PathBuf },
+    Local { path: std::path::PathBuf },
 
     /// Buffer memory of where identity is stored
     Memory { buffer: &'a mut Vec<u8> },
