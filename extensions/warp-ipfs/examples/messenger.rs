@@ -528,7 +528,7 @@ async fn main() -> anyhow::Result<()> {
                                 Ok(conversation) => {
                                     let mut permissions = GroupPermissions::new();
                                     if open {
-                                        for did in conversation.recipients()).to_owned() {
+                                        for did in conversation.recipients().to_owned() {
                                             permissions.insert(did, GroupPermission::values().into_iter().collect());
                                         }
                                     }
