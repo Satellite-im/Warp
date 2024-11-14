@@ -76,7 +76,7 @@ pub async fn create_account(
     let profile = instance.create_identity(username, passphrase).await?;
     let identity = profile.identity().clone();
 
-    Ok((instance, identity.did_key(), identity))
+    Ok((instance, identity.did_key().clone(), identity))
 }
 
 #[allow(dead_code)]
