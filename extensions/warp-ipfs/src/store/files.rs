@@ -548,7 +548,7 @@ impl FileTask {
             return Err(Error::FileNotFound);
         }
 
-        let file_size = fs::file_size(&path).await?;
+        let file_size = tokio::fs::metadata(&path).await?.len();
 
         if self.current_size() + (file_size as usize) >= self.max_size() {
             return Err(Error::InvalidLength {

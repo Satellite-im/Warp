@@ -41,8 +41,6 @@ mediatype.workspace = true
 bincode.workspace = true
 bytes.workspace = true
 
-fs = { path = "../../tools/fs", default-features = false }
-
 tokio-util = { workspace = true }
 tokio-stream = { workspace = true }
 

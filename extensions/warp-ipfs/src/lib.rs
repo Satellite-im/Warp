@@ -378,7 +378,7 @@ impl WarpIpfs {
 
                 if !path.is_dir() {
                     tracing::warn!("Path doesnt exist... creating");
-                    fs::create_dir_all(path).await?;
+                    tokio::fs::create_dir_all(path).await?;
                 }
                 uninitialized = uninitialized.set_path(path);
             }
@@ -1175,7 +1175,7 @@ impl MultiPassImportExport for WarpIpfs {
                 let internal_keypair =
                     Keypair::ed25519_from_bytes(bytes).map_err(|_| Error::PrivateKeyInvalid)?;
 
-                let bytes = fs::read(path).await?;
+                let bytes = tokio::fs::read(path).await?;
 
                 let decrypted_bundle = ecdh_decrypt(&internal_keypair, None, bytes)?;
                 let exported_document =
@@ -1263,7 +1263,7 @@ impl MultiPassImportExport for WarpIpfs {
             #[cfg(not(target_arch = "wasm32"))]
             ImportLocation::Local { path } => {
                 let bundle = store.root_document().export_bytes().await?;
-                fs::write(path, bundle).await?;
+                tokio::fs::write(path, bundle).await?;
                 Ok(())
             }
             ImportLocation::Memory { buffer } => {
