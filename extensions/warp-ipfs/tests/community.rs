@@ -1,14 +1,14 @@
 mod common;
 #[cfg(test)]
 mod test {
-    use futures::StreamExt;
+    use futures::{stream::FuturesUnordered, FutureExt, Stream, StreamExt, TryStreamExt};
     use std::time::Duration;
     use warp::raygun::{
         community::{
             Community, CommunityChannelPermission, CommunityChannelType, CommunityInvite,
             CommunityPermission, RayGunCommunity,
         },
-        MessageEventKind, MessageEventStream,
+        MessageEventKind, MessageEventStream, RayGunEventKind, RayGunStream,
     };
 
     #[cfg(target_arch = "wasm32")]
@@ -24,31 +24,32 @@ mod test {
 
     use crate::common::create_accounts;
 
-    async fn assert_next_event(
+    async fn assert_next_msg_event(
         streams: Vec<&mut MessageEventStream>,
         timeout: Duration,
         expected_event: MessageEventKind,
     ) -> Result<(), std::io::Error> {
-        let mut events = vec![];
-        for stream in streams {
-            events.push(next_event(stream, timeout.clone()).await?);
-        }
-        for event in events {
-            assert_eq!(event, expected_event);
-        }
-        Ok(())
-    }
-    async fn next_event(
-        stream: &mut MessageEventStream,
-        timeout: Duration,
-    ) -> Result<MessageEventKind, std::io::Error> {
-        crate::common::timeout(timeout, async {
-            loop {
-                if let Some(event) = stream.next().await {
-                    return event;
-                }
-            }
+        FuturesUnordered::from_iter(
+            streams
+                .into_iter()
+                .map(|st| next_event(st, timeout).boxed()),
+        )
+        .try_for_each(|ev| {
+            assert_eq!(ev, expected_event);
+            futures::future::ok(())
         })
+        .await
+    }
+    async fn next_event<S: Stream + Unpin>(
+        stream: &mut S,
+        timeout: Duration,
+    ) -> Result<S::Item, std::io::Error> {
+        crate::common::timeout(
+            timeout,
+            stream
+                .next()
+                .map(|item| item.expect("stream not to terminate")),
+        )
         .await
     }
     #[async_test]
@@ -63,6 +64,7 @@ mod test {
         let community = instance_a.create_community("Community0").await?;
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
 
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
@@ -73,16 +75,16 @@ mod test {
                 invite: invite.clone()
             }
         );
-
-        let invite_list = crate::common::timeout(Duration::from_secs(60), async {
-            loop {
-                let invite_list = instance_b.list_communities_invited_to().await.unwrap();
-                if invite_list.len() == 1 {
-                    return invite_list;
-                }
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
             }
-        })
-        .await?;
+        );
+
+        let invite_list = instance_b.list_communities_invited_to().await?;
+        assert_eq!(invite_list.len(), 1);
 
         let mut stream_b = instance_b.get_community_stream(community.id()).await?;
         for (community_id, invite) in invite_list {
@@ -90,7 +92,7 @@ mod test {
                 .accept_community_invite(community_id, invite.id())
                 .await?;
         }
-        assert_next_event(
+        assert_next_msg_event(
             vec![&mut stream_a, &mut stream_b],
             Duration::from_secs(60),
             MessageEventKind::AcceptedCommunityInvite {
@@ -101,10 +103,11 @@ mod test {
         )
         .await?;
 
+        let mut rg_stream_c = instance_c.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_c.clone()), None)
             .await?;
-        assert_next_event(
+        assert_next_msg_event(
             vec![&mut stream_a, &mut stream_b],
             Duration::from_secs(60),
             MessageEventKind::CreatedCommunityInvite {
@@ -113,16 +116,16 @@ mod test {
             },
         )
         .await?;
-
-        let invite_list = crate::common::timeout(Duration::from_secs(60), async {
-            loop {
-                let invite_list = instance_c.list_communities_invited_to().await.unwrap();
-                if invite_list.len() == 1 {
-                    return invite_list;
-                }
+        assert_eq!(
+            next_event(&mut rg_stream_c, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
             }
-        })
-        .await?;
+        );
+
+        let invite_list = instance_c.list_communities_invited_to().await?;
+        assert_eq!(invite_list.len(), 1);
 
         let mut stream_c = instance_c.get_community_stream(community.id()).await?;
         for (community_id, invite) in invite_list {
@@ -130,7 +133,7 @@ mod test {
                 .accept_community_invite(community_id, invite.id())
                 .await?;
         }
-        assert_next_event(
+        assert_next_msg_event(
             vec![&mut stream_a, &mut stream_b, &mut stream_c],
             Duration::from_secs(60),
             MessageEventKind::AcceptedCommunityInvite {
@@ -213,6 +216,7 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(
                 community.id(),
@@ -220,6 +224,13 @@ mod test {
                 Some(chrono::Utc::now() + chrono::Duration::days(1)),
             )
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
 
         let got_community = instance_b.get_community(community.id()).await?;
         assert!(got_community.invites().contains(&invite.id()));
@@ -234,9 +245,17 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
 
         instance_b
             .accept_community_invite(community.id(), invite.id())
@@ -256,9 +275,17 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
 
         instance_b
             .accept_community_invite(community.id(), invite.id())
@@ -279,9 +306,17 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
 
         let list = instance_b.list_communities_invited_to().await?;
         assert!(list.len() == 1);
@@ -330,9 +365,17 @@ mod test {
             .revoke_community_permission_for_all(community.id(), CommunityPermission::CreateInvites)
             .await?;
 
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
@@ -377,9 +420,17 @@ mod test {
             )
             .await?;
 
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite_for_b = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite_for_b.id()
+            }
+        );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
@@ -398,7 +449,7 @@ mod test {
         instance_a
             .grant_community_role(community.id(), role.id(), did_b.clone())
             .await?;
-        assert_next_event(
+        assert_next_msg_event(
             vec![&mut stream_a, &mut stream_b],
             Duration::from_secs(60),
             MessageEventKind::GrantedCommunityRole {
@@ -409,6 +460,7 @@ mod test {
         )
         .await?;
 
+        let mut rg_stream_c = instance_c.raygun_subscribe().await?;
         let invite_for_c = instance_b
             .create_community_invite(community.id(), Some(did_c.clone()), None)
             .await?;
@@ -417,6 +469,13 @@ mod test {
             MessageEventKind::CreatedCommunityInvite {
                 community_id: community.id(),
                 invite: invite_for_c.clone(),
+            }
+        );
+        assert_eq!(
+            next_event(&mut rg_stream_c, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite_for_c.id()
             }
         );
 
@@ -442,9 +501,17 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite_for_b = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite_for_b.id()
+            }
+        );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
@@ -482,9 +549,18 @@ mod test {
 
         let community = instance_a.create_community("Community0").await?;
 
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite_for_b = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite_for_b.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite_for_b.id())
@@ -532,9 +608,17 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
 
         let got_invite = instance_b
             .get_community_invite(community.id(), invite.id())
@@ -551,9 +635,18 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite_for_b = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite_for_b.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite_for_b.id())
@@ -589,9 +682,18 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite_for_b = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite_for_b.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite_for_b.id())
@@ -638,9 +740,18 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite_for_b = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite_for_b.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite_for_b.id())
@@ -662,12 +773,21 @@ mod test {
         let accounts = create_accounts(vec![acc.clone(), acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, _, _) = &mut accounts[1].clone();
-        let (_, did_c, _) = &mut accounts[2].clone();
+        let (instance_c, did_c, _) = &mut accounts[2].clone();
 
         let community = instance_a.create_community("Community0").await?;
+        let mut rg_stream_c = instance_c.raygun_subscribe().await?;
         let invite_for_b = instance_a
             .create_community_invite(community.id(), Some(did_c.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_c, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite_for_b.id()
+            }
+        );
+
         let result = instance_b
             .accept_community_invite(community.id(), invite_for_b.id())
             .await;
@@ -686,6 +806,7 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite_for_b = instance_a
             .create_community_invite(
                 community.id(),
@@ -693,6 +814,14 @@ mod test {
                 Some(chrono::Utc::now() - chrono::Duration::days(1)),
             )
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite_for_b.id()
+            }
+        );
+
         let result = instance_b
             .accept_community_invite(community.id(), invite_for_b.id())
             .await;
@@ -726,9 +855,18 @@ mod test {
             )
             .await?;
 
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite.id())
@@ -764,9 +902,18 @@ mod test {
             .create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard)
             .await?;
 
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite.id())
@@ -796,9 +943,18 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite.id())
@@ -830,9 +986,18 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite.id())
@@ -880,9 +1045,18 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite.id())
@@ -917,9 +1091,18 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite.id())
@@ -970,9 +1153,18 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite.id())
@@ -1004,9 +1196,18 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite.id())
@@ -1047,9 +1248,18 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite.id())
@@ -1081,9 +1291,18 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite.id())
@@ -1150,9 +1369,18 @@ mod test {
             .create_community_role(community.id(), "Role0")
             .await?;
 
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite.id())
@@ -1184,9 +1412,18 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite.id())
@@ -1232,9 +1469,19 @@ mod test {
         let role = instance_a
             .create_community_role(community.id(), "Role0")
             .await?;
+
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite.id())
@@ -1266,9 +1513,18 @@ mod test {
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite.id())
@@ -1317,9 +1573,18 @@ mod test {
         let (instance_c, did_c, _) = &mut accounts[2].clone();
 
         let community = instance_a.create_community("Community0").await?;
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite.id())
@@ -1333,9 +1598,17 @@ mod test {
             }
         );
 
+        let mut rg_stream_c = instance_c.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_c.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_c, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
 
         let mut stream_b = instance_b.get_community_stream(community.id()).await?;
         instance_c
@@ -1380,9 +1653,18 @@ mod test {
             )
             .await?;
 
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite.id())
@@ -1400,7 +1682,7 @@ mod test {
         instance_a
             .grant_community_role(community.id(), role.id(), did_b.clone())
             .await?;
-        assert_next_event(
+        assert_next_msg_event(
             vec![&mut stream_a, &mut stream_b],
             Duration::from_secs(60),
             MessageEventKind::GrantedCommunityRole {
@@ -1411,10 +1693,11 @@ mod test {
         )
         .await?;
 
+        let mut rg_stream_c = instance_c.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_c.clone()), None)
             .await?;
-        assert_next_event(
+        assert_next_msg_event(
             vec![&mut stream_a, &mut stream_b],
             Duration::from_secs(60),
             MessageEventKind::CreatedCommunityInvite {
@@ -1423,11 +1706,18 @@ mod test {
             },
         )
         .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_c, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
 
         instance_c
             .accept_community_invite(community.id(), invite.id())
             .await?;
-        assert_next_event(
+        assert_next_msg_event(
             vec![&mut stream_a, &mut stream_b],
             Duration::from_secs(60),
             MessageEventKind::AcceptedCommunityInvite {
@@ -1468,9 +1758,18 @@ mod test {
             .create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard)
             .await?;
 
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite.id())
@@ -1506,9 +1805,18 @@ mod test {
             .create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard)
             .await?;
 
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite.id())
@@ -1560,9 +1868,18 @@ mod test {
             .create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard)
             .await?;
 
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite.id())
@@ -1602,9 +1919,18 @@ mod test {
             .create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard)
             .await?;
 
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite.id())
@@ -1671,9 +1997,18 @@ mod test {
             .create_community_role(community.id(), "Role0")
             .await?;
 
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite.id())
@@ -1720,9 +2055,18 @@ mod test {
             )
             .await?;
 
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite.id())

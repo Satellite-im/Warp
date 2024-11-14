@@ -52,14 +52,14 @@ async fn main() -> anyhow::Result<()> {
             Some(ev) = subscribe_a.next() => {
                 match ev {
                     MultiPassEventKind::FriendRequestSent { .. } => sent = true,
-                    MultiPassEventKind::IdentityUpdate { did } if did == ident_b.did_key() => seen_b = true,
+                    MultiPassEventKind::IdentityUpdate { did } if did.eq(ident_b.did_key()) => seen_b = true,
                     _ => {}
                 }
             }
             Some(ev) = subscribe_b.next() => {
                 match ev {
                     MultiPassEventKind::FriendRequestReceived { .. } => received = true,
-                    MultiPassEventKind::IdentityUpdate { did } if did == ident_a.did_key() => seen_a = true,
+                    MultiPassEventKind::IdentityUpdate { did } if did.eq(ident_a.did_key()) => seen_a = true,
                     _ => {}
                 }
             }
