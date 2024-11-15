@@ -1,3 +1,4 @@
+mod attachment;
 mod community_task;
 mod task;
 

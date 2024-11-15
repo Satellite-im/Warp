@@ -2,7 +2,7 @@ use bytes::Bytes;
 use chrono::Utc;
 use either::Either;
 use futures::channel::oneshot;
-use futures::stream::{self, BoxStream, FuturesUnordered};
+use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{FutureExt, SinkExt, StreamExt, TryFutureExt};
 use futures_timeout::TimeoutExt;
 use futures_timer::Delay;
@@ -22,15 +22,13 @@ use std::pin::Pin;
 use std::str::FromStr;
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
-use tokio_stream::StreamMap;
 use uuid::Uuid;
-use warp::constellation::directory::Directory;
-use warp::constellation::{ConstellationProgressStream, Progression};
+use warp::constellation::ConstellationProgressStream;
 use warp::crypto::DID;
 use warp::raygun::{
-    AttachmentEventStream, AttachmentKind, ConversationImage, GroupPermissionOpt, Location,
-    LocationKind, MessageEvent, MessageOptions, MessageReference, MessageStatus, MessageType,
-    Messages, MessagesType, RayGunEventKind,
+    AttachmentEventStream, ConversationImage, GroupPermissionOpt, Location, MessageEvent,
+    MessageOptions, MessageReference, MessageStatus, MessageType, Messages, MessagesType,
+    RayGunEventKind,
 };
 use warp::{
     crypto::{cipher::Cipher, generate},
@@ -50,7 +48,7 @@ use crate::store::document::files::FileDocument;
 use crate::store::document::image_dag::ImageDag;
 use crate::store::ds_key::DataStoreKey;
 use crate::store::event_subscription::EventSubscription;
-use crate::store::message::CHAT_DIRECTORY;
+use crate::store::message::attachment::AttachmentStream;
 use crate::store::topics::PeerTopic;
 use crate::store::{
     ecdh_shared_key, verify_serde_sig, ConversationEvents, ConversationImageType,
@@ -2398,312 +2396,23 @@ impl ConversationTask {
         messages: Vec<String>,
     ) -> Result<(Uuid, AttachmentEventStream), Error> {
         let conversation_id = self.conversation_id;
-        if locations.len() > 32 {
-            return Err(Error::InvalidLength {
-                context: "files".into(),
-                current: locations.len(),
-                minimum: Some(1),
-                maximum: Some(32),
-            });
-        }
 
-        if !messages.is_empty() {
-            let lines_value_length: usize = messages
-                .iter()
-                .filter(|s| !s.is_empty())
-                .map(|s| s.trim())
-                .map(|s| s.chars().count())
-                .sum();
-
-            if lines_value_length > MAX_MESSAGE_SIZE {
-                tracing::error!(
-                    current_size = lines_value_length,
-                    max = MAX_MESSAGE_SIZE,
-                    "length of message is invalid"
-                );
-                return Err(Error::InvalidLength {
-                    context: "message".into(),
-                    current: lines_value_length,
-                    minimum: None,
-                    maximum: Some(MAX_MESSAGE_SIZE),
-                });
-            }
-        }
-
-        let keypair = self.root.keypair();
-
-        let mut constellation = self.file.clone();
-
-        let files = locations
-            .into_iter()
-            .filter(|location| match location {
-                Location::Disk { path } => path.is_file(),
-                _ => true,
-            })
-            .collect::<Vec<_>>();
-
-        if files.is_empty() {
-            return Err(Error::NoAttachments);
-        }
-
-        let root_directory = constellation.root_directory();
-
-        if !root_directory.has_item(CHAT_DIRECTORY) {
-            let new_dir = Directory::new(CHAT_DIRECTORY);
-            root_directory.add_directory(new_dir)?;
-        }
-
-        let mut media_dir = root_directory
-            .get_last_directory_from_path(&format!("/{CHAT_DIRECTORY}/{conversation_id}"))?;
-
-        // if the directory that returned is the chat directory, this means we should create
-        // the directory specific to the conversation
-        if media_dir.name() == CHAT_DIRECTORY {
-            let new_dir = Directory::new(&conversation_id.to_string());
-            media_dir.add_directory(new_dir)?;
-            media_dir = media_dir.get_last_directory_from_path(&conversation_id.to_string())?;
-        }
-
-        assert_eq!(media_dir.name(), conversation_id.to_string());
-
-        let mut atx = self.attachment_tx.clone();
         let keystore = pubkey_or_keystore(&*self)?;
-        let ipfs = self.ipfs.clone();
-        let own_did = self.identity.did_key();
 
-        let keypair = keypair.clone();
+        let stream = AttachmentStream::new(
+            &self.ipfs,
+            self.root.keypair(),
+            &self.identity.did_key(),
+            &self.file,
+            conversation_id,
+            keystore,
+            self.attachment_tx.clone(),
+        )
+        .set_reply(reply_id)
+        .set_locations(locations)?
+        .set_lines(messages)?;
 
-        let message_id = Uuid::new_v4();
-
-        let stream = async_stream::stream! {
-            let mut in_stack = vec![];
-
-            let mut attachments = vec![];
-
-            let mut streams = StreamMap::new();
-
-            for file in files {
-                let kind = LocationKind::from(&file);
-                match file {
-                    Location::Constellation { path } => {
-                        match constellation
-                            .root_directory()
-                            .get_item_by_path(&path)
-                            .and_then(|item| item.get_file())
-                        {
-                            Ok(f) => {
-                                streams.insert(kind, stream::once(async { (Progression::ProgressComplete { name: f.name(), total: Some(f.size()) }, Some(f)) }).boxed());
-                            },
-                            Err(e) => {
-                                let constellation_path = PathBuf::from(&path);
-                                let name = constellation_path.file_name().and_then(OsStr::to_str).map(str::to_string).unwrap_or(path.to_string());
-                                streams.insert(kind, stream::once(async { (Progression::ProgressFailed { name, last_size: None, error: e }, None) }).boxed());
-                            },
-                        }
-                    }
-                    Location::Stream { name, size, stream } => {
-                        let mut filename = name;
-
-                        let original = filename.clone();
-
-                        let current_directory = media_dir.clone();
-
-                        let mut interval = 0;
-                        let skip;
-                        loop {
-                            if in_stack.contains(&filename) || current_directory.has_item(&filename) {
-                                if interval > 2000 {
-                                    skip = true;
-                                    break;
-                                }
-                                interval += 1;
-                                let file = PathBuf::from(&original);
-                                let file_stem =
-                                    file.file_stem().and_then(OsStr::to_str).map(str::to_string);
-                                let ext = file.extension().and_then(OsStr::to_str).map(str::to_string);
-
-                                filename = match (file_stem, ext) {
-                                    (Some(filename), Some(ext)) => {
-                                        format!("{filename} ({interval}).{ext}")
-                                    }
-                                    _ => format!("{original} ({interval})"),
-                                };
-                                continue;
-                            }
-                            skip = false;
-                            break;
-                        }
-
-                        if skip {
-                            streams.insert(kind, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: Error::InvalidFile }, None) }).boxed());
-                            continue;
-                        }
-
-                        in_stack.push(filename.clone());
-
-                        let filename = format!("/{CHAT_DIRECTORY}/{conversation_id}/{filename}");
-
-                        let mut progress = match constellation.put_stream(&filename, size, stream).await {
-                            Ok(stream) => stream,
-                            Err(e) => {
-                               tracing::error!(%conversation_id, "Error uploading {filename}: {e}");
-                                streams.insert(kind, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: e }, None) }).boxed());
-                                continue;
-                            }
-                        };
-
-
-                        let directory = root_directory.clone();
-                        let filename = filename.to_string();
-
-                        let stream = async_stream::stream! {
-                            while let Some(item) = progress.next().await {
-                                match item {
-                                    item @ Progression::CurrentProgress { .. } => {
-                                        yield (item, None);
-                                    },
-                                    item @ Progression::ProgressComplete { .. } => {
-                                        let file_name = directory.get_item_by_path(&filename).and_then(|item| item.get_file()).ok();
-                                        yield (item, file_name);
-                                        break;
-                                    },
-                                    item @ Progression::ProgressFailed { .. } => {
-                                        yield (item, None);
-                                        break;
-                                    }
-                                }
-                            }
-                        };
-
-                        streams.insert(kind, stream.boxed());
-                    }
-                    Location::Disk { path } => {
-                        #[cfg(target_arch = "wasm32")]
-                        {
-                            _ = path;
-                            unreachable!()
-                        }
-                        #[cfg(not(target_arch = "wasm32"))]
-                        {
-                            let mut filename = match path.file_name() {
-                                Some(file) => file.to_string_lossy().to_string(),
-                                None => continue,
-                            };
-
-                            let original = filename.clone();
-
-                            let current_directory = media_dir.clone();
-
-                            let mut interval = 0;
-                            let skip;
-                            loop {
-                                if in_stack.contains(&filename) || current_directory.has_item(&filename) {
-                                    if interval > 2000 {
-                                        skip = true;
-                                        break;
-                                    }
-                                    interval += 1;
-                                    let file = PathBuf::from(&original);
-                                    let file_stem =
-                                        file.file_stem().and_then(OsStr::to_str).map(str::to_string);
-                                    let ext = file.extension().and_then(OsStr::to_str).map(str::to_string);
-
-                                    filename = match (file_stem, ext) {
-                                        (Some(filename), Some(ext)) => {
-                                            format!("{filename} ({interval}).{ext}")
-                                        }
-                                        _ => format!("{original} ({interval})"),
-                                    };
-                                    continue;
-                                }
-                                skip = false;
-                                break;
-                            }
-
-                            if skip {
-                                streams.insert(kind, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: Error::InvalidFile }, None) }).boxed());
-                                continue;
-                            }
-
-                            let file_path = path.display().to_string();
-
-                            in_stack.push(filename.clone());
-
-                            let filename = format!("/{CHAT_DIRECTORY}/{conversation_id}/{filename}");
-
-                            let mut progress = match constellation.put(&filename, &file_path).await {
-                                Ok(stream) => stream,
-                                Err(e) => {
-                                   tracing::error!(%conversation_id, "Error uploading {filename}: {e}");
-                                    streams.insert(kind, stream::once(async { (Progression::ProgressFailed { name: filename, last_size: None, error: e }, None) }).boxed());
-                                    continue;
-                                }
-                            };
-
-
-                            let directory = root_directory.clone();
-                            let filename = filename.to_string();
-
-                            let stream = async_stream::stream! {
-                                while let Some(item) = progress.next().await {
-                                    match item {
-                                        item @ Progression::CurrentProgress { .. } => {
-                                            yield (item, None);
-                                        },
-                                        item @ Progression::ProgressComplete { .. } => {
-                                            let file_name = directory.get_item_by_path(&filename).and_then(|item| item.get_file()).ok();
-                                            yield (item, file_name);
-                                            break;
-                                        },
-                                        item @ Progression::ProgressFailed { .. } => {
-                                            yield (item, None);
-                                            break;
-                                        }
-                                    }
-                                }
-                            };
-
-                            streams.insert(kind, stream.boxed());
-                        }
-                    }
-                };
-            }
-
-            for await (location, (progress, file)) in streams {
-                yield AttachmentKind::AttachedProgress(location, progress);
-                if let Some(file) = file {
-                    attachments.push(file);
-                }
-            }
-
-            let final_results = {
-                async move {
-
-                    if attachments.is_empty() {
-                        return Err(Error::NoAttachments);
-                    }
-
-                    let mut message = warp::raygun::Message::default();
-                    message.set_id(message_id);
-                    message.set_message_type(MessageType::Attachment);
-                    message.set_conversation_id(conversation_id);
-                    message.set_sender(own_did);
-                    message.set_attachment(attachments);
-                    message.set_lines(messages.clone());
-                    message.set_replied(reply_id);
-
-                    let message =
-                        MessageDocument::new(&ipfs, &keypair, message, keystore.as_ref()).await?;
-
-                    let (tx, rx) = oneshot::channel();
-                    _ = atx.send((message, tx)).await;
-
-                    rx.await.expect("shouldnt drop")
-                }
-            };
-
-            yield AttachmentKind::Pending(final_results.await)
-        };
+        let message_id = stream.message_id();
 
         Ok((message_id, stream.boxed()))
     }
