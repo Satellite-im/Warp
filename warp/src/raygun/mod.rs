@@ -880,7 +880,20 @@ impl Conversation {
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
 pub enum GroupPermission {
     AddParticipants,
-    SetGroupName,
+    RemoveParticipants,
+    EditGroupInfo,
+    EditGroupImages,
+}
+
+impl GroupPermission {
+    pub fn values() -> Vec<GroupPermission> {
+        vec![
+            Self::AddParticipants,
+            Self::RemoveParticipants,
+            Self::EditGroupInfo,
+            Self::EditGroupImages,
+        ]
+    }
 }
 
 #[derive(Default, Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq, Display)]
