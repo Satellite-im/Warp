@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use std::borrow::BorrowMut;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
-use std::ffi::OsStr;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -2213,7 +2212,7 @@ impl ConversationTask {
 
                     let extension = path
                         .extension()
-                        .and_then(OsStr::to_str)
+                        .and_then(std::ffi::OsStr::to_str)
                         .map(ExtensionType::from)
                         .unwrap_or(ExtensionType::Other)
                         .into();

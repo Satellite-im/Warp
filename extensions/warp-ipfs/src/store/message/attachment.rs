@@ -10,7 +10,6 @@ use futures::stream::BoxStream;
 use futures::stream::SelectAll;
 use futures::{stream, FutureExt, SinkExt, Stream, StreamExt};
 use rust_ipfs::{Ipfs, Keypair};
-use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -225,7 +224,7 @@ impl Stream for AttachmentStream {
                                         let constellation_path = PathBuf::from(&path);
                                         let name = constellation_path
                                             .file_name()
-                                            .and_then(OsStr::to_str)
+                                            .and_then(std::ffi::OsStr::to_str)
                                             .map(str::to_string)
                                             .unwrap_or(path.to_string());
                                         progressed.push(Box::pin(stream::once(async {
@@ -267,11 +266,11 @@ impl Stream for AttachmentStream {
                                         let file = PathBuf::from(&original);
                                         let file_stem = file
                                             .file_stem()
-                                            .and_then(OsStr::to_str)
+                                            .and_then(std::ffi::OsStr::to_str)
                                             .map(str::to_string);
                                         let ext = file
                                             .extension()
-                                            .and_then(OsStr::to_str)
+                                            .and_then(std::ffi::OsStr::to_str)
                                             .map(str::to_string);
 
                                         filename = match (file_stem, ext) {
@@ -339,9 +338,11 @@ impl Stream for AttachmentStream {
 
                                 progressed.push(st);
                             }
-                            Location::Disk { .. } if cfg!(target_arch = "wasm32") => {
+                            #[cfg(target_arch = "wasm32")]
+                            Location::Disk { .. } => {
                                 unreachable!("cannot access filesystem with web assembly")
                             }
+                            #[cfg(not(target_arch = "wasm32"))]
                             Location::Disk { path } => {
                                 let mut filename = match path.file_name() {
                                     Some(file) => file.to_string_lossy().to_string(),
@@ -366,11 +367,11 @@ impl Stream for AttachmentStream {
                                         let file = PathBuf::from(&original);
                                         let file_stem = file
                                             .file_stem()
-                                            .and_then(OsStr::to_str)
+                                            .and_then(std::ffi::OsStr::to_str)
                                             .map(str::to_string);
                                         let ext = file
                                             .extension()
-                                            .and_then(OsStr::to_str)
+                                            .and_then(std::ffi::OsStr::to_str)
                                             .map(str::to_string);
 
                                         filename = match (file_stem, ext) {
