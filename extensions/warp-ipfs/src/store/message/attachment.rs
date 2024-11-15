@@ -23,7 +23,7 @@ use warp::error::Error;
 use warp::raygun::{AttachmentKind, Location, LocationKind, MessageType};
 
 type AOneShot = (MessageDocument, oneshot::Sender<Result<(), Error>>);
-
+type ProgressedStream = BoxStream<'static, (LocationKind, Progression, Option<File>)>;
 pub struct AttachmentStream {
     ipfs: Ipfs,
     keypair: Keypair,
@@ -39,7 +39,7 @@ pub struct AttachmentStream {
     file_store: FileStore,
     state: AttachmentState,
 
-    progressed: Option<SelectAll<BoxStream<'static, (LocationKind, Progression, Option<File>)>>>,
+    progressed: Option<SelectAll<ProgressedStream>>,
     successful_attachment: Vec<File>,
 }
 
