@@ -37,7 +37,6 @@ pub struct AttachmentStream {
     keystore: Either<DID, Keystore>,
     file_store: FileStore,
     state: AttachmentState,
-
     progressed: Option<SelectAll<ProgressedStream>>,
     successful_attachment: Vec<File>,
 }
@@ -318,29 +317,26 @@ impl Stream for AttachmentStream {
 
                                 let directory = this.file_store.root_directory();
 
-                                let st = BindKey::new((directory, filename, kind), st)
-                                    .map(|((directory, filename, kind), progress)| match progress {
-                                        item @ Progression::CurrentProgress { .. } => {
-                                            (kind, item, None)
-                                        }
-                                        item @ Progression::ProgressComplete { .. } => {
-                                            let file_name = directory
-                                                .get_item_by_path(&filename)
-                                                .and_then(|item| item.get_file())
-                                                .ok();
-                                            (kind, item, file_name)
-                                        }
-                                        item @ Progression::ProgressFailed { .. } => {
-                                            (kind, item, None)
-                                        }
-                                    })
-                                    .boxed();
+                                let st =
+                                    Box::pin(BindKey::new((directory, filename, kind), st).map(
+                                        |((directory, filename, kind), progress)| match progress {
+                                            item @ Progression::CurrentProgress { .. } => {
+                                                (kind, item, None)
+                                            }
+                                            item @ Progression::ProgressComplete { .. } => {
+                                                let file_name = directory
+                                                    .get_item_by_path(&filename)
+                                                    .and_then(|item| item.get_file())
+                                                    .ok();
+                                                (kind, item, file_name)
+                                            }
+                                            item @ Progression::ProgressFailed { .. } => {
+                                                (kind, item, None)
+                                            }
+                                        },
+                                    ));
 
                                 progressed.push(st);
-                            }
-                            #[cfg(target_arch = "wasm32")]
-                            Location::Disk { .. } => {
-                                unreachable!("cannot access filesystem with web assembly")
                             }
                             #[cfg(not(target_arch = "wasm32"))]
                             Location::Disk { path } => {
@@ -422,25 +418,30 @@ impl Stream for AttachmentStream {
 
                                 let directory = this.file_store.root_directory();
 
-                                let st = BindKey::new((directory, filename, kind), st)
-                                    .map(|((directory, filename, kind), progress)| match progress {
-                                        item @ Progression::CurrentProgress { .. } => {
-                                            (kind, item, None)
-                                        }
-                                        item @ Progression::ProgressComplete { .. } => {
-                                            let file_name = directory
-                                                .get_item_by_path(&filename)
-                                                .and_then(|item| item.get_file())
-                                                .ok();
-                                            (kind, item, file_name)
-                                        }
-                                        item @ Progression::ProgressFailed { .. } => {
-                                            (kind, item, None)
-                                        }
-                                    })
-                                    .boxed();
+                                let st =
+                                    Box::pin(BindKey::new((directory, filename, kind), st).map(
+                                        |((directory, filename, kind), progress)| match progress {
+                                            item @ Progression::CurrentProgress { .. } => {
+                                                (kind, item, None)
+                                            }
+                                            item @ Progression::ProgressComplete { .. } => {
+                                                let file_name = directory
+                                                    .get_item_by_path(&filename)
+                                                    .and_then(|item| item.get_file())
+                                                    .ok();
+                                                (kind, item, file_name)
+                                            }
+                                            item @ Progression::ProgressFailed { .. } => {
+                                                (kind, item, None)
+                                            }
+                                        },
+                                    ));
 
                                 progressed.push(st);
+                            }
+                            #[cfg(target_arch = "wasm32")]
+                            Location::Disk { .. } => {
+                                unreachable!("cannot access filesystem with web assembly")
                             }
                         }
                     }
