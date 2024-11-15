@@ -470,7 +470,7 @@ async fn main() -> anyhow::Result<()> {
                             let mut permissions = GroupPermissions::new();
                             if open {
                                 for did in &did_keys {
-                                    permissions.insert(did.clone(), vec![GroupPermission::AddParticipants, GroupPermission::SetGroupName].into_iter().collect());
+                                    permissions.insert(did.clone(), GroupPermission::values().into_iter().collect());
                                 }
                             }
                             if let Err(e) = instance.create_group_conversation(
@@ -529,7 +529,7 @@ async fn main() -> anyhow::Result<()> {
                                     let mut permissions = GroupPermissions::new();
                                     if open {
                                         for did in conversation.recipients().to_owned() {
-                                            permissions.insert(did, vec![GroupPermission::AddParticipants, GroupPermission::SetGroupName].into_iter().collect());
+                                            permissions.insert(did, GroupPermission::values().into_iter().collect());
                                         }
                                     }
                                     if let Err(e) = instance.update_conversation_permissions(topic, permissions).await {
