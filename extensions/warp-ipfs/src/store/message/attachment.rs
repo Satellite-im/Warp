@@ -226,17 +226,17 @@ impl Stream for AttachmentStream {
                                             .and_then(std::ffi::OsStr::to_str)
                                             .map(str::to_string)
                                             .unwrap_or(path.to_string());
-                                        progressed.push(Box::pin(stream::once(async {
-                                            (
+
+                                        return Poll::Ready(Some(
+                                            AttachmentKind::AttachedProgress(
                                                 kind,
                                                 Progression::ProgressFailed {
                                                     name,
                                                     last_size: None,
                                                     error: e,
                                                 },
-                                                None,
-                                            )
-                                        })));
+                                            ),
+                                        ));
                                     }
                                 }
                             }
@@ -285,18 +285,14 @@ impl Stream for AttachmentStream {
                                 }
 
                                 if skip {
-                                    progressed.push(Box::pin(stream::once(async {
-                                        (
-                                            kind,
-                                            Progression::ProgressFailed {
-                                                name: filename,
-                                                last_size: None,
-                                                error: Error::InvalidFile,
-                                            },
-                                            None,
-                                        )
-                                    })));
-                                    continue;
+                                    return Poll::Ready(Some(AttachmentKind::AttachedProgress(
+                                        kind,
+                                        Progression::ProgressFailed {
+                                            name: filename,
+                                            last_size: None,
+                                            error: Error::InvalidFile,
+                                        },
+                                    )));
                                 }
 
                                 in_stack.push(filename.clone());
@@ -383,18 +379,14 @@ impl Stream for AttachmentStream {
                                 }
 
                                 if skip {
-                                    progressed.push(Box::pin(stream::once(async {
-                                        (
-                                            kind,
-                                            Progression::ProgressFailed {
-                                                name: filename,
-                                                last_size: None,
-                                                error: Error::InvalidFile,
-                                            },
-                                            None,
-                                        )
-                                    })));
-                                    continue;
+                                    return Poll::Ready(Some(AttachmentKind::AttachedProgress(
+                                        kind,
+                                        Progression::ProgressFailed {
+                                            name: filename,
+                                            last_size: None,
+                                            error: Error::InvalidFile,
+                                        },
+                                    )));
                                 }
 
                                 let file_path = path.display().to_string();
