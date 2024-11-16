@@ -101,7 +101,7 @@ impl MessageDocument {
         let modified = message.modified();
         let replied = message.replied();
         let lines = message.lines();
-        let reactions = message.reactions();
+        let reactions = message.reactions().to_owned();
         let attachments = message.attachments();
 
         if attachments.len() > MAX_ATTACHMENT {
@@ -153,7 +153,7 @@ impl MessageDocument {
 
         let data = match key {
             Either::Right(keystore) => {
-                let key = keystore.get_latest(keypair, &sender)?;
+                let key = keystore.get_latest(keypair, sender)?;
                 Cipher::direct_encrypt(&bytes, &key)?.into()
             }
             Either::Left(key) => ecdh_encrypt(keypair, Some(key), &bytes)?.into(),
@@ -161,7 +161,7 @@ impl MessageDocument {
 
         let message = Some(data);
 
-        let sender = DIDEd25519Reference::from_did(&sender);
+        let sender = DIDEd25519Reference::from_did(sender);
 
         let document = MessageDocument {
             id,
@@ -255,7 +255,7 @@ impl MessageDocument {
 
         if message.id() != self.id
             || message.conversation_id() != self.conversation_id
-            || message.sender() != sender
+            || message.sender() != &sender
         {
             tracing::error!(id = %self.conversation_id, message_id = %self.id, "Message does not exist, is invalid or has invalid sender");
             //TODO: Maybe remove message from this point?
@@ -275,7 +275,7 @@ impl MessageDocument {
             });
         }
 
-        self.reactions = reactions;
+        self.reactions = reactions.to_owned();
 
         if message.lines() != old_message.lines() {
             let lines = message.lines();

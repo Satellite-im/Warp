@@ -1869,7 +1869,7 @@ impl ConversationTask {
             .has_permission(own_did, GroupPermission::AddParticipants)
             && creator.ne(own_did)
         {
-            return Err(Error::PublicKeyInvalid);
+            return Err(Error::Unauthorized);
         }
 
         if creator.eq(did_key) {
@@ -1936,8 +1936,13 @@ impl ConversationTask {
 
         let own_did = &self.identity.did_key();
 
-        if creator.ne(own_did) {
-            return Err(Error::PublicKeyInvalid);
+        if creator.ne(own_did)
+            && !self
+                .document
+                .permissions
+                .has_permission(own_did, GroupPermission::RemoveParticipants)
+        {
+            return Err(Error::Unauthorized);
         }
 
         if creator.eq(did_key) {
@@ -2086,10 +2091,10 @@ impl ConversationTask {
         if !&self
             .document
             .permissions
-            .has_permission(own_did, GroupPermission::SetGroupName)
+            .has_permission(own_did, GroupPermission::EditGroupInfo)
             && creator.ne(own_did)
         {
-            return Err(Error::PublicKeyInvalid);
+            return Err(Error::Unauthorized);
         }
 
         self.document.name = (!name.is_empty()).then_some(name.to_string());
@@ -2161,15 +2166,20 @@ impl ConversationTask {
             ConversationImageType::Banner => MAX_CONVERSATION_BANNER_SIZE,
             ConversationImageType::Icon => MAX_CONVERSATION_ICON_SIZE,
         };
-
-        let own_did = self.identity.did_key();
-
-        if self.document.conversation_type() == ConversationType::Group
-            && !matches!(self.document.creator.as_ref(), Some(creator) if own_did.eq(creator))
-        {
-            return Err(Error::InvalidConversation);
+        if self.document.conversation_type() == ConversationType::Group {
+            let Some(creator) = self.document.creator.as_ref() else {
+                return Err(Error::InvalidConversation);
+            };
+            let own_did = self.identity.did_key();
+            if !&self
+                .document
+                .permissions
+                .has_permission(&own_did, GroupPermission::EditGroupImages)
+                && own_did.ne(creator)
+            {
+                return Err(Error::Unauthorized);
+            }
         }
-
         let (cid, size, ext) = match location {
             Location::Constellation { path } => {
                 let file = self
@@ -2298,12 +2308,19 @@ impl ConversationTask {
         &mut self,
         image_type: ConversationImageType,
     ) -> Result<(), Error> {
-        let own_did = self.identity.did_key();
-
-        if self.document.conversation_type() == ConversationType::Group
-            && !matches!(self.document.creator.as_ref(), Some(creator) if own_did.eq(creator))
-        {
-            return Err(Error::InvalidConversation);
+        if self.document.conversation_type() == ConversationType::Group {
+            let Some(creator) = self.document.creator.as_ref() else {
+                return Err(Error::InvalidConversation);
+            };
+            let own_did = self.identity.did_key();
+            if !&self
+                .document
+                .permissions
+                .has_permission(&own_did, GroupPermission::EditGroupImages)
+                && own_did.ne(creator)
+            {
+                return Err(Error::Unauthorized);
+            }
         }
 
         let cid = match image_type {
@@ -2345,14 +2362,20 @@ impl ConversationTask {
 
     pub async fn set_description(&mut self, desc: Option<&str>) -> Result<(), Error> {
         let conversation_id = self.conversation_id;
-        let own_did = &self.identity.did_key();
-
         if self.document.conversation_type() == ConversationType::Group {
             let Some(creator) = self.document.creator.as_ref() else {
                 return Err(Error::InvalidConversation);
             };
-            if own_did != creator {
-                return Err(Error::InvalidConversation); //TODO:
+
+            let own_did = self.identity.did_key();
+
+            if !&self
+                .document
+                .permissions
+                .has_permission(&own_did, GroupPermission::EditGroupInfo)
+                && own_did.ne(creator)
+            {
+                return Err(Error::Unauthorized);
             }
         }
 
@@ -2825,10 +2848,10 @@ async fn message_event(
                 });
             }
 
-            let sender = message.sender();
-
             *message.lines_mut() = lines;
             message.set_modified(modified);
+
+            let sender = message.sender().to_owned();
 
             message_document
                 .update(
@@ -3078,7 +3101,12 @@ async fn message_event(
                     }
                 }
                 ConversationUpdateKind::RemoveParticipant { did } => {
-                    if !this.document.creator.as_ref().is_some_and(|c| c == sender) {
+                    if !this.document.creator.as_ref().is_some_and(|c| c == sender)
+                        && !this
+                            .document
+                            .permissions
+                            .has_permission(sender, GroupPermission::RemoveParticipants)
+                    {
                         return Err(Error::Unauthorized);
                     }
                     if !this.document.recipients.contains(&did) {
@@ -3112,7 +3140,7 @@ async fn message_event(
                         && !this
                             .document
                             .permissions
-                            .has_permission(sender, GroupPermission::SetGroupName)
+                            .has_permission(sender, GroupPermission::EditGroupInfo)
                     {
                         return Err(Error::Unauthorized);
                     }
@@ -3152,7 +3180,7 @@ async fn message_event(
                         && !this
                             .document
                             .permissions
-                            .has_permission(sender, GroupPermission::SetGroupName)
+                            .has_permission(sender, GroupPermission::EditGroupInfo)
                     {
                         return Err(Error::Unauthorized);
                     }
@@ -3198,6 +3226,15 @@ async fn message_event(
                     }
                 }
                 ConversationUpdateKind::AddedIcon | ConversationUpdateKind::RemovedIcon => {
+                    if this.document.conversation_type == ConversationType::Group
+                        && !this.document.creator.as_ref().is_some_and(|c| c == sender)
+                        && !this
+                            .document
+                            .permissions
+                            .has_permission(sender, GroupPermission::EditGroupImages)
+                    {
+                        return Err(Error::Unauthorized);
+                    }
                     this.replace_document(conversation).await?;
 
                     if let Err(e) = this
@@ -3209,6 +3246,15 @@ async fn message_event(
                 }
 
                 ConversationUpdateKind::AddedBanner | ConversationUpdateKind::RemovedBanner => {
+                    if this.document.conversation_type == ConversationType::Group
+                        && !this.document.creator.as_ref().is_some_and(|c| c == sender)
+                        && !this
+                            .document
+                            .permissions
+                            .has_permission(sender, GroupPermission::EditGroupImages)
+                    {
+                        return Err(Error::Unauthorized);
+                    }
                     this.replace_document(conversation).await?;
 
                     if let Err(e) = this
@@ -3219,6 +3265,15 @@ async fn message_event(
                     }
                 }
                 ConversationUpdateKind::ChangeDescription { description } => {
+                    if this.document.conversation_type == ConversationType::Group
+                        && !this.document.creator.as_ref().is_some_and(|c| c == sender)
+                        && !this
+                            .document
+                            .permissions
+                            .has_permission(sender, GroupPermission::EditGroupInfo)
+                    {
+                        return Err(Error::Unauthorized);
+                    }
                     if let Some(desc) = description.as_ref() {
                         if desc.is_empty() || desc.len() > MAX_CONVERSATION_DESCRIPTION {
                             return Err(Error::InvalidLength {
