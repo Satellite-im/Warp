@@ -206,7 +206,7 @@ async fn main() -> anyhow::Result<()> {
                         warp::multipass::MultiPassEventKind::FriendRequestReceived { from: did, .. } => {
                             let username = account
                                 .get_identity(Identifier::did_key(did.clone())).await
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_owned())
                                 .unwrap_or_else(|_| did.to_string());
 
                             if !opt.autoaccept_friend {
@@ -218,7 +218,7 @@ async fn main() -> anyhow::Result<()> {
                         warp::multipass::MultiPassEventKind::FriendRequestSent { to: did, .. } => {
                             let username = account
                                 .get_identity(Identifier::did_key(did.clone())).await
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_owned())
                                 .unwrap_or_else(|_| did.to_string());
 
                             writeln!(stdout, "> A request has been sent to {username}. Do \"request close {did}\" to if you wish to close the request")?;
@@ -226,7 +226,7 @@ async fn main() -> anyhow::Result<()> {
                         warp::multipass::MultiPassEventKind::IncomingFriendRequestRejected { did } => {
                             let username = account
                                 .get_identity(Identifier::did_key(did.clone())).await
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_owned())
                                 .unwrap_or_else(|_| did.to_string());
 
                             writeln!(stdout, "> You've rejected {username} request")?;
@@ -234,7 +234,7 @@ async fn main() -> anyhow::Result<()> {
                         warp::multipass::MultiPassEventKind::OutgoingFriendRequestRejected { did } => {
                             let username = account
                                 .get_identity(Identifier::did_key(did.clone())).await
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_owned())
                                 .unwrap_or_else(|_| did.to_string());
 
                             writeln!(stdout, "> {username} rejected your request")?;
@@ -242,7 +242,7 @@ async fn main() -> anyhow::Result<()> {
                         warp::multipass::MultiPassEventKind::IncomingFriendRequestClosed { did } => {
                             let username = account
                                 .get_identity(Identifier::did_key(did.clone())).await
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_owned())
                                 .unwrap_or_else(|_| did.to_string());
 
                             writeln!(stdout, "> {username} has retracted their request")?;
@@ -250,7 +250,7 @@ async fn main() -> anyhow::Result<()> {
                         warp::multipass::MultiPassEventKind::OutgoingFriendRequestClosed { did } => {
                             let username = account
                                 .get_identity(Identifier::did_key(did.clone())).await
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_owned())
                                 .unwrap_or_else(|_| did.to_string());
 
 
@@ -259,7 +259,7 @@ async fn main() -> anyhow::Result<()> {
                         warp::multipass::MultiPassEventKind::FriendAdded { did } => {
                             let username = account
                                 .get_identity(Identifier::did_key(did.clone())).await
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_owned())
                                 .unwrap_or_else(|_| did.to_string());
 
                             writeln!(stdout, "> You are now friends with {username}")?;
@@ -267,7 +267,7 @@ async fn main() -> anyhow::Result<()> {
                         warp::multipass::MultiPassEventKind::FriendRemoved { did } => {
                             let username = account
                                 .get_identity(Identifier::did_key(did.clone())).await
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_owned())
                                 .unwrap_or_else(|_| did.to_string());
 
                             writeln!(stdout, "> {username} has been removed from friends list")?;
@@ -275,7 +275,7 @@ async fn main() -> anyhow::Result<()> {
                         warp::multipass::MultiPassEventKind::IdentityOnline { did } => {
                             let username = account
                                 .get_identity(Identifier::did_key(did.clone())).await
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_owned())
                                 .unwrap_or_else(|_| did.to_string());
 
                             writeln!(stdout, "> {username} has came online")?;
@@ -283,7 +283,7 @@ async fn main() -> anyhow::Result<()> {
                         warp::multipass::MultiPassEventKind::IdentityOffline { did } => {
                             let username = account
                                 .get_identity(Identifier::did_key(did.clone())).await
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_owned())
                                 .unwrap_or_else(|_| did.to_string());
 
                             writeln!(stdout, "> {username} went offline")?;
@@ -291,7 +291,7 @@ async fn main() -> anyhow::Result<()> {
                         warp::multipass::MultiPassEventKind::Blocked { did } => {
                             let username = account
                                 .get_identity(Identifier::did_key(did.clone())).await
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_owned())
                                 .unwrap_or_else(|_| did.to_string());
 
                             writeln!(stdout, "> {username} was blocked")?;
@@ -299,7 +299,7 @@ async fn main() -> anyhow::Result<()> {
                         warp::multipass::MultiPassEventKind::Unblocked { did } => {
                             let username = account
                                 .get_identity(Identifier::did_key(did.clone())).await
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_owned())
                                 .unwrap_or_else(|_| did.to_string());
 
                             writeln!(stdout, "> {username} was unblocked")?;
@@ -307,7 +307,7 @@ async fn main() -> anyhow::Result<()> {
                         warp::multipass::MultiPassEventKind::UnblockedBy { did } => {
                             let username = account
                                 .get_identity(Identifier::did_key(did.clone())).await
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_owned())
                                 .unwrap_or_else(|_| did.to_string());
 
 
@@ -316,7 +316,7 @@ async fn main() -> anyhow::Result<()> {
                         warp::multipass::MultiPassEventKind::BlockedBy { did } => {
                             let username = account
                                 .get_identity(Identifier::did_key(did.clone())).await
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_owned())
                                 .unwrap_or_else(|_| did.to_string());
 
 
@@ -325,7 +325,7 @@ async fn main() -> anyhow::Result<()> {
                         warp::multipass::MultiPassEventKind::IdentityUpdate { did } => {
                             let username = account
                                 .get_identity(Identifier::did_key(did.clone())).await
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_owned())
                                 .unwrap_or_else(|_| did.to_string());
 
                             writeln!(stdout, "> {username} has been updated ")?;
@@ -364,7 +364,7 @@ async fn main() -> anyhow::Result<()> {
                             };
                             for friend in friends.iter() {
                                 let username = match account.get_identity(Identifier::did_key(friend.clone())).await {
-                                    Ok(ident) => ident.username(),
+                                    Ok(ident) => ident.username().to_owned(),
                                     Err(_) => String::from("N/A")
                                 };
                                 table.add_row(vec![
@@ -386,7 +386,7 @@ async fn main() -> anyhow::Result<()> {
                             };
                             for item in block_list.iter() {
                                 let username = match account.get_identity(Identifier::did_key(item.clone())).await {
-                                    Ok(ident) => ident.username(),
+                                    Ok(ident) => ident.username().to_owned(),
                                     Err(_) => String::from("N/A")
                                 };
                                 table.add_row(vec![
@@ -633,7 +633,7 @@ async fn main() -> anyhow::Result<()> {
                             for request in list.iter() {
                                 let identity = request.identity();
                                 let username = match account.get_identity(Identifier::did_key(identity.clone())).await {
-                                    Ok(ident) => ident.username(),
+                                    Ok(ident) => ident.username().to_owned(),
                                     Err(_) => String::from("N/A")
                                 };
                                 table.add_row(vec![
@@ -656,7 +656,7 @@ async fn main() -> anyhow::Result<()> {
                             for request in list.iter() {
                                 let identity = request.identity();
                                 let username = match account.get_identity(Identifier::did_key(identity.clone())).await {
-                                    Ok(ident) => ident.username(),
+                                    Ok(ident) => ident.username().to_owned(),
                                     Err(_) => String::from("N/A")
                                 };
                                 table.add_row(vec![
@@ -774,11 +774,11 @@ async fn main() -> anyhow::Result<()> {
                                     let meta = identity.metadata();
 
                                     table.add_row(vec![
-                                        identity.username(),
+                                        identity.username().to_owned(),
                                         identity.did_key().to_string(),
                                         created.to_string(),
                                         modified.to_string(),
-                                        identity.status_message().unwrap_or_default(),
+                                        identity.status_message().map(ToOwned::to_owned).unwrap_or_default(),
                                         (!profile_banner.data().is_empty()).to_string(),
                                         (!profile_picture.data().is_empty()).to_string(),
                                         platform.to_string(),
@@ -811,11 +811,11 @@ async fn main() -> anyhow::Result<()> {
                                         let meta = identity.metadata();
 
                                         table.add_row(vec![
-                                            identity.username(),
+                                            identity.username().to_string(),
                                             identity.did_key().to_string(),
                                             created.to_string(),
                                             modified.to_string(),
-                                            identity.status_message().unwrap_or_default(),
+                                            identity.status_message().map(ToOwned::to_owned).unwrap_or_default(),
                                             (!profile_banner.data().is_empty()).to_string(),
                                             (!profile_picture.data().is_empty()).to_string(),
                                             platform.to_string(),
