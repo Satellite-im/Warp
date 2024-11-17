@@ -5,6 +5,7 @@ use futures::future::BoxFuture;
 use futures::stream::{self, BoxStream};
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_timeout::TimeoutExt;
+use indexmap::IndexSet;
 use ipfs::p2p::{
     IdentifyConfiguration, KadConfig, KadInserts, MultiaddrExt, PubsubConfig, TransportConfig,
 };
@@ -22,6 +23,9 @@ use std::time::Duration;
 use tokio_util::compat::TokioAsyncReadCompatExt;
 use tracing::{Instrument, Span};
 use uuid::Uuid;
+use warp::raygun::community::{
+    CommunityChannelPermission, CommunityPermission, CommunityRole, RoleId,
+};
 
 use crate::config::{Bootstrap, DiscoveryType};
 use crate::rt::{Executor, LocalExecutor};
@@ -58,6 +62,9 @@ use warp::multipass::{
     MultiPassImportExport,
 };
 use warp::raygun::{
+    community::{
+        Community, CommunityChannel, CommunityChannelType, CommunityInvite, RayGunCommunity,
+    },
     AttachmentEventStream, Conversation, ConversationImage, EmbedState, GroupPermissionOpt,
     Location, Message, MessageEvent, MessageEventStream, MessageOptions, MessageReference,
     MessageStatus, Messages, PinState, RayGun, RayGunAttachment, RayGunConversationInformation,
@@ -1659,6 +1666,347 @@ impl RayGunAttachment for WarpIpfs {
     ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error> {
         self.messaging_store()?
             .download_stream(conversation_id, message_id, file)
+            .await
+    }
+}
+
+#[async_trait::async_trait]
+impl RayGunCommunity for WarpIpfs {
+    async fn get_community_stream(
+        &mut self,
+        community_id: Uuid,
+    ) -> Result<MessageEventStream, Error> {
+        let store = self.messaging_store()?;
+        let stream = store.get_community_stream(community_id).await?;
+        Ok(stream.boxed())
+    }
+
+    async fn create_community(&mut self, name: &str) -> Result<Community, Error> {
+        self.messaging_store()?.create_community(name).await
+    }
+    async fn delete_community(&mut self, community_id: Uuid) -> Result<(), Error> {
+        self.messaging_store()?.delete_community(community_id).await
+    }
+    async fn get_community(&self, community_id: Uuid) -> Result<Community, Error> {
+        self.messaging_store()?.get_community(community_id).await
+    }
+
+    async fn list_communities_joined(&self) -> Result<IndexSet<Uuid>, Error> {
+        self.messaging_store()?.list_communities_joined().await
+    }
+    async fn list_communities_invited_to(&self) -> Result<Vec<(Uuid, CommunityInvite)>, Error> {
+        self.messaging_store()?.list_communities_invited_to().await
+    }
+    async fn leave_community(&mut self, community_id: Uuid) -> Result<(), Error> {
+        self.messaging_store()?.leave_community(community_id).await
+    }
+
+    async fn get_community_icon(&self, community_id: Uuid) -> Result<ConversationImage, Error> {
+        self.messaging_store()?
+            .get_community_icon(community_id)
+            .await
+    }
+    async fn get_community_banner(&self, community_id: Uuid) -> Result<ConversationImage, Error> {
+        self.messaging_store()?
+            .get_community_banner(community_id)
+            .await
+    }
+    async fn edit_community_icon(
+        &mut self,
+        community_id: Uuid,
+        location: Location,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .edit_community_icon(community_id, location)
+            .await
+    }
+    async fn edit_community_banner(
+        &mut self,
+        community_id: Uuid,
+        location: Location,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .edit_community_banner(community_id, location)
+            .await
+    }
+
+    async fn create_community_invite(
+        &mut self,
+        community_id: Uuid,
+        target_user: Option<DID>,
+        expiry: Option<DateTime<Utc>>,
+    ) -> Result<CommunityInvite, Error> {
+        self.messaging_store()?
+            .create_community_invite(community_id, target_user, expiry)
+            .await
+    }
+    async fn delete_community_invite(
+        &mut self,
+        community_id: Uuid,
+        invite_id: Uuid,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .delete_community_invite(community_id, invite_id)
+            .await
+    }
+    async fn get_community_invite(
+        &self,
+        community_id: Uuid,
+        invite_id: Uuid,
+    ) -> Result<CommunityInvite, Error> {
+        self.messaging_store()?
+            .get_community_invite(community_id, invite_id)
+            .await
+    }
+    async fn accept_community_invite(
+        &mut self,
+        community_id: Uuid,
+        invite_id: Uuid,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .accept_community_invite(community_id, invite_id)
+            .await
+    }
+    async fn edit_community_invite(
+        &mut self,
+        community_id: Uuid,
+        invite_id: Uuid,
+        invite: CommunityInvite,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .edit_community_invite(community_id, invite_id, invite)
+            .await
+    }
+
+    async fn create_community_role(
+        &mut self,
+        community_id: Uuid,
+        name: &str,
+    ) -> Result<CommunityRole, Error> {
+        self.messaging_store()?
+            .create_community_role(community_id, name)
+            .await
+    }
+    async fn delete_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .delete_community_role(community_id, role_id)
+            .await
+    }
+    async fn get_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+    ) -> Result<CommunityRole, Error> {
+        self.messaging_store()?
+            .get_community_role(community_id, role_id)
+            .await
+    }
+    async fn edit_community_role_name(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+        new_name: String,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .edit_community_role_name(community_id, role_id, new_name)
+            .await
+    }
+    async fn grant_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+        user: DID,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .grant_community_role(community_id, role_id, user)
+            .await
+    }
+    async fn revoke_community_role(
+        &mut self,
+        community_id: Uuid,
+        role_id: RoleId,
+        user: DID,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .revoke_community_role(community_id, role_id, user)
+            .await
+    }
+
+    async fn create_community_channel(
+        &mut self,
+        community_id: Uuid,
+        channel_name: &str,
+        channel_type: CommunityChannelType,
+    ) -> Result<CommunityChannel, Error> {
+        self.messaging_store()?
+            .create_community_channel(community_id, channel_name, channel_type)
+            .await
+    }
+    async fn delete_community_channel(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .delete_community_channel(community_id, channel_id)
+            .await
+    }
+    async fn get_community_channel(
+        &self,
+        community_id: Uuid,
+        channel_id: Uuid,
+    ) -> Result<CommunityChannel, Error> {
+        self.messaging_store()?
+            .get_community_channel(community_id, channel_id)
+            .await
+    }
+
+    async fn edit_community_name(&mut self, community_id: Uuid, name: &str) -> Result<(), Error> {
+        self.messaging_store()?
+            .edit_community_name(community_id, name)
+            .await
+    }
+    async fn edit_community_description(
+        &mut self,
+        community_id: Uuid,
+        description: Option<String>,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .edit_community_description(community_id, description)
+            .await
+    }
+    async fn grant_community_permission(
+        &mut self,
+        community_id: Uuid,
+        permission: CommunityPermission,
+        role_id: RoleId,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .grant_community_permission(community_id, permission, role_id)
+            .await
+    }
+    async fn revoke_community_permission(
+        &mut self,
+        community_id: Uuid,
+        permission: CommunityPermission,
+        role_id: RoleId,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .revoke_community_permission(community_id, permission, role_id)
+            .await
+    }
+    async fn grant_community_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        permission: CommunityPermission,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .grant_community_permission_for_all(community_id, permission)
+            .await
+    }
+    async fn revoke_community_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        permission: CommunityPermission,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .revoke_community_permission_for_all(community_id, permission)
+            .await
+    }
+    async fn remove_community_member(
+        &mut self,
+        community_id: Uuid,
+        member: DID,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .remove_community_member(community_id, member)
+            .await
+    }
+
+    async fn edit_community_channel_name(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        name: &str,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .edit_community_channel_name(community_id, channel_id, name)
+            .await
+    }
+    async fn edit_community_channel_description(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        description: Option<String>,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .edit_community_channel_description(community_id, channel_id, description)
+            .await
+    }
+    async fn grant_community_channel_permission(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+        role_id: RoleId,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .grant_community_channel_permission(community_id, channel_id, permission, role_id)
+            .await
+    }
+    async fn revoke_community_channel_permission(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+        role_id: RoleId,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .revoke_community_channel_permission(community_id, channel_id, permission, role_id)
+            .await
+    }
+    async fn grant_community_channel_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .grant_community_channel_permission_for_all(community_id, channel_id, permission)
+            .await
+    }
+    async fn revoke_community_channel_permission_for_all(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .revoke_community_channel_permission_for_all(community_id, channel_id, permission)
+            .await
+    }
+    async fn send_community_channel_message(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        message: &str,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .send_community_channel_message(community_id, channel_id, message)
+            .await
+    }
+    async fn delete_community_channel_message(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .delete_community_channel_message(community_id, channel_id, message_id)
             .await
     }
 }

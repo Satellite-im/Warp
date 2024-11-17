@@ -90,9 +90,12 @@ pub struct RootDocument {
     /// map of conversations
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conversations: Option<Cid>,
-    /// map of keystore for group chat conversations
+    /// map of communities
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub conversations_keystore: Option<Cid>,
+    pub communities: Option<Cid>,
+    /// map of keystore for group chat conversations and communities
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keystore: Option<Cid>,
     /// index to constellation
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_index: Option<Cid>,
@@ -201,24 +204,23 @@ impl RootDocument {
             .await
             .unwrap_or_default();
 
-        let conversation_keystore =
-            futures::future::ready(self.conversations_keystore.ok_or(Error::Other))
-                .and_then(|document| async move {
-                    let map: BTreeMap<String, Cid> =
-                        ipfs.get_dag(document).local().deserialized().await?;
-                    let mut resolved_map: BTreeMap<Uuid, Keystore> = BTreeMap::new();
-                    for (k, v) in map
-                        .iter()
-                        .filter_map(|(k, v)| Uuid::from_str(k).map(|k| (k, *v)).ok())
-                    {
-                        if let Ok(store) = ipfs.get_dag(v).local().deserialized().await {
-                            resolved_map.insert(k, store);
-                        }
+        let conversation_keystore = futures::future::ready(self.keystore.ok_or(Error::Other))
+            .and_then(|document| async move {
+                let map: BTreeMap<String, Cid> =
+                    ipfs.get_dag(document).local().deserialized().await?;
+                let mut resolved_map: BTreeMap<Uuid, Keystore> = BTreeMap::new();
+                for (k, v) in map
+                    .iter()
+                    .filter_map(|(k, v)| Uuid::from_str(k).map(|k| (k, *v)).ok())
+                {
+                    if let Ok(store) = ipfs.get_dag(v).local().deserialized().await {
+                        resolved_map.insert(k, store);
                     }
-                    Ok(resolved_map)
-                })
-                .await
-                .unwrap_or_default();
+                }
+                Ok(resolved_map)
+            })
+            .await
+            .unwrap_or_default();
 
         // TODO: Uncomment when tying the files portion to shuttle
         // let file_index = futures::future::ready(self.file_index.ok_or(Error::Other))
@@ -302,7 +304,7 @@ impl RootDocument {
             })
             .await;
 
-        let _ = futures::future::ready(self.conversations_keystore.ok_or(Error::Other))
+        let _ = futures::future::ready(self.keystore.ok_or(Error::Other))
             .and_then(|document| async move {
                 let map: BTreeMap<String, Cid> = ipfs.get_dag(document).deserialized().await?;
                 let mut resolved_map: BTreeMap<Uuid, _> = BTreeMap::new();
@@ -349,7 +351,8 @@ impl RootDocument {
             block_by: None,
             request: None,
             conversations: None,
-            conversations_keystore: None,
+            keystore: None,
+            communities: None,
             file_index: None,
             status: None,
             signature: None,
@@ -385,7 +388,7 @@ impl RootDocument {
                 }
             }
 
-            root_document.conversations_keystore = ipfs.put_dag(pointer_map).await.ok();
+            root_document.keystore = ipfs.put_dag(pointer_map).await.ok();
         }
 
         if let Some(root) = data.file_index {

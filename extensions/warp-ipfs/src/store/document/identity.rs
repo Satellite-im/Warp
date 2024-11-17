@@ -62,10 +62,10 @@ pub struct IdentityMetadata {
 
 impl From<Identity> for IdentityDocument {
     fn from(identity: Identity) -> Self {
-        let username = identity.username();
-        let did = identity.did_key();
+        let username = identity.username().to_owned();
+        let did = identity.did_key().to_owned();
         let short_id = *identity.short_id();
-        let status_message = identity.status_message();
+        let status_message = identity.status_message().map(ToOwned::to_owned);
         let created = identity.created();
         let modified = identity.modified();
 

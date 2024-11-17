@@ -999,27 +999,10 @@ impl IdentityStore {
 
         let is_blocked_by = self.is_blocked_by(out_did).await.unwrap_or_default();
 
-        let share_platform = self.config.store_setting().share_platform;
+        identity.metadata.platform = Some(self.own_platform());
 
-        let platform =
-            (share_platform && (!is_blocked || !is_blocked_by)).then_some(self.own_platform());
-
-        identity.metadata.platform = platform;
-
-        let mut metadata = identity.metadata;
-        metadata.platform = platform;
-
+        let metadata = identity.metadata;
         identity.metadata = Default::default();
-
-        /*
-        (matches!(
-            self.config.store_setting().update_events,
-            UpdateEvents::Enabled
-        ) || matches!(
-            self.config.store_setting().update_events,
-            UpdateEvents::FriendsOnly
-        ) && is_friend)
-            &&  */
 
         let include_meta = is_friend || (!is_blocked && !is_blocked_by);
 
@@ -1281,7 +1264,7 @@ impl IdentityStore {
                 identity.verify()?;
 
                 if let Ok(own_id) = self.own_identity().await {
-                    if own_id.did_key() == identity.did {
+                    if own_id.did_key() == &identity.did {
                         tracing::warn!(did = %identity.did, "Cannot accept own identity");
                         return Ok(());
                     }
@@ -1626,22 +1609,20 @@ impl IdentityStore {
     }
 
     fn own_platform(&self) -> Platform {
-        if self.config.store_setting().share_platform {
-            if cfg!(any(
-                target_os = "windows",
-                target_os = "macos",
-                target_os = "linux",
-                target_os = "freebsd",
-                target_os = "dragonfly",
-                target_os = "openbsd",
-                target_os = "netbsd"
-            )) {
-                Platform::Desktop
-            } else if cfg!(any(target_os = "android", target_os = "ios")) {
-                Platform::Mobile
-            } else {
-                Platform::Unknown
-            }
+        if cfg!(any(
+            target_os = "windows",
+            target_os = "macos",
+            target_os = "linux",
+            target_os = "freebsd",
+            target_os = "dragonfly",
+            target_os = "openbsd",
+            target_os = "netbsd"
+        )) {
+            Platform::Desktop
+        } else if cfg!(any(target_os = "android", target_os = "ios")) {
+            Platform::Mobile
+        } else if cfg!(any(target_arch = "wasm32", target_os = "unknown")) {
+            Platform::Web
         } else {
             Platform::Unknown
         }
@@ -2253,7 +2234,7 @@ impl IdentityStore {
         let own_did = self
             .own_identity()
             .await
-            .map(|identity| identity.did_key())
+            .map(|identity| identity.did_key().to_owned())
             .map_err(|_| Error::OtherWithContext("Identity store may not be initialized".into()))?;
 
         if own_did.eq(did) {

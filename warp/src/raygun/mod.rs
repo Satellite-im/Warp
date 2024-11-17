@@ -1,11 +1,17 @@
+pub mod community;
 pub mod group;
 
 use crate::constellation::file::{File, FileType};
 use crate::constellation::{ConstellationProgressStream, Progression};
 use crate::crypto::DID;
 use crate::error::Error;
+use crate::raygun::community::RayGunCommunity;
 use crate::{Extension, SingleHandle};
 
+use community::{
+    CommunityChannel, CommunityChannelPermission, CommunityInvite, CommunityPermission,
+    CommunityRole, RoleId,
+};
 use derive_more::Display;
 use futures::stream::BoxStream;
 
@@ -29,6 +35,9 @@ pub enum RayGunEventKind {
     ConversationArchived { conversation_id: Uuid },
     ConversationUnarchived { conversation_id: Uuid },
     ConversationDeleted { conversation_id: Uuid },
+    CommunityCreated { community_id: Uuid },
+    CommunityInvite { community_id: Uuid, invite_id: Uuid },
+    CommunityUpdate { community_id: Uuid },
 }
 
 pub type RayGunEventStream = BoxStream<'static, RayGunEventKind>;
@@ -108,6 +117,130 @@ pub enum MessageEventKind {
         conversation_id: Uuid,
         added: Vec<(DID, GroupPermission)>,
         removed: Vec<(DID, GroupPermission)>,
+    },
+    CommunityEventReceived {
+        community_id: Uuid,
+        community_channel_id: Uuid,
+        did_key: DID,
+        event: MessageEvent,
+    },
+    CommunityEventCancelled {
+        community_id: Uuid,
+        community_channel_id: Uuid,
+        did_key: DID,
+        event: MessageEvent,
+    },
+    LeftCommunity {
+        community_id: Uuid,
+    },
+    CreatedCommunityInvite {
+        community_id: Uuid,
+        invite: CommunityInvite,
+    },
+    DeletedCommunityInvite {
+        community_id: Uuid,
+        invite_id: Uuid,
+    },
+    AcceptedCommunityInvite {
+        community_id: Uuid,
+        invite_id: Uuid,
+        user: DID,
+    },
+    EditedCommunityInvite {
+        community_id: Uuid,
+        invite_id: Uuid,
+    },
+    CreatedCommunityRole {
+        community_id: Uuid,
+        role: CommunityRole,
+    },
+    DeletedCommunityRole {
+        community_id: Uuid,
+        role_id: Uuid,
+    },
+    EditedCommunityRole {
+        community_id: Uuid,
+        role_id: Uuid,
+    },
+    GrantedCommunityRole {
+        community_id: Uuid,
+        role_id: Uuid,
+        user: DID,
+    },
+    RevokedCommunityRole {
+        community_id: Uuid,
+        role_id: Uuid,
+        user: DID,
+    },
+    CreatedCommunityChannel {
+        community_id: Uuid,
+        channel: CommunityChannel,
+    },
+    DeletedCommunityChannel {
+        community_id: Uuid,
+        channel_id: Uuid,
+    },
+    EditedCommunityName {
+        community_id: Uuid,
+        name: String,
+    },
+    EditedCommunityDescription {
+        community_id: Uuid,
+        description: Option<String>,
+    },
+    GrantedCommunityPermission {
+        community_id: Uuid,
+        permission: CommunityPermission,
+        role_id: RoleId,
+    },
+    RevokedCommunityPermission {
+        community_id: Uuid,
+        permission: CommunityPermission,
+        role_id: RoleId,
+    },
+    GrantedCommunityPermissionForAll {
+        community_id: Uuid,
+        permission: CommunityPermission,
+    },
+    RevokedCommunityPermissionForAll {
+        community_id: Uuid,
+        permission: CommunityPermission,
+    },
+    RemovedCommunityMember {
+        community_id: Uuid,
+        member: DID,
+    },
+    EditedCommunityChannelName {
+        community_id: Uuid,
+        channel_id: Uuid,
+        name: String,
+    },
+    EditedCommunityChannelDescription {
+        community_id: Uuid,
+        channel_id: Uuid,
+        description: Option<String>,
+    },
+    GrantedCommunityChannelPermission {
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+        role_id: RoleId,
+    },
+    RevokedCommunityChannelPermission {
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+        role_id: RoleId,
+    },
+    GrantedCommunityChannelPermissionForAll {
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
+    },
+    RevokedCommunityChannelPermissionForAll {
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: CommunityChannelPermission,
     },
 }
 
@@ -657,12 +790,12 @@ impl Conversation {
         self.id
     }
 
-    pub fn name(&self) -> Option<String> {
-        self.name.clone()
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
     }
 
-    pub fn creator(&self) -> Option<DID> {
-        self.creator.clone()
+    pub fn creator(&self) -> Option<&DID> {
+        self.creator.as_ref()
     }
 
     pub fn created(&self) -> DateTime<Utc> {
@@ -681,12 +814,12 @@ impl Conversation {
         self.conversation_type
     }
 
-    pub fn permissions(&self) -> GroupPermissions {
-        self.permissions.clone()
+    pub fn permissions(&self) -> &GroupPermissions {
+        &self.permissions
     }
 
-    pub fn recipients(&self) -> Vec<DID> {
-        self.recipients.clone()
+    pub fn recipients(&self) -> &[DID] {
+        &self.recipients
     }
 
     pub fn description(&self) -> Option<&str> {
@@ -747,7 +880,20 @@ impl Conversation {
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
 pub enum GroupPermission {
     AddParticipants,
-    SetGroupName,
+    RemoveParticipants,
+    EditGroupInfo,
+    EditGroupImages,
+}
+
+impl GroupPermission {
+    pub fn values() -> Vec<GroupPermission> {
+        vec![
+            Self::AddParticipants,
+            Self::RemoveParticipants,
+            Self::EditGroupInfo,
+            Self::EditGroupImages,
+        ]
+    }
 }
 
 #[derive(Default, Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq, Display)]
@@ -817,8 +963,8 @@ impl MessageReference {
         self.conversation_id
     }
 
-    pub fn sender(&self) -> DID {
-        self.sender.clone()
+    pub fn sender(&self) -> &DID {
+        &self.sender
     }
 
     pub fn date(&self) -> DateTime<Utc> {
@@ -975,8 +1121,8 @@ impl Message {
         self.conversation_id
     }
 
-    pub fn sender(&self) -> DID {
-        self.sender.clone()
+    pub fn sender(&self) -> &DID {
+        &self.sender
     }
 
     pub fn date(&self) -> DateTime<Utc> {
@@ -991,24 +1137,24 @@ impl Message {
         self.pinned
     }
 
-    pub fn reactions(&self) -> IndexMap<String, Vec<DID>> {
-        self.reactions.clone()
+    pub fn reactions(&self) -> &IndexMap<String, Vec<DID>> {
+        &self.reactions
     }
 
     pub fn mentions(&self) -> &[DID] {
         &self.mentions
     }
 
-    pub fn lines(&self) -> Vec<String> {
-        self.lines.clone()
+    pub fn lines(&self) -> &[String] {
+        &self.lines
     }
 
-    pub fn attachments(&self) -> Vec<File> {
-        self.attachment.clone()
+    pub fn attachments(&self) -> &[File] {
+        &self.attachment
     }
 
-    pub fn metadata(&self) -> IndexMap<String, String> {
-        self.metadata.clone()
+    pub fn metadata(&self) -> &IndexMap<String, String> {
+        &self.metadata
     }
 
     pub fn replied(&self) -> Option<Uuid> {
@@ -1207,6 +1353,7 @@ impl Eq for Location {}
 pub trait RayGun:
     RayGunStream
     + RayGunGroupConversation
+    + RayGunCommunity
     + RayGunAttachment
     + RayGunEvents
     + RayGunConversationInformation

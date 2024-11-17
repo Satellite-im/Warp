@@ -56,7 +56,7 @@ mod test {
         .await?;
 
         let conversation = instance_a.get_conversation(id_a).await?;
-        assert_eq!(conversation.permissions(), GroupPermissions::new(),);
+        assert_eq!(conversation.permissions(), &GroupPermissions::new(),);
         assert_eq!(conversation.recipients().len(), 1);
         assert!(conversation.recipients().contains(&did_a));
 
@@ -110,7 +110,7 @@ mod test {
         .await?;
 
         let conversation = instance_a.get_conversation(id_a).await?;
-        assert_eq!(conversation.name(), Some(name));
+        assert_eq!(conversation.name(), Some(name).as_deref());
 
         instance_a.update_conversation_name(id_a, "").await?;
 
@@ -193,7 +193,7 @@ mod test {
         assert_eq!(id_b, id_c);
 
         let conversation = instance_a.get_conversation(id_a).await?;
-        assert_eq!(conversation.permissions(), GroupPermissions::new(),);
+        assert_eq!(conversation.permissions(), &GroupPermissions::new(),);
         assert_eq!(conversation.recipients().len(), 3);
         assert!(conversation.recipients().contains(&did_a));
         assert!(conversation.recipients().contains(&did_b));
@@ -317,11 +317,11 @@ mod test {
         let mut permissions = GroupPermissions::new();
         permissions.insert(
             did_b.clone(),
-            vec![GroupPermission::SetGroupName].into_iter().collect(),
+            vec![GroupPermission::EditGroupInfo].into_iter().collect(),
         );
         permissions.insert(
             did_c.clone(),
-            vec![GroupPermission::SetGroupName].into_iter().collect(),
+            vec![GroupPermission::EditGroupInfo].into_iter().collect(),
         );
 
         instance_a
@@ -439,7 +439,7 @@ mod test {
         .await?;
 
         let conversation = instance_a.get_conversation(id_a).await?;
-        assert_eq!(conversation.permissions(), permissions,);
+        assert_eq!(conversation.permissions(), &permissions,);
         assert_eq!(conversation.name().as_deref(), Some("test"));
         assert_eq!(conversation.recipients().len(), 4);
         assert!(conversation.recipients().contains(&did_a));
@@ -601,8 +601,8 @@ mod test {
 
         let ret = instance_b.update_conversation_name(id_b, "test").await;
 
-        if permissions[&did_b].contains(&GroupPermission::SetGroupName)
-            && permissions[&did_c].contains(&GroupPermission::SetGroupName)
+        if permissions[&did_b].contains(&GroupPermission::EditGroupInfo)
+            && permissions[&did_c].contains(&GroupPermission::EditGroupInfo)
         {
             // Non-owner should be able to change the name.
             ret?;
@@ -615,7 +615,7 @@ mod test {
         }
 
         let conversation = instance_a.get_conversation(id_a).await?;
-        assert_eq!(conversation.permissions(), permissions,);
+        assert_eq!(conversation.permissions(), &permissions,);
         assert_eq!(conversation.recipients().len(), 4);
         assert!(conversation.recipients().contains(&did_a));
         assert!(conversation.recipients().contains(&did_b));
@@ -765,7 +765,7 @@ mod test {
         .await?;
 
         let conversation = instance_a.get_conversation(id_a).await?;
-        assert_eq!(conversation.permissions(), GroupPermissions::new(),);
+        assert_eq!(conversation.permissions(), &GroupPermissions::new(),);
         assert_eq!(conversation.recipients().len(), 4);
         assert!(conversation.recipients().contains(&did_a));
         assert!(conversation.recipients().contains(&did_b));
@@ -1092,7 +1092,7 @@ mod test {
 
         let conversation = instance_a.get_conversation(id_a).await?;
 
-        assert_eq!(conversation.permissions(), GroupPermissions::new(),);
+        assert_eq!(conversation.permissions(), &GroupPermissions::new(),);
         assert_eq!(conversation.recipients().len(), 3);
         assert!(conversation.recipients().contains(&did_a));
         assert!(!conversation.recipients().contains(&did_b));
@@ -1335,7 +1335,7 @@ mod test {
         assert_eq!(id_b, id_c);
 
         let conversation = instance_a.get_conversation(id_a).await?;
-        assert_eq!(conversation.permissions(), GroupPermissions::new(),);
+        assert_eq!(conversation.permissions(), &GroupPermissions::new(),);
         assert_eq!(conversation.recipients().len(), 3);
         assert!(conversation.recipients().contains(&did_a));
         assert!(conversation.recipients().contains(&did_b));
@@ -1490,7 +1490,7 @@ mod test {
         assert_eq!(id_b, id_c);
 
         let conversation = instance_a.get_conversation(id_a).await?;
-        assert_eq!(conversation.permissions(), GroupPermissions::new(),);
+        assert_eq!(conversation.permissions(), &GroupPermissions::new(),);
         assert_eq!(conversation.recipients().len(), 3);
         assert!(conversation.recipients().contains(&did_a));
         assert!(conversation.recipients().contains(&did_b));
@@ -1614,7 +1614,8 @@ mod test {
                                 assert!(!conversation.archived());
                                 unarchived = true;
                             }
-                            RayGunEventKind::ConversationDeleted { .. } => unreachable!()
+                            RayGunEventKind::ConversationDeleted { .. } => unreachable!(),
+                            _ => {}
                         }
                     }
                 }

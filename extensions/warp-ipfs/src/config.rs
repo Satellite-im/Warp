@@ -129,8 +129,6 @@ pub struct StoreSetting {
 
     /// Fetch data over bitswap instead of pubsub
     pub fetch_over_bitswap: bool,
-    /// Enables sharing platform (Desktop, Mobile, Web) information to another user
-    pub share_platform: bool,
     /// Waits for a response from peer for a specific duration
     pub friend_request_response_duration: Option<Duration>,
     /// Disable providing images for identities
@@ -156,7 +154,6 @@ impl Default for StoreSetting {
                 discovery_type: Default::default(),
             },
             fetch_over_bitswap: false,
-            share_platform: false,
             friend_request_response_duration: None,
             disable_images: false,
             with_friends: false,
