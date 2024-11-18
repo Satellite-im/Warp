@@ -1,30 +1,37 @@
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use either::Either;
 use futures::channel::oneshot;
-use futures::stream::FuturesUnordered;
+use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{FutureExt, SinkExt, StreamExt, TryFutureExt};
 use futures_timeout::TimeoutExt;
 use futures_timer::Delay;
 use indexmap::{IndexMap, IndexSet};
 use ipld_core::cid::Cid;
+use rust_ipfs::libp2p::gossipsub::Message;
 use rust_ipfs::p2p::MultiaddrExt;
-use rust_ipfs::{libp2p::gossipsub::Message, Ipfs};
+use rust_ipfs::Ipfs;
 use rust_ipfs::{PeerId, SubscriptionStream};
 use serde::{Deserialize, Serialize};
 use std::borrow::BorrowMut;
 use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 use uuid::Uuid;
+use warp::constellation::ConstellationProgressStream;
 use warp::crypto::DID;
 use warp::raygun::community::{
     CommunityChannel, CommunityChannelPermission, CommunityChannelType, CommunityInvite,
     CommunityPermission, CommunityRole, RoleId,
 };
-use warp::raygun::{ConversationImage, Location, RayGunEventKind};
+use warp::raygun::{
+    AttachmentEventStream, ConversationImage, Location, MessageEvent, MessageOptions,
+    MessageReference, MessageStatus, Messages, PinState, RayGunEventKind, ReactionState,
+};
 use warp::{
     crypto::{cipher::Cipher, generate},
     error::Error,
@@ -206,15 +213,99 @@ pub enum CommunityTaskCommand {
         permission: CommunityChannelPermission,
         response: oneshot::Sender<Result<(), Error>>,
     },
+    GetCommunityChannelMessage {
+        channel_id: Uuid,
+        message_id: Uuid,
+        response: oneshot::Sender<Result<warp::raygun::Message, Error>>,
+    },
+    GetCommunityChannelMessages {
+        channel_id: Uuid,
+        options: MessageOptions,
+        response: oneshot::Sender<Result<Messages, Error>>,
+    },
+    GetCommunityChannelMessageCount {
+        channel_id: Uuid,
+        response: oneshot::Sender<Result<usize, Error>>,
+    },
+    GetCommunityChannelMessageReference {
+        channel_id: Uuid,
+        message_id: Uuid,
+        response: oneshot::Sender<Result<MessageReference, Error>>,
+    },
+    GetCommunityChannelMessageReferences {
+        channel_id: Uuid,
+        options: MessageOptions,
+        response: oneshot::Sender<Result<BoxStream<'static, MessageReference>, Error>>,
+    },
+    CommunityChannelMessageStatus {
+        channel_id: Uuid,
+        message_id: Uuid,
+        response: oneshot::Sender<Result<MessageStatus, Error>>,
+    },
     SendCommunityChannelMessage {
         channel_id: Uuid,
-        message: String,
+        message: Vec<String>,
+        response: oneshot::Sender<Result<Uuid, Error>>,
+    },
+    EditCommunityChannelMessage {
+        channel_id: Uuid,
+        message_id: Uuid,
+        message: Vec<String>,
         response: oneshot::Sender<Result<(), Error>>,
+    },
+    ReplyToCommunityChannelMessage {
+        channel_id: Uuid,
+        message_id: Uuid,
+        message: Vec<String>,
+        response: oneshot::Sender<Result<Uuid, Error>>,
     },
     DeleteCommunityChannelMessage {
         channel_id: Uuid,
-        message_id: Uuid,
+        message_id: Option<Uuid>,
         response: oneshot::Sender<Result<(), Error>>,
+    },
+    PinCommunityChannelMessage {
+        channel_id: Uuid,
+        message_id: Uuid,
+        state: PinState,
+        response: oneshot::Sender<Result<(), Error>>,
+    },
+    ReactToCommunityChannelMessage {
+        channel_id: Uuid,
+        message_id: Uuid,
+        state: ReactionState,
+        emoji: String,
+        response: oneshot::Sender<Result<(), Error>>,
+    },
+    SendCommunityChannelMesssageEvent {
+        channel_id: Uuid,
+        event: MessageEvent,
+        response: oneshot::Sender<Result<(), Error>>,
+    },
+    CancelCommunityChannelMesssageEvent {
+        channel_id: Uuid,
+        event: MessageEvent,
+        response: oneshot::Sender<Result<(), Error>>,
+    },
+    AttachToCommunityChannelMessage {
+        channel_id: Uuid,
+        message_id: Option<Uuid>,
+        locations: Vec<Location>,
+        message: Vec<String>,
+        response: oneshot::Sender<Result<(Uuid, AttachmentEventStream), Error>>,
+    },
+    DownloadFromCommunityChannelMessage {
+        channel_id: Uuid,
+        message_id: Uuid,
+        file: String,
+        path: PathBuf,
+        response: oneshot::Sender<Result<ConstellationProgressStream, Error>>,
+    },
+    DownloadStreamFromCommunityChannelMessage {
+        channel_id: Uuid,
+        message_id: Uuid,
+        file: String,
+        response: oneshot::Sender<Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error>>,
     },
 
     EventHandler {
@@ -819,26 +910,184 @@ impl CommunityTask {
                     .await;
                 let _ = response.send(result);
             }
-            CommunityTaskCommand::SendCommunityChannelMessage {
+            CommunityTaskCommand::GetCommunityChannelMessage {
+                channel_id,
+                message_id,
                 response,
+            } => {
+                let result = self
+                    .get_community_channel_message(channel_id, message_id)
+                    .await;
+                let _ = response.send(result);
+            }
+            CommunityTaskCommand::GetCommunityChannelMessages {
+                channel_id,
+                options,
+                response,
+            } => {
+                let result = self
+                    .get_community_channel_messages(channel_id, options)
+                    .await;
+                let _ = response.send(result);
+            }
+            CommunityTaskCommand::GetCommunityChannelMessageCount {
+                channel_id,
+                response,
+            } => {
+                let result = self.get_community_channel_message_count(channel_id).await;
+                let _ = response.send(result);
+            }
+            CommunityTaskCommand::GetCommunityChannelMessageReference {
+                channel_id,
+                message_id,
+                response,
+            } => {
+                let result = self
+                    .get_community_channel_message_reference(channel_id, message_id)
+                    .await;
+                let _ = response.send(result);
+            }
+            CommunityTaskCommand::GetCommunityChannelMessageReferences {
+                channel_id,
+                options,
+                response,
+            } => {
+                let result = self
+                    .get_community_channel_message_references(channel_id, options)
+                    .await;
+                let _ = response.send(result);
+            }
+            CommunityTaskCommand::CommunityChannelMessageStatus {
+                channel_id,
+                message_id,
+                response,
+            } => {
+                let result = self
+                    .community_channel_message_status(channel_id, message_id)
+                    .await;
+                let _ = response.send(result);
+            }
+            CommunityTaskCommand::SendCommunityChannelMessage {
                 channel_id,
                 message,
+                response,
             } => {
                 let result = self
                     .send_community_channel_message(channel_id, message)
                     .await;
                 let _ = response.send(result);
             }
-            CommunityTaskCommand::DeleteCommunityChannelMessage {
-                response,
+            CommunityTaskCommand::EditCommunityChannelMessage {
                 channel_id,
                 message_id,
+                message,
+                response,
+            } => {
+                let result = self
+                    .edit_community_channel_message(channel_id, message_id, message)
+                    .await;
+                let _ = response.send(result);
+            }
+            CommunityTaskCommand::ReplyToCommunityChannelMessage {
+                channel_id,
+                message_id,
+                message,
+                response,
+            } => {
+                let result = self
+                    .reply_to_community_channel_message(channel_id, message_id, message)
+                    .await;
+                let _ = response.send(result);
+            }
+            CommunityTaskCommand::DeleteCommunityChannelMessage {
+                channel_id,
+                message_id,
+                response,
             } => {
                 let result = self
                     .delete_community_channel_message(channel_id, message_id)
                     .await;
                 let _ = response.send(result);
             }
+            CommunityTaskCommand::PinCommunityChannelMessage {
+                channel_id,
+                message_id,
+                state,
+                response,
+            } => {
+                let result = self
+                    .pin_community_channel_message(channel_id, message_id, state)
+                    .await;
+                let _ = response.send(result);
+            }
+            CommunityTaskCommand::ReactToCommunityChannelMessage {
+                channel_id,
+                message_id,
+                state,
+                emoji,
+                response,
+            } => {
+                let result = self
+                    .react_to_community_channel_message(channel_id, message_id, state, emoji)
+                    .await;
+                let _ = response.send(result);
+            }
+            CommunityTaskCommand::SendCommunityChannelMesssageEvent {
+                channel_id,
+                event,
+                response,
+            } => {
+                let result = self
+                    .send_community_channel_messsage_event(channel_id, event)
+                    .await;
+                let _ = response.send(result);
+            }
+            CommunityTaskCommand::CancelCommunityChannelMesssageEvent {
+                channel_id,
+                event,
+                response,
+            } => {
+                let result = self
+                    .cancel_community_channel_messsage_event(channel_id, event)
+                    .await;
+                let _ = response.send(result);
+            }
+            CommunityTaskCommand::AttachToCommunityChannelMessage {
+                channel_id,
+                message_id,
+                locations,
+                message,
+                response,
+            } => {
+                let result = self
+                    .attach_to_community_channel_message(channel_id, message_id, locations, message)
+                    .await;
+                let _ = response.send(result);
+            }
+            CommunityTaskCommand::DownloadFromCommunityChannelMessage {
+                channel_id,
+                message_id,
+                file,
+                path,
+                response,
+            } => {
+                let result = self
+                    .download_from_community_channel_message(channel_id, message_id, file, path)
+                    .await;
+                let _ = response.send(result);
+            }
+            CommunityTaskCommand::DownloadStreamFromCommunityChannelMessage {
+                channel_id,
+                message_id,
+                file,
+                response,
+            } => {
+                let result = self
+                    .download_stream_from_community_channel_message(channel_id, message_id, file)
+                    .await;
+                let _ = response.send(result);
+            }
+
             CommunityTaskCommand::EventHandler { response } => {
                 let sender = self.event_broadcast.clone();
                 let _ = response.send(sender);
@@ -2228,35 +2477,133 @@ impl CommunityTask {
         )
         .await
     }
+
+    pub async fn get_community_channel_message(
+        &self,
+        _channel_id: Uuid,
+        _message_id: Uuid,
+    ) -> Result<warp::raygun::Message, Error> {
+        Err(Error::Unimplemented)
+    }
+    pub async fn get_community_channel_messages(
+        &self,
+        _channel_id: Uuid,
+        _options: MessageOptions,
+    ) -> Result<Messages, Error> {
+        Err(Error::Unimplemented)
+    }
+    pub async fn get_community_channel_message_count(
+        &self,
+        _channel_id: Uuid,
+    ) -> Result<usize, Error> {
+        Err(Error::Unimplemented)
+    }
+    pub async fn get_community_channel_message_reference(
+        &self,
+        _channel_id: Uuid,
+        _message_id: Uuid,
+    ) -> Result<MessageReference, Error> {
+        Err(Error::Unimplemented)
+    }
+    pub async fn get_community_channel_message_references(
+        &self,
+        _channel_id: Uuid,
+        _options: MessageOptions,
+    ) -> Result<BoxStream<'static, MessageReference>, Error> {
+        Err(Error::Unimplemented)
+    }
+    pub async fn community_channel_message_status(
+        &self,
+        _channel_id: Uuid,
+        _message_id: Uuid,
+    ) -> Result<MessageStatus, Error> {
+        Err(Error::Unimplemented)
+    }
     pub async fn send_community_channel_message(
         &mut self,
-        channel_id: Uuid,
-        _message: String,
+        _channel_id: Uuid,
+        _message: Vec<String>,
+    ) -> Result<Uuid, Error> {
+        Err(Error::Unimplemented)
+    }
+    pub async fn edit_community_channel_message(
+        &mut self,
+        _channel_id: Uuid,
+        _message_id: Uuid,
+        _message: Vec<String>,
     ) -> Result<(), Error> {
-        let own_did = &self.identity.did_key();
-        if !self.document.has_channel_permission(
-            own_did,
-            &CommunityChannelPermission::SendMessages,
-            channel_id,
-        ) {
-            return Err(Error::Unauthorized);
-        }
-
+        Err(Error::Unimplemented)
+    }
+    pub async fn reply_to_community_channel_message(
+        &mut self,
+        _channel_id: Uuid,
+        _message_id: Uuid,
+        _message: Vec<String>,
+    ) -> Result<Uuid, Error> {
         Err(Error::Unimplemented)
     }
     pub async fn delete_community_channel_message(
         &mut self,
         _channel_id: Uuid,
-        _message_id: Uuid,
+        _message_id: Option<Uuid>,
     ) -> Result<(), Error> {
-        let own_did = &self.identity.did_key();
-        if !self
-            .document
-            .has_permission(own_did, &CommunityPermission::DeleteMessages)
-        {
-            return Err(Error::Unauthorized);
-        }
-
+        Err(Error::Unimplemented)
+    }
+    pub async fn pin_community_channel_message(
+        &mut self,
+        _channel_id: Uuid,
+        _message_id: Uuid,
+        _state: PinState,
+    ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+    pub async fn react_to_community_channel_message(
+        &mut self,
+        _channel_id: Uuid,
+        _message_id: Uuid,
+        _state: ReactionState,
+        _emoji: String,
+    ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+    pub async fn send_community_channel_messsage_event(
+        &mut self,
+        _channel_id: Uuid,
+        _event: MessageEvent,
+    ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+    pub async fn cancel_community_channel_messsage_event(
+        &mut self,
+        _channel_id: Uuid,
+        _event: MessageEvent,
+    ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+    pub async fn attach_to_community_channel_message(
+        &mut self,
+        _channel_id: Uuid,
+        _message_id: Option<Uuid>,
+        _locations: Vec<Location>,
+        _message: Vec<String>,
+    ) -> Result<(Uuid, AttachmentEventStream), Error> {
+        Err(Error::Unimplemented)
+    }
+    pub async fn download_from_community_channel_message(
+        &self,
+        _channel_id: Uuid,
+        _message_id: Uuid,
+        _file: String,
+        _path: PathBuf,
+    ) -> Result<ConstellationProgressStream, Error> {
+        Err(Error::Unimplemented)
+    }
+    pub async fn download_stream_from_community_channel_message(
+        &self,
+        _channel_id: Uuid,
+        _message_id: Uuid,
+        _file: String,
+    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error> {
         Err(Error::Unimplemented)
     }
 
