@@ -273,7 +273,7 @@ mod test {
         let acc = (None, None, context);
         let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
-        let (instance_b, did_b, _) = &mut accounts[1].clone();
+        let (instance_b, _, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
 
