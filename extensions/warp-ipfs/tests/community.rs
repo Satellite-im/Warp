@@ -257,13 +257,11 @@ mod test {
             }
         );
 
-        match instance_b.delete_community(community.id()).await {
-            Err(e) => match e {
-                Error::Unauthorized => {}
-                _ => panic!("error should be Error::Unauthorized"),
-            },
-            Ok(_) => panic!("should be unauthorized to delete community"),
-        }
+        let result = instance_b.delete_community(community.id()).await;
+        assert_eq!(
+            format!("{:?}", result),
+            format!("{:?}", Err::<Community, Error>(Error::Unauthorized))
+        );
         Ok(())
     }
 
