@@ -746,7 +746,6 @@ impl Future for DiscoveryTask {
             }
         }
 
-        let _ = self.peers.poll_next_unpin(cx);
         self.waker = Some(cx.waker().clone());
 
         Poll::Pending
