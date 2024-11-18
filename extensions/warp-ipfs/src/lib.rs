@@ -1989,24 +1989,201 @@ impl RayGunCommunity for WarpIpfs {
             .revoke_community_channel_permission_for_all(community_id, channel_id, permission)
             .await
     }
+
+    async fn get_community_channel_message(
+        &self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Message, Error> {
+        self.messaging_store()?
+            .get_community_channel_message(community_id, channel_id, message_id)
+            .await
+    }
+    async fn get_community_channel_messages(
+        &self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        options: MessageOptions,
+    ) -> Result<Messages, Error> {
+        self.messaging_store()?
+            .get_community_channel_messages(community_id, channel_id, options)
+            .await
+    }
+    async fn get_community_channel_message_count(
+        &self,
+        community_id: Uuid,
+        channel_id: Uuid,
+    ) -> Result<usize, Error> {
+        self.messaging_store()?
+            .get_community_channel_message_count(community_id, channel_id)
+            .await
+    }
+    async fn get_community_channel_message_reference(
+        &self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<MessageReference, Error> {
+        self.messaging_store()?
+            .get_community_channel_message_reference(community_id, channel_id, message_id)
+            .await
+    }
+    async fn get_community_channel_message_references(
+        &self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        options: MessageOptions,
+    ) -> Result<BoxStream<'static, MessageReference>, Error> {
+        self.messaging_store()?
+            .get_community_channel_message_references(community_id, channel_id, options)
+            .await
+    }
+    async fn community_channel_message_status(
+        &self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<MessageStatus, Error> {
+        self.messaging_store()?
+            .community_channel_message_status(community_id, channel_id, message_id)
+            .await
+    }
     async fn send_community_channel_message(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
-        message: &str,
-    ) -> Result<(), Error> {
+        message: Vec<String>,
+    ) -> Result<Uuid, Error> {
         self.messaging_store()?
             .send_community_channel_message(community_id, channel_id, message)
+            .await
+    }
+    async fn edit_community_channel_message(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+        message: Vec<String>,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .edit_community_channel_message(community_id, channel_id, message_id, message)
+            .await
+    }
+    async fn reply_to_community_channel_message(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+        message: Vec<String>,
+    ) -> Result<Uuid, Error> {
+        self.messaging_store()?
+            .reply_to_community_channel_message(community_id, channel_id, message_id, message)
             .await
     }
     async fn delete_community_channel_message(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
-        message_id: Uuid,
+        message_id: Option<Uuid>,
     ) -> Result<(), Error> {
         self.messaging_store()?
             .delete_community_channel_message(community_id, channel_id, message_id)
+            .await
+    }
+    async fn pin_community_channel_message(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+        state: PinState,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .pin_community_channel_message(community_id, channel_id, message_id, state)
+            .await
+    }
+    async fn react_to_community_channel_message(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+        state: ReactionState,
+        emoji: String,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .react_to_community_channel_message(community_id, channel_id, message_id, state, emoji)
+            .await
+    }
+    async fn send_community_channel_messsage_event(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        event: MessageEvent,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .send_community_channel_messsage_event(community_id, channel_id, event)
+            .await
+    }
+    async fn cancel_community_channel_messsage_event(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        event: MessageEvent,
+    ) -> Result<(), Error> {
+        self.messaging_store()?
+            .cancel_community_channel_messsage_event(community_id, channel_id, event)
+            .await
+    }
+    async fn attach_to_community_channel_message(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Option<Uuid>,
+        locations: Vec<Location>,
+        message: Vec<String>,
+    ) -> Result<(Uuid, AttachmentEventStream), Error> {
+        self.messaging_store()?
+            .attach_to_community_channel_message(
+                community_id,
+                channel_id,
+                message_id,
+                locations,
+                message,
+            )
+            .await
+    }
+    async fn download_from_community_channel_message(
+        &self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+        file: String,
+        path: PathBuf,
+    ) -> Result<ConstellationProgressStream, Error> {
+        self.messaging_store()?
+            .download_from_community_channel_message(
+                community_id,
+                channel_id,
+                message_id,
+                file,
+                path,
+            )
+            .await
+    }
+    async fn download_stream_from_community_channel_message(
+        &self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+        file: &str,
+    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error> {
+        self.messaging_store()?
+            .download_stream_from_community_channel_message(
+                community_id,
+                channel_id,
+                message_id,
+                file,
+            )
             .await
     }
 }

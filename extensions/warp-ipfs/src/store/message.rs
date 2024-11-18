@@ -7,6 +7,7 @@ use task::ConversationTaskCommand;
 
 use bytes::Bytes;
 use std::borrow::BorrowMut;
+use std::path::PathBuf;
 use std::time::Duration;
 use std::{
     collections::{HashMap, HashSet},
@@ -57,7 +58,7 @@ use warp::raygun::community::{
     Community, CommunityChannel, CommunityChannelPermission, CommunityChannelType, CommunityInvite,
     CommunityPermission, CommunityRole, RoleId,
 };
-use warp::raygun::{ConversationImage, GroupPermissionOpt};
+use warp::raygun::{ConversationImage, GroupPermissionOpt, Message};
 use warp::{
     constellation::ConstellationProgressStream,
     crypto::DID,
@@ -1623,12 +1624,149 @@ impl MessageStore {
             .await;
         rx.await.map_err(anyhow::Error::from)?
     }
+
+    pub async fn get_community_channel_message(
+        &self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Message, Error> {
+        let inner = &*self.inner.read().await;
+        let community_meta = inner
+            .community_task
+            .get(&community_id)
+            .ok_or(Error::InvalidCommunity)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = community_meta
+            .command_tx
+            .clone()
+            .send(CommunityTaskCommand::GetCommunityChannelMessage {
+                channel_id,
+                message_id,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+    pub async fn get_community_channel_messages(
+        &self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        options: MessageOptions,
+    ) -> Result<Messages, Error> {
+        let inner = &*self.inner.read().await;
+        let community_meta = inner
+            .community_task
+            .get(&community_id)
+            .ok_or(Error::InvalidCommunity)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = community_meta
+            .command_tx
+            .clone()
+            .send(CommunityTaskCommand::GetCommunityChannelMessages {
+                channel_id,
+                options,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+    pub async fn get_community_channel_message_count(
+        &self,
+        community_id: Uuid,
+        channel_id: Uuid,
+    ) -> Result<usize, Error> {
+        let inner = &*self.inner.read().await;
+        let community_meta = inner
+            .community_task
+            .get(&community_id)
+            .ok_or(Error::InvalidCommunity)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = community_meta
+            .command_tx
+            .clone()
+            .send(CommunityTaskCommand::GetCommunityChannelMessageCount {
+                channel_id,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+    pub async fn get_community_channel_message_reference(
+        &self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<MessageReference, Error> {
+        let inner = &*self.inner.read().await;
+        let community_meta = inner
+            .community_task
+            .get(&community_id)
+            .ok_or(Error::InvalidCommunity)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = community_meta
+            .command_tx
+            .clone()
+            .send(CommunityTaskCommand::GetCommunityChannelMessageReference {
+                channel_id,
+                message_id,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+    pub async fn get_community_channel_message_references(
+        &self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        options: MessageOptions,
+    ) -> Result<BoxStream<'static, MessageReference>, Error> {
+        let inner = &*self.inner.read().await;
+        let community_meta = inner
+            .community_task
+            .get(&community_id)
+            .ok_or(Error::InvalidCommunity)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = community_meta
+            .command_tx
+            .clone()
+            .send(CommunityTaskCommand::GetCommunityChannelMessageReferences {
+                channel_id,
+                options,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+    pub async fn community_channel_message_status(
+        &self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<MessageStatus, Error> {
+        let inner = &*self.inner.read().await;
+        let community_meta = inner
+            .community_task
+            .get(&community_id)
+            .ok_or(Error::InvalidCommunity)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = community_meta
+            .command_tx
+            .clone()
+            .send(CommunityTaskCommand::CommunityChannelMessageStatus {
+                channel_id,
+                message_id,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
     pub async fn send_community_channel_message(
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
-        message: &str,
-    ) -> Result<(), Error> {
+        message: Vec<String>,
+    ) -> Result<Uuid, Error> {
         let inner = &*self.inner.read().await;
         let community_meta = inner
             .community_task
@@ -1640,7 +1778,57 @@ impl MessageStore {
             .clone()
             .send(CommunityTaskCommand::SendCommunityChannelMessage {
                 channel_id,
-                message: message.to_string(),
+                message,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+    pub async fn edit_community_channel_message(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+        message: Vec<String>,
+    ) -> Result<(), Error> {
+        let inner = &*self.inner.read().await;
+        let community_meta = inner
+            .community_task
+            .get(&community_id)
+            .ok_or(Error::InvalidCommunity)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = community_meta
+            .command_tx
+            .clone()
+            .send(CommunityTaskCommand::EditCommunityChannelMessage {
+                channel_id,
+                message_id,
+                message,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+    pub async fn reply_to_community_channel_message(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+        message: Vec<String>,
+    ) -> Result<Uuid, Error> {
+        let inner = &*self.inner.read().await;
+        let community_meta = inner
+            .community_task
+            .get(&community_id)
+            .ok_or(Error::InvalidCommunity)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = community_meta
+            .command_tx
+            .clone()
+            .send(CommunityTaskCommand::ReplyToCommunityChannelMessage {
+                channel_id,
+                message_id,
+                message,
                 response: tx,
             })
             .await;
@@ -1650,7 +1838,7 @@ impl MessageStore {
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
-        message_id: Uuid,
+        message_id: Option<Uuid>,
     ) -> Result<(), Error> {
         let inner = &*self.inner.read().await;
         let community_meta = inner
@@ -1666,6 +1854,185 @@ impl MessageStore {
                 message_id,
                 response: tx,
             })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+    pub async fn pin_community_channel_message(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+        state: PinState,
+    ) -> Result<(), Error> {
+        let inner = &*self.inner.read().await;
+        let community_meta = inner
+            .community_task
+            .get(&community_id)
+            .ok_or(Error::InvalidCommunity)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = community_meta
+            .command_tx
+            .clone()
+            .send(CommunityTaskCommand::PinCommunityChannelMessage {
+                channel_id,
+                message_id,
+                state,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+    pub async fn react_to_community_channel_message(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+        state: ReactionState,
+        emoji: String,
+    ) -> Result<(), Error> {
+        let inner = &*self.inner.read().await;
+        let community_meta = inner
+            .community_task
+            .get(&community_id)
+            .ok_or(Error::InvalidCommunity)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = community_meta
+            .command_tx
+            .clone()
+            .send(CommunityTaskCommand::ReactToCommunityChannelMessage {
+                channel_id,
+                message_id,
+                state,
+                emoji,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+    pub async fn send_community_channel_messsage_event(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        event: MessageEvent,
+    ) -> Result<(), Error> {
+        let inner = &*self.inner.read().await;
+        let community_meta = inner
+            .community_task
+            .get(&community_id)
+            .ok_or(Error::InvalidCommunity)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = community_meta
+            .command_tx
+            .clone()
+            .send(CommunityTaskCommand::SendCommunityChannelMesssageEvent {
+                channel_id,
+                event,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+    pub async fn cancel_community_channel_messsage_event(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        event: MessageEvent,
+    ) -> Result<(), Error> {
+        let inner = &*self.inner.read().await;
+        let community_meta = inner
+            .community_task
+            .get(&community_id)
+            .ok_or(Error::InvalidCommunity)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = community_meta
+            .command_tx
+            .clone()
+            .send(CommunityTaskCommand::CancelCommunityChannelMesssageEvent {
+                channel_id,
+                event,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+    pub async fn attach_to_community_channel_message(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Option<Uuid>,
+        locations: Vec<Location>,
+        message: Vec<String>,
+    ) -> Result<(Uuid, AttachmentEventStream), Error> {
+        let inner = &*self.inner.read().await;
+        let community_meta = inner
+            .community_task
+            .get(&community_id)
+            .ok_or(Error::InvalidCommunity)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = community_meta
+            .command_tx
+            .clone()
+            .send(CommunityTaskCommand::AttachToCommunityChannelMessage {
+                channel_id,
+                message_id,
+                locations,
+                message,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+    pub async fn download_from_community_channel_message(
+        &self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+        file: String,
+        path: PathBuf,
+    ) -> Result<ConstellationProgressStream, Error> {
+        let inner = &*self.inner.read().await;
+        let community_meta = inner
+            .community_task
+            .get(&community_id)
+            .ok_or(Error::InvalidCommunity)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = community_meta
+            .command_tx
+            .clone()
+            .send(CommunityTaskCommand::DownloadFromCommunityChannelMessage {
+                channel_id,
+                message_id,
+                file,
+                path,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+    pub async fn download_stream_from_community_channel_message(
+        &self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+        file: &str,
+    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error> {
+        let inner = &*self.inner.read().await;
+        let community_meta = inner
+            .community_task
+            .get(&community_id)
+            .ok_or(Error::InvalidCommunity)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = community_meta
+            .command_tx
+            .clone()
+            .send(
+                CommunityTaskCommand::DownloadStreamFromCommunityChannelMessage {
+                    channel_id,
+                    message_id,
+                    file: file.to_owned(),
+                    response: tx,
+                },
+            )
             .await;
         rx.await.map_err(anyhow::Error::from)?
     }
