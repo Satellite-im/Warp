@@ -503,29 +503,23 @@ impl Stream for DiscoveryPeerTask {
     type Item = DiscoveryPeerEvent;
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         if let Some(fut) = self.is_connected_fut.as_mut() {
-            match fut.poll_unpin(cx) {
-                Poll::Ready(connected) => {
-                    self.connected = connected;
-                    self.is_connected_fut.take();
-                    let event = match connected {
-                        true => DiscoveryPeerEvent::Connected,
-                        false => DiscoveryPeerEvent::Disconnected,
-                    };
-                    return Poll::Ready(Some(event));
-                }
-                Poll::Pending => {}
+            if let Poll::Ready(connected) = fut.poll_unpin(cx) {
+                self.connected = connected;
+                self.is_connected_fut.take();
+                let event = match connected {
+                    true => DiscoveryPeerEvent::Connected,
+                    false => DiscoveryPeerEvent::Disconnected,
+                };
+                return Poll::Ready(Some(event));
             }
         }
 
         if let Some(fut) = self.dialing_task.as_mut() {
-            match fut.poll_unpin(cx) {
-                Poll::Ready(result) => {
-                    if let Err(e) = result {
-                        tracing::error!(error = %e, "dialing failed");
-                    }
-                    self.dialing_task.take();
+            if let Poll::Ready(result) = fut.poll_unpin(cx) {
+                if let Err(e) = result {
+                    tracing::error!(error = %e, "dialing failed");
                 }
-                Poll::Pending => {}
+                self.dialing_task.take();
             }
         }
 
@@ -540,32 +534,34 @@ impl Stream for DiscoveryPeerTask {
                 },
                 DiscoveryPeerStatus::Status { ref mut stream } => {
                     match stream.poll_next_unpin(cx) {
-                        Poll::Ready(Some(event)) => match event {
-                            PeerConnectionEvents::IncomingConnection {
-                                connection_id,
-                                addr,
-                            }
-                            | PeerConnectionEvents::OutgoingConnection {
-                                connection_id,
-                                addr,
-                            } => {
-                                let currently_connected =
-                                    !self.connections.is_empty() | self.connected;
-                                self.addresses.insert(addr.clone());
-                                self.connections.insert(connection_id, addr);
-                                self.connected = true;
-                                if !currently_connected {
-                                    return Poll::Ready(Some(DiscoveryPeerEvent::Connected));
+                        Poll::Ready(Some(event)) => {
+                            let (id, addr) = match event {
+                                PeerConnectionEvents::IncomingConnection {
+                                    connection_id,
+                                    addr,
+                                } => (connection_id, addr),
+                                PeerConnectionEvents::OutgoingConnection {
+                                    connection_id,
+                                    addr,
+                                } => (connection_id, addr),
+                                PeerConnectionEvents::ClosedConnection { connection_id } => {
+                                    self.connections.remove(&connection_id);
+                                    if self.connections.is_empty() {
+                                        self.connected = false;
+                                        return Poll::Ready(Some(DiscoveryPeerEvent::Disconnected));
+                                    }
+                                    continue;
                                 }
+                            };
+
+                            let currently_connected = !self.connections.is_empty() | self.connected;
+                            self.addresses.insert(addr.clone());
+                            self.connections.insert(id, addr);
+                            self.connected = true;
+                            if !currently_connected {
+                                return Poll::Ready(Some(DiscoveryPeerEvent::Connected));
                             }
-                            PeerConnectionEvents::ClosedConnection { connection_id } => {
-                                self.connections.remove(&connection_id);
-                                if self.connections.is_empty() {
-                                    self.connected = false;
-                                    return Poll::Ready(Some(DiscoveryPeerEvent::Disconnected));
-                                }
-                            }
-                        },
+                        }
                         Poll::Ready(None) => unreachable!(),
                         Poll::Pending => break,
                     }
@@ -705,30 +701,29 @@ impl Future for DiscoveryTask {
 
         loop {
             match self.connection_event.poll_next_unpin(cx) {
-                Poll::Ready(Some(event)) => match event {
-                    ConnectionEvents::IncomingConnection {
-                        peer_id,
-                        connection_id,
-                        addr,
-                    }
-                    | ConnectionEvents::OutgoingConnection {
-                        peer_id,
-                        connection_id,
-                        addr,
-                    } => {
-                        if self.peers.contains_key(&peer_id) {
-                            continue;
-                        }
+                Poll::Ready(Some(event)) => {
+                    let (peer_id, id, addr) = match event {
+                        ConnectionEvents::IncomingConnection {
+                            peer_id,
+                            connection_id,
+                            addr,
+                        } => (peer_id, connection_id, addr),
+                        ConnectionEvents::OutgoingConnection {
+                            peer_id,
+                            connection_id,
+                            addr,
+                        } => (peer_id, connection_id, addr),
+                        _ => continue,
+                    };
 
-                        let task = DiscoveryPeerTask::new(&self.ipfs, peer_id)
-                            .set_connection(connection_id, addr);
+                    if self.peers.contains_key(&peer_id) {
+                        continue;
+                    }
 
-                        self.peers.insert(peer_id, task);
-                    }
-                    ConnectionEvents::ClosedConnection { .. } => {
-                        // Note: Since we are handling individual peers connection tracking, we can ignore this event
-                    }
-                },
+                    let task = DiscoveryPeerTask::new(&self.ipfs, peer_id).set_connection(id, addr);
+
+                    self.peers.insert(peer_id, task);
+                }
                 Poll::Ready(None) => unreachable!(),
                 Poll::Pending => break,
             }
