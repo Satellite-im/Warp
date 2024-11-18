@@ -252,17 +252,59 @@ impl ConversationDocument {
 
 impl ConversationDocument {
     pub fn sign(&mut self, keypair: &Keypair) -> Result<(), Error> {
-        if let ConversationType::Group = self.conversation_type() {
-            assert_eq!(self.conversation_type(), ConversationType::Group);
-            let Some(creator) = self.creator.clone() else {
-                return Err(Error::PublicKeyInvalid);
-            };
+        if self.conversation_type() == ConversationType::Direct {
+            return Ok(());
+        }
 
-            if self.version != ConversationVersion::default() {
-                self.version = ConversationVersion::default();
-            }
+        let Some(creator) = self.creator.as_ref() else {
+            return Err(Error::PublicKeyInvalid);
+        };
 
-            let construct = warp::crypto::hash::sha256_iter(
+        if self.version != ConversationVersion::default() {
+            self.version = ConversationVersion::default();
+        }
+
+        let construct = warp::crypto::hash::sha256_iter(
+            [
+                Some(self.id().into_bytes().to_vec()),
+                Some(creator.to_string().as_bytes().to_vec()),
+                Some(Vec::from_iter(
+                    self.restrict
+                        .iter()
+                        .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+                )),
+                self.icon.map(|s| s.hash().digest().to_vec()),
+                self.banner.map(|s| s.hash().digest().to_vec()),
+            ]
+            .into_iter(),
+            None,
+        );
+
+        let signature = keypair.sign(&construct).expect("not RSA");
+        self.signature = Some(bs58::encode(signature).into_string());
+
+        Ok(())
+    }
+
+    pub fn verify(&self) -> Result<(), Error> {
+        if self.conversation_type() == ConversationType::Direct {
+            return Ok(());
+        }
+
+        let Some(creator) = self.creator.as_ref() else {
+            return Err(Error::PublicKeyInvalid);
+        };
+
+        let creator_pk = creator.to_public_key()?;
+
+        let Some(signature) = self.signature.as_ref() else {
+            return Err(Error::InvalidSignature);
+        };
+
+        let signature = bs58::decode(signature).into_vec()?;
+
+        let construct = match self.version {
+            ConversationVersion::V0 => warp::crypto::hash::sha256_iter(
                 [
                     Some(self.id().into_bytes().to_vec()),
                     Some(creator.to_string().as_bytes().to_vec()),
@@ -276,51 +318,13 @@ impl ConversationDocument {
                 ]
                 .into_iter(),
                 None,
-            );
+            ),
+        };
 
-            let signature = keypair.sign(&construct).expect("not RSA");
-            self.signature = Some(bs58::encode(signature).into_string());
+        if !creator_pk.verify(&construct, &signature) {
+            return Err(Error::InvalidSignature);
         }
-        Ok(())
-    }
 
-    pub fn verify(&self) -> Result<(), Error> {
-        if let ConversationType::Group = &self.conversation_type() {
-            assert_eq!(self.conversation_type(), ConversationType::Group);
-            let Some(creator) = &self.creator else {
-                return Err(Error::PublicKeyInvalid);
-            };
-
-            let creator_pk = creator.to_public_key()?;
-
-            let Some(signature) = &self.signature else {
-                return Err(Error::InvalidSignature);
-            };
-
-            let signature = bs58::decode(signature).into_vec()?;
-
-            let construct = match self.version {
-                ConversationVersion::V0 => warp::crypto::hash::sha256_iter(
-                    [
-                        Some(self.id().into_bytes().to_vec()),
-                        Some(creator.to_string().as_bytes().to_vec()),
-                        Some(Vec::from_iter(
-                            self.restrict
-                                .iter()
-                                .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
-                        )),
-                        self.icon.map(|s| s.hash().digest().to_vec()),
-                        self.banner.map(|s| s.hash().digest().to_vec()),
-                    ]
-                    .into_iter(),
-                    None,
-                ),
-            };
-
-            if !creator_pk.verify(&construct, &signature) {
-                return Err(Error::InvalidSignature);
-            }
-        }
         Ok(())
     }
 
