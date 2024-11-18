@@ -224,8 +224,8 @@ mod test {
         Ok(())
     }
     #[async_test]
-    async fn delete_community_as_non_owner() -> anyhow::Result<()> {
-        let context = Some("test::delete_community_as_non_owner".into());
+    async fn delete_community_as_non_owner_member() -> anyhow::Result<()> {
+        let context = Some("test::delete_community_as_non_owner_member".into());
         let acc = (None, None, context);
         let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
@@ -264,6 +264,22 @@ mod test {
             },
             Ok(_) => panic!("should be unauthorized to delete community"),
         }
+        Ok(())
+    }
+
+    #[async_test]
+    async fn delete_community_as_non_member() -> anyhow::Result<()> {
+        let context = Some("test::delete_community_as_non_member".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, _, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+
+        let result = instance_b.delete_community(community.id()).await;
+        let expected_err = Err::<Community, warp::error::Error>(Error::InvalidCommunity);
+        assert_eq!(format!("{:?}", result), format!("{:?}", expected_err));
         Ok(())
     }
 
