@@ -2985,7 +2985,8 @@ impl ConversationInner {
         }
         let doc = self.delete_community_task(community_id).await?;
 
-        let peer_id_list = doc.participants()
+        let peer_id_list = doc
+            .participants()
             .clone()
             .iter()
             .filter(|did| own_did.ne(did))
@@ -3024,11 +3025,7 @@ impl ConversationInner {
                 //      For now we will queue the message if we hit an error
                 self.queue_event(
                     recipient.clone(),
-                    Queue::direct(
-                        peer_id,
-                        recipient.messaging(),
-                        payload.message().to_vec(),
-                    ),
+                    Queue::direct(peer_id, recipient.messaging(), payload.message().to_vec()),
                 )
                 .await;
                 time = false;
@@ -3277,10 +3274,7 @@ async fn process_conversation(
             let sender = data.sender().to_did()?;
 
             match this.get_community_document(community_id).await {
-                Ok(community) if community.owner.eq(&sender) =>
-                {
-                    community
-                }
+                Ok(community) if community.owner.eq(&sender) => community,
                 _ => {
                     return Err(anyhow::anyhow!(
                         "Community exist but did not match condition required"

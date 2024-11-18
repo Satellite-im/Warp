@@ -177,11 +177,7 @@ mod test {
             }
         );
         let invite = instance_a
-            .create_community_invite(
-                community.id(),
-                Some(did_b.clone()),
-                None,
-            )
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
@@ -190,7 +186,7 @@ mod test {
                 invite_id: invite.id()
             }
         );
-        
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite.id())
@@ -238,11 +234,7 @@ mod test {
         let community = instance_a.create_community("Community0").await?;
         let mut rg_stream_b = instance_b.raygun_subscribe().await?;
         let invite = instance_a
-            .create_community_invite(
-                community.id(),
-                Some(did_b.clone()),
-                None,
-            )
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
@@ -251,7 +243,7 @@ mod test {
                 invite_id: invite.id()
             }
         );
-        
+
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
         instance_b
             .accept_community_invite(community.id(), invite.id())
