@@ -160,8 +160,8 @@ mod test {
     }
 
     #[async_test]
-    async fn delete_community_as_creator() -> anyhow::Result<()> {
-        let context = Some("test::delete_community_as_creator".into());
+    async fn delete_community_as_owner() -> anyhow::Result<()> {
+        let context = Some("test::delete_community_as_owner".into());
         let acc = (None, None, context);
         let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
@@ -224,8 +224,8 @@ mod test {
         Ok(())
     }
     #[async_test]
-    async fn delete_community_as_non_creator() -> anyhow::Result<()> {
-        let context = Some("test::delete_community_as_non_creator".into());
+    async fn delete_community_as_non_owner() -> anyhow::Result<()> {
+        let context = Some("test::delete_community_as_non_owner".into());
         let acc = (None, None, context);
         let accounts = create_accounts(vec![acc.clone(), acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
@@ -1417,8 +1417,8 @@ mod test {
         Ok(())
     }
     #[async_test]
-    async fn edit_community_description_as_creator() -> anyhow::Result<()> {
-        let context = Some("test::edit_community_description_as_creator".into());
+    async fn edit_community_description_as_owner() -> anyhow::Result<()> {
+        let context = Some("test::edit_community_description_as_owner".into());
         let acc = (None, None, context);
         let accounts = create_accounts(vec![acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
