@@ -378,11 +378,6 @@ impl IdentityStore {
         identity_command: futures::channel::mpsc::Sender<IdentityCommand>,
         span: &Span,
     ) -> Result<Self, Error> {
-        if let Some(path) = config.path() {
-            if !path.exists() {
-                fs::create_dir_all(path).await?;
-            }
-        }
         let config = config.clone();
 
         let identity_cache = IdentityCache::new(ipfs).await;
