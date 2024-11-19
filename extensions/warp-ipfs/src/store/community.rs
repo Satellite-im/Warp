@@ -305,25 +305,18 @@ impl CommunityDocument {
         if !self.members.contains(user) {
             return false;
         }
-        let permission = has_permission.to_string();
-        let nodes = permission.split('.');
-        let mut prev = None;
-        for node in nodes.into_iter() {
-            let node = match prev {
-                Some(prev) => format!("{}.{}", prev, node),
-                None => node.to_string(),
-            };
-            let Some(authorized_roles) = self.permissions.get(&node) else {
-                return true;
-            };
-            for authorized_role in authorized_roles {
-                if let Some(role) = self.roles.get(&authorized_role.to_string()) {
-                    if role.members.contains(user) {
-                        return true;
-                    }
+        // TODO: What happens with conflicting roles. ATM it finds the first applicable
+        let permissions = parse_permission(&has_permission.to_string());
+        let authorized_roles = permissions.iter().find_map(|node|self.permissions.get(node));
+        let Some(authorized_roles) = authorized_roles else {
+            return true;
+        };
+        for authorized_role in authorized_roles {
+            if let Some(role) = self.roles.get(&authorized_role.to_string()) {
+                if role.members.contains(user) {
+                    return true;
                 }
             }
-            prev = Some(node);
         }
         false
     }
@@ -346,28 +339,29 @@ impl CommunityDocument {
         let Some(channel) = self.channels.get(&channel_id.to_string()) else {
             return false;
         };
-        let permission = has_permission.to_string();
-        let nodes = permission.split('.');
-        let mut prev = None;
-        for node in nodes.into_iter() {
-            let node = match prev {
-                Some(prev) => format!("{}.{}", prev, node),
-                None => node.to_string(),
-            };
-            let Some(authorized_roles) = channel.permissions.get(&node) else {
-                return true;
-            };
-            for authorized_role in authorized_roles {
-                if let Some(role) = self.roles.get(&authorized_role.to_string()) {
-                    if role.members.contains(user) {
-                        return true;
-                    }
+        // TODO: What happens with conflicting roles. ATM it finds the first applicable
+        let permissions = parse_permission(&has_permission.to_string());
+        let authorized_roles = permissions.iter().find_map(|node|channel.permissions.get(node));
+        let Some(authorized_roles) = authorized_roles else {
+            return true;
+        };
+        for authorized_role in authorized_roles {
+            if let Some(role) = self.roles.get(&authorized_role.to_string()) {
+                if role.members.contains(user) {
+                    return true;
                 }
             }
-            prev = Some(node);
         }
         false
     }
+}
+fn parse_permission(permission: &String) -> Vec<String> {
+    let split: Vec<_> = permission.split(".").collect();
+    let mut nodes = vec![];
+    for i in (1..=split.len()).rev() {
+        nodes.push(split[0..i].join("."));
+    }
+    nodes
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommunityChannelDocument {

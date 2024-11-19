@@ -4,11 +4,11 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, Data, DeriveInput};
 
-///
 /// Implements Display for enum values with formatting and snake_case conversion
 /// This is used for CommunityPermissions
 /// E.g.
-/// ```rust
+/// ```
+/// use enum_macro::EnumFormatting;
 /// #[derive(EnumFormatting)]
 /// pub enum SomeEnum {
 ///     #[permission(formatting="prefix.{}")]
@@ -16,8 +16,8 @@ use syn::{parse_macro_input, Data, DeriveInput};
 ///     SomeValue2
 /// }
 ///
-/// assert_eq!(SomeEnum::SomeValue1.to_string(), "prefix.some_value_1")
-/// assert_eq!(SomeEnum::SomeValue2.to_string(), "some_value_2")
+/// assert_eq!(SomeEnum::SomeValue1.to_string(), "prefix.some_value1");
+/// assert_eq!(SomeEnum::SomeValue2.to_string(), "some_value2");
 /// ```
 #[proc_macro_derive(EnumFormatting, attributes(permission))]
 pub fn permission_node(input: TokenStream) -> TokenStream {
@@ -84,17 +84,17 @@ pub fn permission_node(input: TokenStream) -> TokenStream {
     }
 }
 
-///
 /// Implements #values() for enum values that returns all defined values in the enum
 /// E.g.
-/// ```rust
-/// #[derive(EnumValues, PartialEq)]
+/// ```
+/// use enum_macro::EnumValues;
+/// #[derive(EnumValues, PartialEq, Debug)]
 /// pub enum SomeEnum {
 ///     SomeValue1,
 ///     SomeValue2
 /// }
 ///
-/// assert_eq!([SomeEnum::SomeValue1, SomeEnum::SomeValue2], SomeEnum::values())
+/// assert_eq!([SomeEnum::SomeValue1, SomeEnum::SomeValue2], SomeEnum::values());
 /// ```
 #[proc_macro_derive(EnumValues)]
 pub fn enum_values(input: TokenStream) -> TokenStream {
