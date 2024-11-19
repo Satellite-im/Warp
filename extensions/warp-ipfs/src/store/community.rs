@@ -359,7 +359,7 @@ impl CommunityDocument {
         false
     }
 }
-fn parse_permission(permission: &String) -> Vec<String> {
+fn parse_permission(permission: &str) -> Vec<String> {
     let split: Vec<_> = permission.split(".").collect();
     let mut nodes = vec![];
     for i in (1..=split.len()).rev() {
