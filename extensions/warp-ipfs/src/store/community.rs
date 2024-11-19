@@ -305,7 +305,6 @@ impl CommunityDocument {
         if !self.members.contains(user) {
             return false;
         }
-        // TODO: What happens with conflicting roles. ATM it finds the first applicable
         let permissions = parse_permission(&has_permission.to_string());
         let authorized_roles = permissions
             .iter()
@@ -341,7 +340,6 @@ impl CommunityDocument {
         let Some(channel) = self.channels.get(&channel_id.to_string()) else {
             return false;
         };
-        // TODO: What happens with conflicting roles. ATM it finds the first applicable
         let permissions = parse_permission(&has_permission.to_string());
         let authorized_roles = permissions
             .iter()
@@ -359,6 +357,8 @@ impl CommunityDocument {
         false
     }
 }
+/// Turns a permission string into nodes to check against
+/// E.g. some.random.permission -> vec!["some.random.permission", "some.random", "some"]
 fn parse_permission(permission: &str) -> Vec<String> {
     let split: Vec<_> = permission.split(".").collect();
     let mut nodes = vec![];
