@@ -8,10 +8,7 @@ use crate::error::Error;
 use crate::raygun::community::RayGunCommunity;
 use crate::{Extension, SingleHandle};
 
-use community::{
-    CommunityChannel, CommunityChannelPermission, CommunityInvite, CommunityPermission,
-    CommunityRole, RoleId,
-};
+use community::{CommunityChannel, CommunityInvite, CommunityRole, RoleId};
 use derive_more::Display;
 use futures::stream::BoxStream;
 
@@ -190,21 +187,21 @@ pub enum MessageEventKind {
     },
     GrantedCommunityPermission {
         community_id: Uuid,
-        permission: CommunityPermission,
+        permission: String,
         role_id: RoleId,
     },
     RevokedCommunityPermission {
         community_id: Uuid,
-        permission: CommunityPermission,
+        permission: String,
         role_id: RoleId,
     },
     GrantedCommunityPermissionForAll {
         community_id: Uuid,
-        permission: CommunityPermission,
+        permission: String,
     },
     RevokedCommunityPermissionForAll {
         community_id: Uuid,
-        permission: CommunityPermission,
+        permission: String,
     },
     RemovedCommunityMember {
         community_id: Uuid,
@@ -223,24 +220,24 @@ pub enum MessageEventKind {
     GrantedCommunityChannelPermission {
         community_id: Uuid,
         channel_id: Uuid,
-        permission: CommunityChannelPermission,
+        permission: String,
         role_id: RoleId,
     },
     RevokedCommunityChannelPermission {
         community_id: Uuid,
         channel_id: Uuid,
-        permission: CommunityChannelPermission,
+        permission: String,
         role_id: RoleId,
     },
     GrantedCommunityChannelPermissionForAll {
         community_id: Uuid,
         channel_id: Uuid,
-        permission: CommunityChannelPermission,
+        permission: String,
     },
     RevokedCommunityChannelPermissionForAll {
         community_id: Uuid,
         channel_id: Uuid,
-        permission: CommunityChannelPermission,
+        permission: String,
     },
 }
 

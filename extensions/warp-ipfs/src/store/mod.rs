@@ -30,10 +30,7 @@ use warp::{
     },
     error::Error,
     multipass::identity::IdentityStatus,
-    raygun::{
-        community::{CommunityChannelPermission, CommunityPermission, RoleId},
-        GroupPermissions, MessageEvent, PinState, ReactionState,
-    },
+    raygun::{community::RoleId, GroupPermissions, MessageEvent, PinState, ReactionState},
 };
 
 use conversation::{message::MessageDocument, ConversationDocument};
@@ -504,18 +501,18 @@ pub enum CommunityUpdateKind {
         description: Option<String>,
     },
     GrantCommunityPermission {
-        permission: CommunityPermission,
+        permission: String,
         role_id: RoleId,
     },
     RevokeCommunityPermission {
-        permission: CommunityPermission,
+        permission: String,
         role_id: RoleId,
     },
     GrantCommunityPermissionForAll {
-        permission: CommunityPermission,
+        permission: String,
     },
     RevokeCommunityPermissionForAll {
-        permission: CommunityPermission,
+        permission: String,
     },
     RemoveCommunityMember {
         member: DID,
@@ -530,21 +527,21 @@ pub enum CommunityUpdateKind {
     },
     GrantCommunityChannelPermission {
         channel_id: Uuid,
-        permission: CommunityChannelPermission,
+        permission: String,
         role_id: RoleId,
     },
     RevokeCommunityChannelPermission {
         channel_id: Uuid,
-        permission: CommunityChannelPermission,
+        permission: String,
         role_id: RoleId,
     },
     GrantCommunityChannelPermissionForAll {
         channel_id: Uuid,
-        permission: CommunityChannelPermission,
+        permission: String,
     },
     RevokeCommunityChannelPermissionForAll {
         channel_id: Uuid,
-        permission: CommunityChannelPermission,
+        permission: String,
     },
 }
 

@@ -160,21 +160,21 @@ pub enum CommunityTaskCommand {
         response: oneshot::Sender<Result<(), Error>>,
     },
     GrantCommunityPermission {
-        permission: CommunityPermission,
+        permission: String,
         role_id: RoleId,
         response: oneshot::Sender<Result<(), Error>>,
     },
     RevokeCommunityPermission {
-        permission: CommunityPermission,
+        permission: String,
         role_id: RoleId,
         response: oneshot::Sender<Result<(), Error>>,
     },
     GrantCommunityPermissionForAll {
-        permission: CommunityPermission,
+        permission: String,
         response: oneshot::Sender<Result<(), Error>>,
     },
     RevokeCommunityPermissionForAll {
-        permission: CommunityPermission,
+        permission: String,
         response: oneshot::Sender<Result<(), Error>>,
     },
     RemoveCommunityMember {
@@ -193,24 +193,24 @@ pub enum CommunityTaskCommand {
     },
     GrantCommunityChannelPermission {
         channel_id: Uuid,
-        permission: CommunityChannelPermission,
+        permission: String,
         role_id: RoleId,
         response: oneshot::Sender<Result<(), Error>>,
     },
     RevokeCommunityChannelPermission {
         channel_id: Uuid,
-        permission: CommunityChannelPermission,
+        permission: String,
         role_id: RoleId,
         response: oneshot::Sender<Result<(), Error>>,
     },
     GrantCommunityChannelPermissionForAll {
         channel_id: Uuid,
-        permission: CommunityChannelPermission,
+        permission: String,
         response: oneshot::Sender<Result<(), Error>>,
     },
     RevokeCommunityChannelPermissionForAll {
         channel_id: Uuid,
-        permission: CommunityChannelPermission,
+        permission: String,
         response: oneshot::Sender<Result<(), Error>>,
     },
     GetCommunityChannelMessage {
@@ -2007,7 +2007,7 @@ impl CommunityTask {
 
     pub async fn grant_community_permission(
         &mut self,
-        permission: CommunityPermission,
+        permission: String,
         role_id: RoleId,
     ) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
@@ -2025,7 +2025,7 @@ impl CommunityTask {
             None => {
                 let mut roles = IndexSet::new();
                 roles.insert(role_id);
-                self.document.permissions.insert(permission, roles);
+                self.document.permissions.insert(permission.clone(), roles);
             }
         }
         self.set_document().await?;
@@ -2034,7 +2034,7 @@ impl CommunityTask {
             .event_broadcast
             .send(MessageEventKind::GrantedCommunityPermission {
                 community_id: self.community_id,
-                permission,
+                permission: permission.clone(),
                 role_id,
             });
 
@@ -2054,7 +2054,7 @@ impl CommunityTask {
     }
     pub async fn revoke_community_permission(
         &mut self,
-        permission: CommunityPermission,
+        permission: String,
         role_id: RoleId,
     ) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
@@ -2069,12 +2069,11 @@ impl CommunityTask {
             authorized_roles.swap_remove(&role_id);
         }
         self.set_document().await?;
-
         let _ = self
             .event_broadcast
             .send(MessageEventKind::RevokedCommunityPermission {
                 community_id: self.community_id,
-                permission,
+                permission: permission.clone(),
                 role_id,
             });
 
@@ -2094,7 +2093,7 @@ impl CommunityTask {
     }
     pub async fn grant_community_permission_for_all(
         &mut self,
-        permission: CommunityPermission,
+        permission: String,
     ) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
         if !self
@@ -2115,7 +2114,7 @@ impl CommunityTask {
             .event_broadcast
             .send(MessageEventKind::GrantedCommunityPermissionForAll {
                 community_id: self.community_id,
-                permission,
+                permission: permission.clone(),
             });
 
         self.publish(
@@ -2131,7 +2130,7 @@ impl CommunityTask {
     }
     pub async fn revoke_community_permission_for_all(
         &mut self,
-        permission: CommunityPermission,
+        permission: String,
     ) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
         if !self
@@ -2143,14 +2142,14 @@ impl CommunityTask {
 
         self.document
             .permissions
-            .insert(permission, IndexSet::new());
+            .insert(permission.clone(), IndexSet::new());
         self.set_document().await?;
 
         let _ = self
             .event_broadcast
             .send(MessageEventKind::RevokedCommunityPermissionForAll {
                 community_id: self.community_id,
-                permission,
+                permission: permission.clone(),
             });
 
         self.publish(
@@ -2287,7 +2286,7 @@ impl CommunityTask {
     pub async fn grant_community_channel_permission(
         &mut self,
         channel_id: Uuid,
-        permission: CommunityChannelPermission,
+        permission: String,
         role_id: RoleId,
     ) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
@@ -2310,7 +2309,7 @@ impl CommunityTask {
             None => {
                 let mut roles = IndexSet::new();
                 roles.insert(role_id);
-                channel_doc.permissions.insert(permission, roles);
+                channel_doc.permissions.insert(permission.clone(), roles);
             }
         }
         self.set_document().await?;
@@ -2320,7 +2319,7 @@ impl CommunityTask {
             .send(MessageEventKind::GrantedCommunityChannelPermission {
                 community_id: self.community_id,
                 channel_id,
-                permission,
+                permission: permission.clone(),
                 role_id,
             });
 
@@ -2342,7 +2341,7 @@ impl CommunityTask {
     pub async fn revoke_community_channel_permission(
         &mut self,
         channel_id: Uuid,
-        permission: CommunityChannelPermission,
+        permission: String,
         role_id: RoleId,
     ) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
@@ -2368,7 +2367,7 @@ impl CommunityTask {
             .send(MessageEventKind::RevokedCommunityChannelPermission {
                 community_id: self.community_id,
                 channel_id,
-                permission,
+                permission: permission.clone(),
                 role_id,
             });
 
@@ -2390,7 +2389,7 @@ impl CommunityTask {
     pub async fn grant_community_channel_permission_for_all(
         &mut self,
         channel_id: Uuid,
-        permission: CommunityChannelPermission,
+        permission: String,
     ) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
         if !self
@@ -2417,7 +2416,7 @@ impl CommunityTask {
                 .send(MessageEventKind::GrantedCommunityChannelPermissionForAll {
                     community_id: self.community_id,
                     channel_id,
-                    permission,
+                    permission: permission.clone(),
                 });
 
         self.publish(
@@ -2437,7 +2436,7 @@ impl CommunityTask {
     pub async fn revoke_community_channel_permission_for_all(
         &mut self,
         channel_id: Uuid,
-        permission: CommunityChannelPermission,
+        permission: String,
     ) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
         if !self
@@ -2452,7 +2451,9 @@ impl CommunityTask {
             .channels
             .get_mut(&channel_id.to_string())
             .ok_or(Error::CommunityChannelDoesntExist)?;
-        channel_doc.permissions.insert(permission, IndexSet::new());
+        channel_doc
+            .permissions
+            .insert(permission.clone(), IndexSet::new());
         self.set_document().await?;
 
         let _ =
@@ -2460,7 +2461,7 @@ impl CommunityTask {
                 .send(MessageEventKind::RevokedCommunityChannelPermissionForAll {
                     community_id: self.community_id,
                     channel_id,
-                    permission,
+                    permission: permission.clone(),
                 });
 
         self.publish(

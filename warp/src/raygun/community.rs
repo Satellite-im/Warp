@@ -15,11 +15,12 @@ use super::{
     AttachmentEventStream, ConversationImage, Message, MessageEvent, MessageEventStream,
     MessageOptions, MessageReference, MessageStatus, Messages, PinState, ReactionState,
 };
+use enum_macro::{EnumFormatting, EnumValues};
 
 pub type RoleId = Uuid;
 pub type CommunityRoles = IndexMap<RoleId, CommunityRole>;
-pub type CommunityPermissions = IndexMap<CommunityPermission, IndexSet<RoleId>>;
-pub type CommunityChannelPermissions = IndexMap<CommunityChannelPermission, IndexSet<RoleId>>;
+pub type CommunityPermissions = IndexMap<String, IndexSet<RoleId>>;
+pub type CommunityChannelPermissions = IndexMap<String, IndexSet<RoleId>>;
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommunityRole {
@@ -237,41 +238,88 @@ pub enum CommunityChannelType {
     VoiceEnabled,
 }
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "snake_case")]
+/// Built-in CommunityPermission for ease of access
+#[derive(Debug, Copy, Clone, EnumFormatting, EnumValues, PartialEq, Eq, Hash)]
 pub enum CommunityPermission {
+    #[permission(formatting = "community.visuals.{}")]
     EditName,
+    #[permission(formatting = "community.visuals.{}")]
     EditDescription,
+    #[permission(formatting = "community.visuals.{}")]
     EditIcon,
+    #[permission(formatting = "community.visuals.{}")]
     EditBanner,
 
+    #[permission(formatting = "community.roles.{}")]
     CreateRoles,
+    #[permission(formatting = "community.roles.{}")]
     EditRoles,
+    #[permission(formatting = "community.roles.{}")]
     DeleteRoles,
 
+    #[permission(formatting = "community.roles.{}")]
     GrantRoles,
+    #[permission(formatting = "community.roles.{}")]
     RevokeRoles,
 
+    #[permission(formatting = "community.permissions.{}")]
     GrantPermissions,
+    #[permission(formatting = "community.permissions.{}")]
     RevokePermissions,
 
+    #[permission(formatting = "community.invites.{}")]
     CreateInvites,
+    #[permission(formatting = "community.invites.{}")]
     EditInvites,
+    #[permission(formatting = "community.invites.{}")]
     DeleteInvites,
 
+    #[permission(formatting = "community.channels.{}")]
     CreateChannels,
+    #[permission(formatting = "community.channels.{}")]
     EditChannels,
+    #[permission(formatting = "community.channels.{}")]
     DeleteChannels,
 
+    #[permission(formatting = "community.members.{}")]
     RemoveMembers,
 
+    #[permission(formatting = "community.messages.{}")]
     DeleteMessages,
 }
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "snake_case")]
+impl CommunityPermission {
+    pub fn default_disabled() -> Vec<CommunityPermission> {
+        vec![
+            CommunityPermission::EditName,
+            CommunityPermission::EditDescription,
+            CommunityPermission::EditIcon,
+            CommunityPermission::EditBanner,
+            CommunityPermission::CreateRoles,
+            CommunityPermission::EditRoles,
+            CommunityPermission::DeleteRoles,
+            CommunityPermission::GrantRoles,
+            CommunityPermission::RevokeRoles,
+            CommunityPermission::GrantPermissions,
+            CommunityPermission::RevokePermissions,
+            //We don't add CreateInvites permission since by default we leave it unrestricted.
+            CommunityPermission::EditInvites,
+            CommunityPermission::DeleteInvites,
+            CommunityPermission::CreateChannels,
+            CommunityPermission::EditChannels,
+            CommunityPermission::DeleteChannels,
+            CommunityPermission::RemoveMembers,
+            CommunityPermission::DeleteMessages,
+        ]
+    }
+}
+
+/// Built-in CommunityChannelPermission for ease of access
+#[derive(Debug, Copy, Clone, EnumFormatting, EnumValues, PartialEq, Eq, Hash)]
 pub enum CommunityChannelPermission {
+    #[permission(formatting = "community_channel.{}")]
     ViewChannel,
+    #[permission(formatting = "community_channel.{}")]
     SendMessages,
 }
 
@@ -442,34 +490,46 @@ pub trait RayGunCommunity: Sync + Send {
     ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
-    async fn grant_community_permission(
+    async fn grant_community_permission<T>(
         &mut self,
         _community_id: Uuid,
-        _permission: CommunityPermission,
+        _permission: T,
         _role_id: RoleId,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        T: ToString + Send,
+    {
         Err(Error::Unimplemented)
     }
-    async fn revoke_community_permission(
+    async fn revoke_community_permission<T>(
         &mut self,
         _community_id: Uuid,
-        _permission: CommunityPermission,
+        _permission: T,
         _role_id: RoleId,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        T: ToString + Send,
+    {
         Err(Error::Unimplemented)
     }
-    async fn grant_community_permission_for_all(
+    async fn grant_community_permission_for_all<T>(
         &mut self,
         _community_id: Uuid,
-        _permission: CommunityPermission,
-    ) -> Result<(), Error> {
+        _permission: T,
+    ) -> Result<(), Error>
+    where
+        T: ToString + Send,
+    {
         Err(Error::Unimplemented)
     }
-    async fn revoke_community_permission_for_all(
+    async fn revoke_community_permission_for_all<T>(
         &mut self,
         _community_id: Uuid,
-        _permission: CommunityPermission,
-    ) -> Result<(), Error> {
+        _permission: T,
+    ) -> Result<(), Error>
+    where
+        T: ToString + Send,
+    {
         Err(Error::Unimplemented)
     }
     async fn remove_community_member(
@@ -496,38 +556,50 @@ pub trait RayGunCommunity: Sync + Send {
     ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
-    async fn grant_community_channel_permission(
+    async fn grant_community_channel_permission<T>(
         &mut self,
         _community_id: Uuid,
         _channel_id: Uuid,
-        _permission: CommunityChannelPermission,
+        _permission: T,
         _role_id: RoleId,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        T: ToString + Send,
+    {
         Err(Error::Unimplemented)
     }
-    async fn revoke_community_channel_permission(
+    async fn revoke_community_channel_permission<T>(
         &mut self,
         _community_id: Uuid,
         _channel_id: Uuid,
-        _permission: CommunityChannelPermission,
+        _permission: T,
         _role_id: RoleId,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        T: ToString + Send,
+    {
         Err(Error::Unimplemented)
     }
-    async fn grant_community_channel_permission_for_all(
+    async fn grant_community_channel_permission_for_all<T>(
         &mut self,
         _community_id: Uuid,
         _channel_id: Uuid,
-        _permission: CommunityChannelPermission,
-    ) -> Result<(), Error> {
+        _permission: T,
+    ) -> Result<(), Error>
+    where
+        T: ToString + Send,
+    {
         Err(Error::Unimplemented)
     }
-    async fn revoke_community_channel_permission_for_all(
+    async fn revoke_community_channel_permission_for_all<T>(
         &mut self,
         _community_id: Uuid,
         _channel_id: Uuid,
-        _permission: CommunityChannelPermission,
-    ) -> Result<(), Error> {
+        _permission: T,
+    ) -> Result<(), Error>
+    where
+        T: ToString + Send,
+    {
         Err(Error::Unimplemented)
     }
 

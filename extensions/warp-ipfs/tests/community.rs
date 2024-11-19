@@ -1558,7 +1558,7 @@ mod test {
         let community = instance_a.get_community(community.id()).await?;
         assert!(community
             .permissions()
-            .get(&CommunityPermission::EditName)
+            .get(&CommunityPermission::EditName.to_string())
             .unwrap()
             .contains(&role.id()));
         Ok(())
@@ -2107,7 +2107,7 @@ mod test {
             .await?;
         assert!(channel
             .permissions()
-            .get(&CommunityChannelPermission::ViewChannel)
+            .get(&CommunityChannelPermission::ViewChannel.to_string())
             .is_none());
         Ok(())
     }

@@ -55,8 +55,7 @@ use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
 use crate::store::community::CommunityDocument;
 use chrono::{DateTime, Utc};
 use warp::raygun::community::{
-    Community, CommunityChannel, CommunityChannelPermission, CommunityChannelType, CommunityInvite,
-    CommunityPermission, CommunityRole, RoleId,
+    Community, CommunityChannel, CommunityChannelType, CommunityInvite, CommunityRole, RoleId,
 };
 use warp::raygun::{ConversationImage, GroupPermissionOpt, Message};
 use warp::{
@@ -1371,7 +1370,7 @@ impl MessageStore {
     pub async fn grant_community_permission(
         &mut self,
         community_id: Uuid,
-        permission: CommunityPermission,
+        permission: String,
         role_id: RoleId,
     ) -> Result<(), Error> {
         let inner = &*self.inner.read().await;
@@ -1394,7 +1393,7 @@ impl MessageStore {
     pub async fn revoke_community_permission(
         &mut self,
         community_id: Uuid,
-        permission: CommunityPermission,
+        permission: String,
         role_id: RoleId,
     ) -> Result<(), Error> {
         let inner = &*self.inner.read().await;
@@ -1417,7 +1416,7 @@ impl MessageStore {
     pub async fn grant_community_permission_for_all(
         &mut self,
         community_id: Uuid,
-        permission: CommunityPermission,
+        permission: String,
     ) -> Result<(), Error> {
         let inner = &*self.inner.read().await;
         let community_meta = inner
@@ -1438,7 +1437,7 @@ impl MessageStore {
     pub async fn revoke_community_permission_for_all(
         &mut self,
         community_id: Uuid,
-        permission: CommunityPermission,
+        permission: String,
     ) -> Result<(), Error> {
         let inner = &*self.inner.read().await;
         let community_meta = inner
@@ -1528,7 +1527,7 @@ impl MessageStore {
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
-        permission: CommunityChannelPermission,
+        permission: String,
         role_id: RoleId,
     ) -> Result<(), Error> {
         let inner = &*self.inner.read().await;
@@ -1553,7 +1552,7 @@ impl MessageStore {
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
-        permission: CommunityChannelPermission,
+        permission: String,
         role_id: RoleId,
     ) -> Result<(), Error> {
         let inner = &*self.inner.read().await;
@@ -1578,7 +1577,7 @@ impl MessageStore {
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
-        permission: CommunityChannelPermission,
+        permission: String,
     ) -> Result<(), Error> {
         let inner = &*self.inner.read().await;
         let community_meta = inner
@@ -1603,7 +1602,7 @@ impl MessageStore {
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
-        permission: CommunityChannelPermission,
+        permission: String,
     ) -> Result<(), Error> {
         let inner = &*self.inner.read().await;
         let community_meta = inner
