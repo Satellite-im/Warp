@@ -307,7 +307,9 @@ impl CommunityDocument {
         }
         // TODO: What happens with conflicting roles. ATM it finds the first applicable
         let permissions = parse_permission(&has_permission.to_string());
-        let authorized_roles = permissions.iter().find_map(|node|self.permissions.get(node));
+        let authorized_roles = permissions
+            .iter()
+            .find_map(|node| self.permissions.get(node));
         let Some(authorized_roles) = authorized_roles else {
             return true;
         };
@@ -341,7 +343,9 @@ impl CommunityDocument {
         };
         // TODO: What happens with conflicting roles. ATM it finds the first applicable
         let permissions = parse_permission(&has_permission.to_string());
-        let authorized_roles = permissions.iter().find_map(|node|channel.permissions.get(node));
+        let authorized_roles = permissions
+            .iter()
+            .find_map(|node| channel.permissions.get(node));
         let Some(authorized_roles) = authorized_roles else {
             return true;
         };
