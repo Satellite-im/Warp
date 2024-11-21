@@ -2611,10 +2611,11 @@ impl CommunityTask {
 
         match self.document.channels.get(&channel_id.to_string()) {
             None => Err(Error::CommunityChannelDoesntExist),
-            Some(channel) => channel
-                .get_messages_reference_stream(&self.ipfs, options)
-                .await
-                .map(|document| document.into()),
+            Some(channel) => {
+                channel
+                    .get_messages_reference_stream(&self.ipfs, options)
+                    .await
+            }
         }
     }
     pub async fn community_channel_message_status(
@@ -3010,7 +3011,7 @@ async fn message_event(
                 return Err(Error::IdentityDoesntExist);
             }
 
-            let channel_id = message.conversation_id.clone();
+            let channel_id = message.conversation_id;
 
             let channel = match this.document.channels.get_mut(&channel_id.to_string()) {
                 Some(c) => c,
