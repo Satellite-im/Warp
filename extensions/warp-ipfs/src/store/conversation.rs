@@ -1,5 +1,5 @@
 pub mod message;
-mod reference;
+pub mod reference;
 
 use super::{keystore::Keystore, topics::ConversationTopic, verify_serde_sig, PeerIdExt};
 use crate::store::DidExt;

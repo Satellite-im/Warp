@@ -30,7 +30,8 @@ use warp::raygun::community::{
 };
 use warp::raygun::{
     AttachmentEventStream, ConversationImage, Location, MessageEvent, MessageOptions,
-    MessageReference, MessageStatus, Messages, PinState, RayGunEventKind, ReactionState,
+    MessageReference, MessageStatus, Messages, MessagesType, PinState, RayGunEventKind,
+    ReactionState,
 };
 use warp::{
     crypto::{cipher::Cipher, generate},
@@ -51,7 +52,7 @@ use crate::store::event_subscription::EventSubscription;
 use crate::store::topics::PeerTopic;
 use crate::store::{
     CommunityUpdateKind, ConversationEvents, MAX_COMMUNITY_CHANNELS, MAX_COMMUNITY_DESCRIPTION,
-    SHUTTLE_TIMEOUT,
+    MAX_MESSAGE_SIZE, MIN_MESSAGE_SIZE, SHUTTLE_TIMEOUT,
 };
 use crate::{
     // rt::LocalExecutor,
@@ -536,147 +537,153 @@ impl CommunityTask {
         let ipfs = self.ipfs.clone();
         let message_command = self.message_command.clone();
         let addresses = addresses.clone();
+
         let community_id = self.community_id;
 
-        let mut mailbox = BTreeMap::new();
-        let mut providers = vec![];
-        for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-            let (tx, rx) = futures::channel::oneshot::channel();
-            let _ = message_command
-                .clone()
-                .send(MessageCommand::FetchMailbox {
-                    peer_id,
-                    conversation_id: community_id,
-                    response: tx,
+        for channel in self.document.channels.values_mut() {
+            let channel_id = channel.id;
+
+            let mut mailbox = BTreeMap::new();
+            let mut providers = vec![];
+            for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = message_command
+                    .clone()
+                    .send(MessageCommand::FetchMailbox {
+                        peer_id,
+                        conversation_id: channel_id,
+                        response: tx,
+                    })
+                    .await;
+
+                match rx.timeout(SHUTTLE_TIMEOUT).await {
+                    Ok(Ok(Ok(list))) => {
+                        providers.push(peer_id);
+                        mailbox.extend(list);
+                        break;
+                    }
+                    Ok(Ok(Err(e))) => {
+                        tracing::error!(
+                            "unable to get mailbox to community channel {channel_id} from {peer_id}: {e}"
+                        );
+                        break;
+                    }
+                    Ok(Err(_)) => {
+                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
+                        continue;
+                    }
+                    Err(_) => {
+                        tracing::error!("Request timed out for {peer_id}");
+                        continue;
+                    }
+                }
+            }
+
+            let community_mailbox = mailbox
+                .into_iter()
+                .filter_map(|(id, cid)| {
+                    let id = Uuid::from_str(&id).ok()?;
+                    Some((id, cid))
                 })
+                .collect::<BTreeMap<Uuid, Cid>>();
+
+            let mut messages =
+                FuturesUnordered::from_iter(community_mailbox.into_iter().map(|(id, cid)| {
+                    let ipfs = ipfs.clone();
+                    async move {
+                        ipfs.fetch(&cid).recursive().await?;
+                        Ok((id, cid))
+                    }
+                    .boxed()
+                }))
+                .filter_map(|res: Result<_, anyhow::Error>| async move { res.ok() })
+                .filter_map(|(_, cid)| {
+                    let ipfs = ipfs.clone();
+                    let providers = providers.clone();
+                    let addresses = addresses.clone();
+                    let message_command = message_command.clone();
+                    async move {
+                        let message_document = ipfs
+                            .get_dag(cid)
+                            .providers(&providers)
+                            .deserialized::<MessageDocument>()
+                            .await
+                            .ok()?;
+
+                        if !message_document.verify() {
+                            return None;
+                        }
+
+                        for peer_id in addresses.into_iter().filter_map(|addr| addr.peer_id()) {
+                            let _ = message_command
+                                .clone()
+                                .send(MessageCommand::MessageDelivered {
+                                    peer_id,
+                                    conversation_id: channel_id,
+                                    message_id: message_document.id,
+                                })
+                                .await;
+                        }
+                        Some(message_document)
+                    }
+                })
+                .collect::<Vec<_>>()
                 .await;
 
-            match rx.timeout(SHUTTLE_TIMEOUT).await {
-                Ok(Ok(Ok(list))) => {
-                    providers.push(peer_id);
-                    mailbox.extend(list);
-                    break;
-                }
-                Ok(Ok(Err(e))) => {
-                    tracing::error!(
-                        "unable to get mailbox to community {community_id} from {peer_id}: {e}"
-                    );
-                    break;
-                }
-                Ok(Err(_)) => {
-                    tracing::error!("Channel been unexpectedly closed for {peer_id}");
+            messages.sort_by(|a, b| b.cmp(a));
+
+            for message in messages {
+                if !message.verify() {
                     continue;
                 }
-                Err(_) => {
-                    tracing::error!("Request timed out for {peer_id}");
-                    continue;
-                }
-            }
-        }
+                let message_id = message.id;
+                match channel
+                    .contains(&self.ipfs, message_id)
+                    .await
+                    .unwrap_or_default()
+                {
+                    true => {
+                        let current_message =
+                            channel.get_message_document(&self.ipfs, message_id).await?;
 
-        let community_mailbox = mailbox
-            .into_iter()
-            .filter_map(|(id, cid)| {
-                let id = Uuid::from_str(&id).ok()?;
-                Some((id, cid))
-            })
-            .collect::<BTreeMap<Uuid, Cid>>();
+                        channel
+                            .update_message_document(&self.ipfs, &message)
+                            .await?;
 
-        let mut messages =
-            FuturesUnordered::from_iter(community_mailbox.into_iter().map(|(id, cid)| {
-                let ipfs = ipfs.clone();
-                async move {
-                    ipfs.fetch(&cid).recursive().await?;
-                    Ok((id, cid))
-                }
-                .boxed()
-            }))
-            .filter_map(|res: Result<_, anyhow::Error>| async move { res.ok() })
-            .filter_map(|(_, cid)| {
-                let ipfs = ipfs.clone();
-                let providers = providers.clone();
-                let addresses = addresses.clone();
-                let message_command = message_command.clone();
-                async move {
-                    let message_document = ipfs
-                        .get_dag(cid)
-                        .providers(&providers)
-                        .deserialized::<MessageDocument>()
-                        .await
-                        .ok()?;
+                        let is_edited = matches!((message.modified, current_message.modified), (Some(modified), Some(current_modified)) if modified > current_modified )
+                            | matches!(
+                                (message.modified, current_message.modified),
+                                (Some(_), None)
+                            );
 
-                    if !message_document.verify() {
-                        return None;
-                    }
-
-                    for peer_id in addresses.into_iter().filter_map(|addr| addr.peer_id()) {
-                        let _ = message_command
-                            .clone()
-                            .send(MessageCommand::MessageDelivered {
-                                peer_id,
-                                conversation_id: community_id,
-                                message_id: message_document.id,
-                            })
-                            .await;
-                    }
-                    Some(message_document)
-                }
-            })
-            .collect::<Vec<_>>()
-            .await;
-
-        messages.sort_by(|a, b| b.cmp(a));
-
-        for message in messages {
-            if !message.verify() {
-                continue;
-            }
-            let message_id = message.id;
-            match self
-                .document
-                .contains(&self.ipfs, message_id)
-                .await
-                .unwrap_or_default()
-            {
-                true => {
-                    let current_message = self
-                        .document
-                        .get_message_document(&self.ipfs, message_id)
-                        .await?;
-
-                    self.document
-                        .update_message_document(&self.ipfs, &message)
-                        .await?;
-
-                    let is_edited = matches!((message.modified, current_message.modified), (Some(modified), Some(current_modified)) if modified > current_modified )
-                        | matches!(
-                            (message.modified, current_message.modified),
-                            (Some(_), None)
-                        );
-
-                    match is_edited {
-                        true => {
-                            let _ = self.event_broadcast.send(MessageEventKind::MessageEdited {
-                                conversation_id: community_id,
-                                message_id,
-                            });
-                        }
-                        false => {
-                            //TODO: Emit event showing message was updated in some way
+                        match is_edited {
+                            true => {
+                                let _ = self.event_broadcast.send(
+                                    MessageEventKind::CommunityMessageEdited {
+                                        community_id,
+                                        channel_id,
+                                        message_id,
+                                    },
+                                );
+                            }
+                            false => {
+                                //TODO: Emit event showing message was updated in some way
+                            }
                         }
                     }
-                }
-                false => {
-                    self.document
-                        .insert_message_document(&self.ipfs, &message)
-                        .await?;
+                    false => {
+                        channel
+                            .insert_message_document(&self.ipfs, &message)
+                            .await?;
 
-                    let _ = self
-                        .event_broadcast
-                        .send(MessageEventKind::MessageReceived {
-                            conversation_id: community_id,
-                            message_id,
-                        });
+                        let _ =
+                            self.event_broadcast
+                                .send(MessageEventKind::CommunityMessageReceived {
+                                    community_id,
+                                    channel_id,
+                                    message_id,
+                                });
+                    }
                 }
             }
         }
@@ -1104,8 +1111,9 @@ impl CommunityTask {
     pub async fn delete(&mut self) -> Result<(), Error> {
         // TODO: Maybe announce to network of the local node removal here
 
-        // TODO: implement messaging in channels and call something like this but on the channels:
-        //self.document.messages.take();
+        for channel in self.document.channels.values_mut() {
+            channel.messages.take();
+        }
 
         self.document.deleted = true;
         self.set_document().await?;
@@ -2480,37 +2488,134 @@ impl CommunityTask {
 
     pub async fn get_community_channel_message(
         &self,
-        _channel_id: Uuid,
-        _message_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
     ) -> Result<warp::raygun::Message, Error> {
-        Err(Error::Unimplemented)
+        let own_did = &self.identity.did_key();
+        if !self.document.has_channel_permission(
+            own_did,
+            &CommunityChannelPermission::ViewChannel,
+            channel_id,
+        ) {
+            return Err(Error::Unauthorized);
+        }
+
+        let keypair = self.root.keypair();
+        let keystore = pubkey_or_keystore(self)?;
+
+        match self.document.channels.get(&channel_id.to_string()) {
+            Some(channel) => {
+                channel
+                    .get_message(&self.ipfs, keypair, message_id, keystore.as_ref())
+                    .await
+            }
+            None => Err(Error::CommunityChannelDoesntExist),
+        }
     }
     pub async fn get_community_channel_messages(
         &self,
-        _channel_id: Uuid,
-        _options: MessageOptions,
+        channel_id: Uuid,
+        options: MessageOptions,
     ) -> Result<Messages, Error> {
-        Err(Error::Unimplemented)
+        let own_did = &self.identity.did_key();
+        if !self.document.has_channel_permission(
+            own_did,
+            &CommunityChannelPermission::ViewChannel,
+            channel_id,
+        ) {
+            return Err(Error::Unauthorized);
+        }
+
+        let keypair = self.root.keypair();
+        let keystore = pubkey_or_keystore(self)?;
+
+        match self.document.channels.get(&channel_id.to_string()) {
+            None => Err(Error::CommunityChannelDoesntExist),
+            Some(channel) => {
+                let m_type = options.messages_type();
+                match m_type {
+                    MessagesType::Stream => {
+                        let stream = channel
+                            .get_messages_stream(&self.ipfs, keypair, options, keystore)
+                            .await?;
+                        Ok(Messages::Stream(stream))
+                    }
+                    MessagesType::List => {
+                        let list = channel
+                            .get_messages(&self.ipfs, keypair, options, keystore)
+                            .await?;
+                        Ok(Messages::List(list))
+                    }
+                    MessagesType::Pages { .. } => {
+                        channel
+                            .get_messages_pages(&self.ipfs, keypair, options, keystore.as_ref())
+                            .await
+                    }
+                }
+            }
+        }
     }
     pub async fn get_community_channel_message_count(
         &self,
-        _channel_id: Uuid,
+        channel_id: Uuid,
     ) -> Result<usize, Error> {
-        Err(Error::Unimplemented)
+        let own_did = &self.identity.did_key();
+        if !self.document.has_channel_permission(
+            own_did,
+            &CommunityChannelPermission::ViewChannel,
+            channel_id,
+        ) {
+            return Err(Error::Unauthorized);
+        }
+
+        match self.document.channels.get(&channel_id.to_string()) {
+            None => Err(Error::CommunityChannelDoesntExist),
+            Some(channel) => channel.messages_length(&self.ipfs).await,
+        }
     }
     pub async fn get_community_channel_message_reference(
         &self,
-        _channel_id: Uuid,
-        _message_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
     ) -> Result<MessageReference, Error> {
-        Err(Error::Unimplemented)
+        let own_did = &self.identity.did_key();
+        if !self.document.has_channel_permission(
+            own_did,
+            &CommunityChannelPermission::ViewChannel,
+            channel_id,
+        ) {
+            return Err(Error::Unauthorized);
+        }
+
+        match self.document.channels.get(&channel_id.to_string()) {
+            None => Err(Error::CommunityChannelDoesntExist),
+            Some(channel) => channel
+                .get_message_document(&self.ipfs, message_id)
+                .await
+                .map(|document| document.into()),
+        }
     }
     pub async fn get_community_channel_message_references(
         &self,
-        _channel_id: Uuid,
-        _options: MessageOptions,
+        channel_id: Uuid,
+        options: MessageOptions,
     ) -> Result<BoxStream<'static, MessageReference>, Error> {
-        Err(Error::Unimplemented)
+        let own_did = &self.identity.did_key();
+        if !self.document.has_channel_permission(
+            own_did,
+            &CommunityChannelPermission::ViewChannel,
+            channel_id,
+        ) {
+            return Err(Error::Unauthorized);
+        }
+
+        match self.document.channels.get(&channel_id.to_string()) {
+            None => Err(Error::CommunityChannelDoesntExist),
+            Some(channel) => channel
+                .get_messages_reference_stream(&self.ipfs, options)
+                .await
+                .map(|document| document.into()),
+        }
     }
     pub async fn community_channel_message_status(
         &self,
@@ -2521,10 +2626,108 @@ impl CommunityTask {
     }
     pub async fn send_community_channel_message(
         &mut self,
-        _channel_id: Uuid,
-        _message: Vec<String>,
+        channel_id: Uuid,
+        messages: Vec<String>,
     ) -> Result<Uuid, Error> {
-        Err(Error::Unimplemented)
+        let own_did = &self.identity.did_key();
+        if !self.document.has_channel_permission(
+            own_did,
+            &CommunityChannelPermission::SendMessages,
+            channel_id,
+        ) {
+            return Err(Error::Unauthorized);
+        }
+
+        if !self.document.channels.contains_key(&channel_id.to_string()) {
+            return Err(Error::CommunityChannelDoesntExist);
+        }
+
+        if messages.is_empty() {
+            return Err(Error::EmptyMessage);
+        }
+
+        let lines_value_length: usize = messages
+            .iter()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.trim())
+            .map(|s| s.chars().count())
+            .sum();
+
+        if lines_value_length == 0 || lines_value_length > MAX_MESSAGE_SIZE {
+            tracing::error!(
+                current_size = lines_value_length,
+                max = MAX_MESSAGE_SIZE,
+                "length of message is invalid"
+            );
+            return Err(Error::InvalidLength {
+                context: "message".into(),
+                current: lines_value_length,
+                minimum: Some(MIN_MESSAGE_SIZE),
+                maximum: Some(MAX_MESSAGE_SIZE),
+            });
+        }
+
+        let keypair = self.root.keypair();
+        let own_did = self.identity.did_key();
+
+        let mut message = warp::raygun::Message::default();
+        message.set_conversation_id(channel_id);
+        message.set_sender(own_did.clone());
+        message.set_lines(messages.clone());
+
+        let message_id = message.id();
+        let keystore = pubkey_or_keystore(&*self)?;
+
+        let message = MessageDocument::new(&self.ipfs, keypair, message, keystore.as_ref()).await?;
+
+        let channel = match self.document.channels.get_mut(&channel_id.to_string()) {
+            Some(c) => c,
+            None => return Err(Error::CommunityChannelDoesntExist),
+        };
+
+        let message_cid = channel
+            .insert_message_document(&self.ipfs, &message)
+            .await?;
+
+        let recipients = self.document.participants();
+
+        self.set_document().await?;
+
+        let event = MessageEventKind::CommunityMessageSent {
+            community_id: self.community_id,
+            channel_id,
+            message_id,
+        };
+
+        if let Err(e) = self.event_broadcast.clone().send(event) {
+            tracing::error!(conversation_id=%channel_id, error = %e, "Error broadcasting event");
+        }
+
+        let message_id = message.id;
+
+        let event = CommunityMessagingEvents::New { message };
+
+        if !recipients.is_empty() {
+            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                    let _ = self
+                        .message_command
+                        .clone()
+                        .send(MessageCommand::InsertMessage {
+                            peer_id,
+                            conversation_id: channel_id,
+                            recipients: recipients.iter().cloned().collect(),
+                            message_id,
+                            message_cid,
+                        })
+                        .await;
+                }
+            }
+        }
+
+        self.publish(Some(message_id), event, true, vec![])
+            .await
+            .map(|_| message_id)
     }
     pub async fn edit_community_channel_message(
         &mut self,
@@ -2608,11 +2811,15 @@ impl CommunityTask {
     }
 
     async fn store_direct_for_attachment(&mut self, message: MessageDocument) -> Result<(), Error> {
-        let conversation_id = self.community_id;
+        let channel_id = message.conversation_id;
         let message_id = message.id;
 
-        let message_cid = self
-            .document
+        let channel = match self.document.channels.get_mut(&channel_id.to_string()) {
+            Some(c) => c,
+            None => return Err(Error::CommunityChannelDoesntExist),
+        };
+
+        let message_cid = channel
             .insert_message_document(&self.ipfs, &message)
             .await?;
 
@@ -2620,13 +2827,14 @@ impl CommunityTask {
 
         self.set_document().await?;
 
-        let event = MessageEventKind::MessageSent {
-            conversation_id,
+        let event = MessageEventKind::CommunityMessageSent {
+            community_id: self.community_id,
+            channel_id,
             message_id,
         };
 
         if let Err(e) = self.event_broadcast.send(event) {
-            tracing::error!(%conversation_id, error = %e, "Error broadcasting event");
+            tracing::error!(%channel_id, error = %e, "Error broadcasting event");
         }
 
         let event = CommunityMessagingEvents::New { message };
@@ -2639,7 +2847,7 @@ impl CommunityTask {
                         .clone()
                         .send(MessageCommand::InsertMessage {
                             peer_id,
-                            conversation_id,
+                            conversation_id: channel_id,
                             recipients: recipients.iter().cloned().collect(),
                             message_id,
                             message_cid,
@@ -2781,13 +2989,80 @@ async fn message_event(
 ) -> Result<(), Error> {
     let community_id = this.community_id;
 
-    let _keypair = this.root.keypair();
+    let keypair = this.root.keypair();
     let _own_did = this.identity.did_key();
 
-    let _keystore = pubkey_or_keystore(&*this)?;
+    let keystore = pubkey_or_keystore(&*this)?;
 
     match events {
-        CommunityMessagingEvents::New { message: _ } => todo!(),
+        CommunityMessagingEvents::New { message } => {
+            if !message.verify() {
+                return Err(Error::InvalidMessage);
+            }
+
+            let message_id = message.id;
+
+            if !this
+                .document
+                .participants()
+                .contains(&message.sender.to_did())
+            {
+                return Err(Error::IdentityDoesntExist);
+            }
+
+            let channel_id = message.conversation_id.clone();
+
+            let channel = match this.document.channels.get_mut(&channel_id.to_string()) {
+                Some(c) => c,
+                None => return Err(Error::CommunityChannelDoesntExist),
+            };
+
+            if channel.contains(&this.ipfs, message_id).await? {
+                return Err(Error::MessageFound);
+            }
+
+            let resolved_message = message
+                .resolve(&this.ipfs, keypair, false, keystore.as_ref())
+                .await?;
+
+            let lines_value_length: usize = resolved_message
+                .lines()
+                .iter()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.chars().count())
+                .sum();
+
+            if lines_value_length == 0 && lines_value_length > MAX_MESSAGE_SIZE {
+                tracing::error!(
+                    message_length = lines_value_length,
+                    "Length of message is invalid."
+                );
+                return Err(Error::InvalidLength {
+                    context: "message".into(),
+                    current: lines_value_length,
+                    minimum: Some(MIN_MESSAGE_SIZE),
+                    maximum: Some(MAX_MESSAGE_SIZE),
+                });
+            }
+
+            channel
+                .insert_message_document(&this.ipfs, &message)
+                .await?;
+
+            this.set_document().await?;
+
+            if let Err(e) = this
+                .event_broadcast
+                .send(MessageEventKind::CommunityMessageReceived {
+                    community_id: this.community_id,
+                    channel_id,
+                    message_id,
+                })
+            {
+                tracing::warn!(%channel_id, "Error broadcasting event: {e}");
+            }
+        }
         CommunityMessagingEvents::Edit {
             community_id: _,
             community_channel_id: _,
