@@ -177,6 +177,11 @@ pub enum CommunityTaskCommand {
         permission: String,
         response: oneshot::Sender<Result<(), Error>>,
     },
+    HasCommunityPermission {
+        permission: String,
+        member: DID,
+        response: oneshot::Sender<Result<bool, Error>>,
+    },
     RemoveCommunityMember {
         member: DID,
         response: oneshot::Sender<Result<(), Error>>,
@@ -212,6 +217,12 @@ pub enum CommunityTaskCommand {
         channel_id: Uuid,
         permission: String,
         response: oneshot::Sender<Result<(), Error>>,
+    },
+    HasCommunityChannelPermission {
+        channel_id: Uuid,
+        permission: String,
+        member: DID,
+        response: oneshot::Sender<Result<bool, Error>>,
     },
     GetCommunityChannelMessage {
         channel_id: Uuid,
@@ -846,6 +857,14 @@ impl CommunityTask {
                 let result = self.revoke_community_permission_for_all(permission).await;
                 let _ = response.send(result);
             }
+            CommunityTaskCommand::HasCommunityPermission {
+                response,
+                permission,
+                member,
+            } => {
+                let result = self.has_community_permission(permission, member).await;
+                let _ = response.send(result);
+            }
             CommunityTaskCommand::RemoveCommunityMember { response, member } => {
                 let result = self.remove_community_member(member).await;
                 let _ = response.send(result);
@@ -907,6 +926,17 @@ impl CommunityTask {
             } => {
                 let result = self
                     .revoke_community_channel_permission_for_all(channel_id, permission)
+                    .await;
+                let _ = response.send(result);
+            }
+            CommunityTaskCommand::HasCommunityChannelPermission {
+                response,
+                channel_id,
+                permission,
+                member,
+            } => {
+                let result = self
+                    .has_community_channel_permission(channel_id, permission, member)
                     .await;
                 let _ = response.send(result);
             }
@@ -2199,6 +2229,13 @@ impl CommunityTask {
         )
         .await
     }
+    pub async fn has_community_permission(
+        &mut self,
+        permission: String,
+        member: DID,
+    ) -> Result<bool, Error> {
+        Ok(self.document.has_permission(&member, &permission))
+    }
     pub async fn remove_community_member(&mut self, member: DID) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
         if !self
@@ -2548,6 +2585,16 @@ impl CommunityTask {
             vec![],
         )
         .await
+    }
+    pub async fn has_community_channel_permission(
+        &mut self,
+        channel_id: Uuid,
+        permission: String,
+        member: DID,
+    ) -> Result<bool, Error> {
+        Ok(self
+            .document
+            .has_channel_permission(&member, &permission, channel_id))
     }
 
     pub async fn get_community_channel_message(

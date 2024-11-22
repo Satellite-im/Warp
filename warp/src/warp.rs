@@ -813,6 +813,19 @@ where
             .revoke_community_permission_for_all(community_id, permission)
             .await
     }
+    async fn has_community_permission<T>(
+        &mut self,
+        community_id: Uuid,
+        permission: T,
+        member: DID,
+    ) -> Result<bool, Error>
+    where
+        T: ToString + Send,
+    {
+        self.raygun
+            .has_community_permission(community_id, permission, member)
+            .await
+    }
     async fn remove_community_member(
         &mut self,
         community_id: Uuid,
@@ -895,6 +908,20 @@ where
     {
         self.raygun
             .revoke_community_channel_permission_for_all(community_id, channel_id, permission)
+            .await
+    }
+    async fn has_community_channel_permission<T>(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: T,
+        member: DID,
+    ) -> Result<bool, Error>
+    where
+        T: ToString + Send,
+    {
+        self.raygun
+            .has_community_channel_permission(community_id, channel_id, permission, member)
             .await
     }
 

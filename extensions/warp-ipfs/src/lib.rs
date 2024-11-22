@@ -1908,6 +1908,19 @@ impl RayGunCommunity for WarpIpfs {
             .revoke_community_permission_for_all(community_id, permission.to_string())
             .await
     }
+    async fn has_community_permission<T>(
+        &mut self,
+        community_id: Uuid,
+        permission: T,
+        member: DID,
+    ) -> Result<bool, Error>
+    where
+        T: ToString + Send,
+    {
+        self.messaging_store()?
+            .has_community_permission(community_id, permission.to_string(), member)
+            .await
+    }
     async fn remove_community_member(
         &mut self,
         community_id: Uuid,
@@ -2007,6 +2020,25 @@ impl RayGunCommunity for WarpIpfs {
                 community_id,
                 channel_id,
                 permission.to_string(),
+            )
+            .await
+    }
+    async fn has_community_channel_permission<T>(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: T,
+        member: DID,
+    ) -> Result<bool, Error>
+    where
+        T: ToString + Send,
+    {
+        self.messaging_store()?
+            .has_community_channel_permission(
+                community_id,
+                channel_id,
+                permission.to_string(),
+                member,
             )
             .await
     }

@@ -550,6 +550,17 @@ pub trait RayGunCommunity: Sync + Send {
     {
         Err(Error::Unimplemented)
     }
+    async fn has_community_permission<T>(
+        &mut self,
+        _community_id: Uuid,
+        _permission: T,
+        _member: DID,
+    ) -> Result<bool, Error>
+    where
+        T: ToString + Send,
+    {
+        Err(Error::Unimplemented)
+    }
     async fn remove_community_member(
         &mut self,
         _community_id: Uuid,
@@ -615,6 +626,18 @@ pub trait RayGunCommunity: Sync + Send {
         _channel_id: Uuid,
         _permission: T,
     ) -> Result<(), Error>
+    where
+        T: ToString + Send,
+    {
+        Err(Error::Unimplemented)
+    }
+    async fn has_community_channel_permission<T>(
+        &mut self,
+        _community_id: Uuid,
+        _channel_id: Uuid,
+        _permission: T,
+        _member: DID,
+    ) -> Result<bool, Error>
     where
         T: ToString + Send,
     {
