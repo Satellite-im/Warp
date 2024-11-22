@@ -358,28 +358,9 @@ impl WarpIpfs {
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            // TODO: Determine if we want to store in temp directory if path isnt set for any reason
-            // if let (path, true) = (self.inner.config.path(), self.inner.config.persist()) {
-            //    tracing::info!("Instance will be persistent");
-            //     let path = match path {
-            //         Some(path) => path.clone(),
-            //         None => std::env::temp_dir().join(did.to_string() + "_temp")
-            //     };
-            //    tracing::info!("Path set: {}", path.display());
-            //     if !path.is_dir() {
-            //        tracing::warn!("Path doesnt exist... creating");
-            //         fs::create_dir_all(path).await?;
-            //     }
-            //     uninitialized = uninitialized.set_path(path);
-            // }
             if let Some(path) = self.inner.config.path() {
                 tracing::info!("Instance will be persistent");
                 tracing::info!("Path set: {}", path.display());
-
-                if !path.is_dir() {
-                    tracing::warn!("Path doesnt exist... creating");
-                    fs::create_dir_all(path).await?;
-                }
                 uninitialized = uninitialized.set_path(path);
             }
         }
