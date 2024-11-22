@@ -242,6 +242,50 @@ pub enum MessageEventKind {
         channel_id: Uuid,
         permission: CommunityChannelPermission,
     },
+    CommunityMessageSent {
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+    },
+    CommunityMessageReceived {
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+    },
+    CommunityMessageEdited {
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+    },
+    CommunityMessageDeleted {
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+    },
+    CommunityMessagePinned {
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+    },
+    CommunityMessageUnpinned {
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+    },
+    CommunityMessageReactionAdded {
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+        did_key: DID,
+        reaction: String,
+    },
+    CommunityMessageReactionRemoved {
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+        did_key: DID,
+        reaction: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
