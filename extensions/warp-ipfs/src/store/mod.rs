@@ -296,9 +296,8 @@ pub enum ConversationEvents {
         community_document: CommunityDocument,
         invite: CommunityInviteDocument,
     },
-    UpdateCommunity {
+    DeleteCommunity {
         community_id: Uuid,
-        community_document: CommunityDocument,
     },
 }
 

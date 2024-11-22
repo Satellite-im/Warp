@@ -1,3 +1,4 @@
+mod attachment;
 mod community_task;
 mod task;
 
@@ -2125,7 +2126,7 @@ struct ConversationInnerMeta {
 #[derive(Clone)]
 struct CommunityInnerMeta {
     pub command_tx: mpsc::Sender<CommunityTaskCommand>,
-    pub _handle: AbortableJoinHandle<()>,
+    pub handle: AbortableJoinHandle<()>,
 }
 
 struct ConversationInner {
@@ -2452,6 +2453,27 @@ impl ConversationInner {
         meta.handle.abort();
 
         Ok(conversation)
+    }
+
+    pub async fn delete_community_task(&mut self, id: Uuid) -> Result<CommunityDocument, Error> {
+        let community = self.get_community_document(id).await?;
+        let mut meta = self
+            .community_task
+            .remove(&id)
+            .ok_or(Error::InvalidCommunity)?;
+
+        let (tx, rx) = oneshot::channel();
+        let _ = meta
+            .command_tx
+            .clone()
+            .send(CommunityTaskCommand::Delete { response: tx })
+            .await;
+        rx.await.map_err(anyhow::Error::from)??;
+
+        meta.command_tx.close_channel();
+        meta.handle.abort();
+
+        Ok(community)
     }
 
     pub async fn list(&self) -> Vec<ConversationDocument> {
@@ -2883,7 +2905,7 @@ impl ConversationInner {
 
         let inner_meta = CommunityInnerMeta {
             command_tx: ctx,
-            _handle: handle,
+            handle,
         };
 
         self.community_task.insert(community_id, inner_meta);
@@ -2961,8 +2983,71 @@ impl ConversationInner {
         if &document.owner != own_did {
             return Err(Error::Unauthorized);
         }
+        let doc = self.delete_community_task(community_id).await?;
 
-        Err(Error::Unimplemented)
+        let peer_id_list = doc
+            .participants()
+            .clone()
+            .iter()
+            .filter(|did| own_did.ne(did))
+            .map(|did| (did.clone(), did))
+            .filter_map(|(a, b)| b.to_peer_id().map(|pk| (a, pk)).ok())
+            .collect::<Vec<_>>();
+
+        let event = serde_json::to_vec(&ConversationEvents::DeleteCommunity {
+            community_id: doc.id(),
+        })?;
+
+        let main_timer = Instant::now();
+        for (recipient, peer_id) in peer_id_list {
+            let keypair = self.root.keypair();
+            let bytes = ecdh_encrypt(keypair, Some(&recipient), &event)?;
+
+            let payload = PayloadBuilder::new(keypair, bytes)
+                .from_ipfs(&self.ipfs)
+                .await?;
+
+            let peers = self.ipfs.pubsub_peers(Some(recipient.messaging())).await?;
+            let timer = Instant::now();
+            let mut time = true;
+            if !peers.contains(&peer_id)
+                || (peers.contains(&peer_id)
+                    && self
+                        .ipfs
+                        .pubsub_publish(recipient.messaging(), payload.to_bytes()?)
+                        .await
+                        .is_err())
+            {
+                tracing::warn!(%community_id, "Unable to publish to topic. Queuing event");
+                //Note: If the error is related to peer not available then we should push this to queue but if
+                //      its due to the message limit being reached we should probably break up the message to fix into
+                //      "max_transmit_size" within rust-libp2p gossipsub
+                //      For now we will queue the message if we hit an error
+                self.queue_event(
+                    recipient.clone(),
+                    Queue::direct(peer_id, recipient.messaging(), payload.message().to_vec()),
+                )
+                .await;
+                time = false;
+            }
+
+            if time {
+                let end = timer.elapsed();
+                tracing::info!(%community_id, "Event sent to {recipient}");
+                tracing::trace!(%community_id, "Took {}ms to send event", end.as_millis());
+            }
+        }
+        let main_timer_end = main_timer.elapsed();
+        tracing::trace!(%community_id,
+            "Completed processing within {}ms",
+            main_timer_end.as_millis()
+        );
+
+        let community_id = doc.id();
+        self.event
+            .emit(RayGunEventKind::CommunityDeleted { community_id })
+            .await;
+        Ok(())
     }
     pub async fn get_community(&mut self, community_id: Uuid) -> Result<Community, Error> {
         let doc = self.get_community_document(community_id).await?;
@@ -3174,19 +3259,34 @@ async fn process_conversation(
             }
 
             this.event
-                .emit(RayGunEventKind::CommunityInvite {
+                .emit(RayGunEventKind::CommunityInvited {
                     community_id,
                     invite_id: invite.id,
                 })
                 .await;
         }
-        ConversationEvents::UpdateCommunity {
-            community_id,
-            community_document,
-        } => {
-            this.set_community_document(community_document).await?;
+        ConversationEvents::DeleteCommunity { community_id } => {
+            tracing::trace!("Delete community event received for {community_id}");
+            if !this.contains_community(community_id).await {
+                return Err(anyhow::anyhow!("Community {community_id} doesnt exist").into());
+            }
+
+            let sender = data.sender().to_did()?;
+
+            match this.get_community_document(community_id).await {
+                Ok(community) if community.owner.eq(&sender) => community,
+                _ => {
+                    return Err(anyhow::anyhow!(
+                        "Community exist but did not match condition required"
+                    )
+                    .into());
+                }
+            };
+
+            let doc = this.delete_community_task(community_id).await?;
+            let community_id = doc.id();
             this.event
-                .emit(RayGunEventKind::CommunityUpdate { community_id })
+                .emit(RayGunEventKind::CommunityDeleted { community_id })
                 .await;
         }
     }
