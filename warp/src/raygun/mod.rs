@@ -187,21 +187,21 @@ pub enum MessageEventKind {
     },
     GrantedCommunityPermission {
         community_id: Uuid,
-        permission: String,
+        permissions: Vec<String>,
         role_id: RoleId,
     },
     RevokedCommunityPermission {
         community_id: Uuid,
-        permission: String,
+        permissions: Vec<String>,
         role_id: RoleId,
     },
     GrantedCommunityPermissionForAll {
         community_id: Uuid,
-        permission: String,
+        permissions: Vec<String>,
     },
     RevokedCommunityPermissionForAll {
         community_id: Uuid,
-        permission: String,
+        permissions: Vec<String>,
     },
     RemovedCommunityMember {
         community_id: Uuid,
@@ -220,24 +220,24 @@ pub enum MessageEventKind {
     GrantedCommunityChannelPermission {
         community_id: Uuid,
         channel_id: Uuid,
-        permission: String,
+        permissions: Vec<String>,
         role_id: RoleId,
     },
     RevokedCommunityChannelPermission {
         community_id: Uuid,
         channel_id: Uuid,
-        permission: String,
+        permissions: Vec<String>,
         role_id: RoleId,
     },
     GrantedCommunityChannelPermissionForAll {
         community_id: Uuid,
         channel_id: Uuid,
-        permission: String,
+        permissions: Vec<String>,
     },
     RevokedCommunityChannelPermissionForAll {
         community_id: Uuid,
         channel_id: Uuid,
-        permission: String,
+        permissions: Vec<String>,
     },
 }
 

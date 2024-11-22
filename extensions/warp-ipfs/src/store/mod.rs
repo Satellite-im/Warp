@@ -500,18 +500,18 @@ pub enum CommunityUpdateKind {
         description: Option<String>,
     },
     GrantCommunityPermission {
-        permission: String,
+        permissions: Vec<String>,
         role_id: RoleId,
     },
     RevokeCommunityPermission {
-        permission: String,
+        permissions: Vec<String>,
         role_id: RoleId,
     },
     GrantCommunityPermissionForAll {
-        permission: String,
+        permissions: Vec<String>,
     },
     RevokeCommunityPermissionForAll {
-        permission: String,
+        permissions: Vec<String>,
     },
     RemoveCommunityMember {
         member: DID,
@@ -526,21 +526,21 @@ pub enum CommunityUpdateKind {
     },
     GrantCommunityChannelPermission {
         channel_id: Uuid,
-        permission: String,
+        permissions: Vec<String>,
         role_id: RoleId,
     },
     RevokeCommunityChannelPermission {
         channel_id: Uuid,
-        permission: String,
+        permissions: Vec<String>,
         role_id: RoleId,
     },
     GrantCommunityChannelPermissionForAll {
         channel_id: Uuid,
-        permission: String,
+        permissions: Vec<String>,
     },
     RevokeCommunityChannelPermissionForAll {
         channel_id: Uuid,
-        permission: String,
+        permissions: Vec<String>,
     },
 }
 

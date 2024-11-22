@@ -2018,14 +2018,23 @@ impl CommunityTask {
             return Err(Error::Unauthorized);
         }
 
-        match self.document.permissions.get_mut(&permission) {
-            Some(authorized_roles) => {
-                authorized_roles.insert(role_id);
-            }
-            None => {
-                let mut roles = IndexSet::new();
-                roles.insert(role_id);
-                self.document.permissions.insert(permission.clone(), roles);
+        let permissions: Vec<String> = CommunityPermission::sub_permissions(&permission)
+            .iter()
+            .map(|p| p.to_string())
+            .collect();
+        if permission.is_empty() {
+            return Err(Error::InvalidPermission);
+        }
+        for permission in &permissions {
+            match self.document.permissions.get_mut(permission) {
+                Some(authorized_roles) => {
+                    authorized_roles.insert(role_id);
+                }
+                None => {
+                    let mut roles = IndexSet::new();
+                    roles.insert(role_id);
+                    self.document.permissions.insert(permission.clone(), roles);
+                }
             }
         }
         self.set_document().await?;
@@ -2034,7 +2043,7 @@ impl CommunityTask {
             .event_broadcast
             .send(MessageEventKind::GrantedCommunityPermission {
                 community_id: self.community_id,
-                permission: permission.clone(),
+                permissions: permissions.clone(),
                 role_id,
             });
 
@@ -2043,7 +2052,7 @@ impl CommunityTask {
             CommunityMessagingEvents::UpdateCommunity {
                 community: self.document.clone(),
                 kind: CommunityUpdateKind::GrantCommunityPermission {
-                    permission,
+                    permissions,
                     role_id,
                 },
             },
@@ -2065,15 +2074,24 @@ impl CommunityTask {
             return Err(Error::Unauthorized);
         }
 
-        if let Some(authorized_roles) = self.document.permissions.get_mut(&permission) {
-            authorized_roles.swap_remove(&role_id);
+        let permissions: Vec<String> = CommunityPermission::sub_permissions(&permission)
+            .iter()
+            .map(|p| p.to_string())
+            .collect();
+        if permission.is_empty() {
+            return Err(Error::InvalidPermission);
+        }
+        for permission in &permissions {
+            if let Some(authorized_roles) = self.document.permissions.get_mut(permission) {
+                authorized_roles.swap_remove(&role_id);
+            }
         }
         self.set_document().await?;
         let _ = self
             .event_broadcast
             .send(MessageEventKind::RevokedCommunityPermission {
                 community_id: self.community_id,
-                permission: permission.clone(),
+                permissions: permissions.clone(),
                 role_id,
             });
 
@@ -2082,7 +2100,7 @@ impl CommunityTask {
             CommunityMessagingEvents::UpdateCommunity {
                 community: self.document.clone(),
                 kind: CommunityUpdateKind::RevokeCommunityPermission {
-                    permission,
+                    permissions,
                     role_id,
                 },
             },
@@ -2103,25 +2121,34 @@ impl CommunityTask {
             return Err(Error::Unauthorized);
         }
 
-        if self.document.permissions.contains_key(&permission) {
-            self.document.permissions.swap_remove(&permission);
-            self.set_document().await?;
-        } else {
-            return Err(Error::PermissionAlreadyGranted);
+        let permissions: Vec<String> = CommunityPermission::sub_permissions(&permission)
+            .iter()
+            .map(|p| p.to_string())
+            .collect();
+        if permission.is_empty() {
+            return Err(Error::InvalidPermission);
+        }
+        for permission in &permissions {
+            if self.document.permissions.contains_key(permission) {
+                self.document.permissions.swap_remove(permission);
+                self.set_document().await?;
+            } else if permissions.len() == 1 {
+                return Err(Error::PermissionAlreadyGranted);
+            }
         }
 
         let _ = self
             .event_broadcast
             .send(MessageEventKind::GrantedCommunityPermissionForAll {
                 community_id: self.community_id,
-                permission: permission.clone(),
+                permissions: permissions.clone(),
             });
 
         self.publish(
             None,
             CommunityMessagingEvents::UpdateCommunity {
                 community: self.document.clone(),
-                kind: CommunityUpdateKind::GrantCommunityPermissionForAll { permission },
+                kind: CommunityUpdateKind::GrantCommunityPermissionForAll { permissions },
             },
             true,
             vec![],
@@ -2140,23 +2167,32 @@ impl CommunityTask {
             return Err(Error::Unauthorized);
         }
 
-        self.document
-            .permissions
-            .insert(permission.clone(), IndexSet::new());
+        let permissions: Vec<String> = CommunityPermission::sub_permissions(&permission)
+            .iter()
+            .map(|p| p.to_string())
+            .collect();
+        if permission.is_empty() {
+            return Err(Error::InvalidPermission);
+        }
+        for permission in &permissions {
+            self.document
+                .permissions
+                .insert(permission.clone(), IndexSet::new());
+        }
         self.set_document().await?;
 
         let _ = self
             .event_broadcast
             .send(MessageEventKind::RevokedCommunityPermissionForAll {
                 community_id: self.community_id,
-                permission: permission.clone(),
+                permissions: permissions.clone(),
             });
 
         self.publish(
             None,
             CommunityMessagingEvents::UpdateCommunity {
                 community: self.document.clone(),
-                kind: CommunityUpdateKind::RevokeCommunityPermissionForAll { permission },
+                kind: CommunityUpdateKind::RevokeCommunityPermissionForAll { permissions },
             },
             true,
             vec![],
@@ -2302,14 +2338,23 @@ impl CommunityTask {
             .channels
             .get_mut(&channel_id.to_string())
             .ok_or(Error::CommunityChannelDoesntExist)?;
-        match channel_doc.permissions.get_mut(&permission) {
-            Some(authorized_roles) => {
-                authorized_roles.insert(role_id);
-            }
-            None => {
-                let mut roles = IndexSet::new();
-                roles.insert(role_id);
-                channel_doc.permissions.insert(permission.clone(), roles);
+        let permissions: Vec<String> = CommunityPermission::sub_permissions(&permission)
+            .iter()
+            .map(|p| p.to_string())
+            .collect();
+        if permission.is_empty() {
+            return Err(Error::InvalidPermission);
+        }
+        for permission in &permissions {
+            match channel_doc.permissions.get_mut(permission) {
+                Some(authorized_roles) => {
+                    authorized_roles.insert(role_id);
+                }
+                None => {
+                    let mut roles = IndexSet::new();
+                    roles.insert(role_id);
+                    channel_doc.permissions.insert(permission.clone(), roles);
+                }
             }
         }
         self.set_document().await?;
@@ -2319,7 +2364,7 @@ impl CommunityTask {
             .send(MessageEventKind::GrantedCommunityChannelPermission {
                 community_id: self.community_id,
                 channel_id,
-                permission: permission.clone(),
+                permissions: permissions.clone(),
                 role_id,
             });
 
@@ -2329,7 +2374,7 @@ impl CommunityTask {
                 community: self.document.clone(),
                 kind: CommunityUpdateKind::GrantCommunityChannelPermission {
                     channel_id,
-                    permission,
+                    permissions,
                     role_id,
                 },
             },
@@ -2357,8 +2402,17 @@ impl CommunityTask {
             .channels
             .get_mut(&channel_id.to_string())
             .ok_or(Error::CommunityChannelDoesntExist)?;
-        if let Some(authorized_roles) = channel_doc.permissions.get_mut(&permission) {
-            authorized_roles.swap_remove(&role_id);
+        let permissions: Vec<String> = CommunityPermission::sub_permissions(&permission)
+            .iter()
+            .map(|p| p.to_string())
+            .collect();
+        if permission.is_empty() {
+            return Err(Error::InvalidPermission);
+        }
+        for permission in &permissions {
+            if let Some(authorized_roles) = channel_doc.permissions.get_mut(permission) {
+                authorized_roles.swap_remove(&role_id);
+            }
         }
         self.set_document().await?;
 
@@ -2367,7 +2421,7 @@ impl CommunityTask {
             .send(MessageEventKind::RevokedCommunityChannelPermission {
                 community_id: self.community_id,
                 channel_id,
-                permission: permission.clone(),
+                permissions: permissions.clone(),
                 role_id,
             });
 
@@ -2377,7 +2431,7 @@ impl CommunityTask {
                 community: self.document.clone(),
                 kind: CommunityUpdateKind::RevokeCommunityChannelPermission {
                     channel_id,
-                    permission,
+                    permissions,
                     role_id,
                 },
             },
@@ -2404,19 +2458,27 @@ impl CommunityTask {
             .channels
             .get_mut(&channel_id.to_string())
             .ok_or(Error::CommunityChannelDoesntExist)?;
-        if channel_doc.permissions.contains_key(&permission) {
-            channel_doc.permissions.swap_remove(&permission);
-            self.set_document().await?;
-        } else {
-            return Err(Error::PermissionAlreadyGranted);
+        let permissions: Vec<String> = CommunityPermission::sub_permissions(&permission)
+            .iter()
+            .map(|p| p.to_string())
+            .collect();
+        if permission.is_empty() {
+            return Err(Error::InvalidPermission);
         }
-
+        for permission in &permissions {
+            if channel_doc.permissions.contains_key(permission) {
+                channel_doc.permissions.swap_remove(permission);
+            } else if permissions.len() == 1 {
+                return Err(Error::PermissionAlreadyGranted);
+            }
+        }
+        self.set_document().await?;
         let _ =
             self.event_broadcast
                 .send(MessageEventKind::GrantedCommunityChannelPermissionForAll {
                     community_id: self.community_id,
                     channel_id,
-                    permission: permission.clone(),
+                    permissions: permissions.clone(),
                 });
 
         self.publish(
@@ -2425,7 +2487,7 @@ impl CommunityTask {
                 community: self.document.clone(),
                 kind: CommunityUpdateKind::GrantCommunityChannelPermissionForAll {
                     channel_id,
-                    permission,
+                    permissions,
                 },
             },
             true,
@@ -2451,9 +2513,18 @@ impl CommunityTask {
             .channels
             .get_mut(&channel_id.to_string())
             .ok_or(Error::CommunityChannelDoesntExist)?;
-        channel_doc
-            .permissions
-            .insert(permission.clone(), IndexSet::new());
+        let permissions: Vec<String> = CommunityPermission::sub_permissions(&permission)
+            .iter()
+            .map(|p| p.to_string())
+            .collect();
+        if permission.is_empty() {
+            return Err(Error::InvalidPermission);
+        }
+        for permission in &permissions {
+            channel_doc
+                .permissions
+                .insert(permission.clone(), IndexSet::new());
+        }
         self.set_document().await?;
 
         let _ =
@@ -2461,7 +2532,7 @@ impl CommunityTask {
                 .send(MessageEventKind::RevokedCommunityChannelPermissionForAll {
                     community_id: self.community_id,
                     channel_id,
-                    permission: permission.clone(),
+                    permissions: permissions.clone(),
                 });
 
         self.publish(
@@ -2470,7 +2541,7 @@ impl CommunityTask {
                 community: self.document.clone(),
                 kind: CommunityUpdateKind::RevokeCommunityChannelPermissionForAll {
                     channel_id,
-                    permission,
+                    permissions,
                 },
             },
             true,
@@ -3011,7 +3082,7 @@ async fn message_event(
                     }
                 }
                 CommunityUpdateKind::GrantCommunityPermission {
-                    permission,
+                    permissions,
                     role_id,
                 } => {
                     this.replace_document(community).await?;
@@ -3019,7 +3090,7 @@ async fn message_event(
                         this.event_broadcast
                             .send(MessageEventKind::GrantedCommunityPermission {
                                 community_id,
-                                permission,
+                                permissions,
                                 role_id,
                             })
                     {
@@ -3027,7 +3098,7 @@ async fn message_event(
                     }
                 }
                 CommunityUpdateKind::RevokeCommunityPermission {
-                    permission,
+                    permissions,
                     role_id,
                 } => {
                     this.replace_document(community).await?;
@@ -3035,30 +3106,30 @@ async fn message_event(
                         this.event_broadcast
                             .send(MessageEventKind::RevokedCommunityPermission {
                                 community_id,
-                                permission,
+                                permissions,
                                 role_id,
                             })
                     {
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");
                     }
                 }
-                CommunityUpdateKind::GrantCommunityPermissionForAll { permission } => {
+                CommunityUpdateKind::GrantCommunityPermissionForAll { permissions } => {
                     this.replace_document(community).await?;
                     if let Err(e) = this.event_broadcast.send(
                         MessageEventKind::GrantedCommunityPermissionForAll {
                             community_id,
-                            permission,
+                            permissions,
                         },
                     ) {
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");
                     }
                 }
-                CommunityUpdateKind::RevokeCommunityPermissionForAll { permission } => {
+                CommunityUpdateKind::RevokeCommunityPermissionForAll { permissions } => {
                     this.replace_document(community).await?;
                     if let Err(e) = this.event_broadcast.send(
                         MessageEventKind::RevokedCommunityPermissionForAll {
                             community_id,
-                            permission,
+                            permissions,
                         },
                     ) {
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");
@@ -3106,7 +3177,7 @@ async fn message_event(
                 }
                 CommunityUpdateKind::GrantCommunityChannelPermission {
                     channel_id,
-                    permission,
+                    permissions,
                     role_id,
                 } => {
                     this.replace_document(community).await?;
@@ -3114,7 +3185,7 @@ async fn message_event(
                         MessageEventKind::GrantedCommunityChannelPermission {
                             community_id,
                             channel_id,
-                            permission,
+                            permissions,
                             role_id,
                         },
                     ) {
@@ -3123,7 +3194,7 @@ async fn message_event(
                 }
                 CommunityUpdateKind::RevokeCommunityChannelPermission {
                     channel_id,
-                    permission,
+                    permissions,
                     role_id,
                 } => {
                     this.replace_document(community).await?;
@@ -3131,7 +3202,7 @@ async fn message_event(
                         MessageEventKind::RevokedCommunityChannelPermission {
                             community_id,
                             channel_id,
-                            permission,
+                            permissions,
                             role_id,
                         },
                     ) {
@@ -3140,14 +3211,14 @@ async fn message_event(
                 }
                 CommunityUpdateKind::GrantCommunityChannelPermissionForAll {
                     channel_id,
-                    permission,
+                    permissions,
                 } => {
                     this.replace_document(community).await?;
                     if let Err(e) = this.event_broadcast.send(
                         MessageEventKind::GrantedCommunityChannelPermissionForAll {
                             community_id,
                             channel_id,
-                            permission,
+                            permissions,
                         },
                     ) {
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");
@@ -3155,14 +3226,14 @@ async fn message_event(
                 }
                 CommunityUpdateKind::RevokeCommunityChannelPermissionForAll {
                     channel_id,
-                    permission,
+                    permissions,
                 } => {
                     this.replace_document(community).await?;
                     if let Err(e) = this.event_broadcast.send(
                         MessageEventKind::RevokedCommunityChannelPermissionForAll {
                             community_id,
                             channel_id,
-                            permission,
+                            permissions,
                         },
                     ) {
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");

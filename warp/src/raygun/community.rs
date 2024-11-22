@@ -312,6 +312,14 @@ impl CommunityPermission {
             CommunityPermission::DeleteMessages,
         ]
     }
+
+    pub fn sub_permissions(node: &str) -> Vec<CommunityPermission> {
+        CommunityPermission::values()
+            .iter()
+            .filter(|p| p.to_string().starts_with(node))
+            .cloned()
+            .collect()
+    }
 }
 
 /// Built-in CommunityChannelPermission for ease of access
@@ -321,6 +329,16 @@ pub enum CommunityChannelPermission {
     ViewChannel,
     #[permission(formatting = "community_channel.{}")]
     SendMessages,
+}
+
+impl CommunityChannelPermission {
+    pub fn sub_permissions(node: &str) -> Vec<CommunityChannelPermission> {
+        CommunityChannelPermission::values()
+            .iter()
+            .filter(|p| p.to_string().starts_with(node))
+            .cloned()
+            .collect()
+    }
 }
 
 #[async_trait::async_trait]
