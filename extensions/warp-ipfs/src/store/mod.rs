@@ -396,11 +396,13 @@ pub enum MessagingEvents {
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum CommunityMessagingEvents {
     New {
+        community_id: Uuid,
+        channel_id: Uuid,
         message: MessageDocument,
     },
     Edit {
         community_id: Uuid,
-        community_channel_id: Uuid,
+        channel_id: Uuid,
         message_id: Uuid,
         modified: DateTime<Utc>,
         lines: Vec<String>,
@@ -409,19 +411,19 @@ pub enum CommunityMessagingEvents {
     },
     Delete {
         community_id: Uuid,
-        community_channel_id: Uuid,
+        channel_id: Uuid,
         message_id: Uuid,
     },
     Pin {
         community_id: Uuid,
-        community_channel_id: Uuid,
+        channel_id: Uuid,
         member: DID,
         message_id: Uuid,
         state: PinState,
     },
     React {
         community_id: Uuid,
-        community_channel_id: Uuid,
+        channel_id: Uuid,
         reactor: DID,
         message_id: Uuid,
         state: ReactionState,
@@ -433,7 +435,7 @@ pub enum CommunityMessagingEvents {
     },
     Event {
         community_id: Uuid,
-        community_channel_id: Uuid,
+        channel_id: Uuid,
         member: DID,
         event: MessageEvent,
         cancelled: bool,
