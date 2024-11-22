@@ -19,7 +19,7 @@ use ipld_core::cid::Cid;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
-use tracing::{error, warn, Span};
+use tracing::Span;
 use web_time::Instant;
 
 use crate::shuttle::identity::client::IdentityCommand;
@@ -378,11 +378,6 @@ impl IdentityStore {
         identity_command: futures::channel::mpsc::Sender<IdentityCommand>,
         span: &Span,
     ) -> Result<Self, Error> {
-        if let Some(path) = config.path() {
-            if !path.exists() {
-                fs::create_dir_all(path).await?;
-            }
-        }
         let config = config.clone();
 
         let identity_cache = IdentityCache::new(ipfs).await;
@@ -455,7 +450,7 @@ impl IdentityStore {
         if !friends.is_empty() {
             tracing::info!("Loading friends list into phonebook");
             if let Err(_e) = phonebook.add_friend_list(&friends).await {
-                error!("Error adding friends in phonebook: {_e}");
+                tracing::error!("Error adding friends in phonebook: {_e}");
             }
         }
 
@@ -549,13 +544,13 @@ impl IdentityStore {
                             // TODO: Uncomment in the future
                             // for addr in payload.addresses() {
                             //     if let Err(e) = store.ipfs.add_peer(*peer_id, addr.clone()).await {
-                            //         error!("Failed to add peer {peer_id} address {addr}: {e}");
+                            //        tracing::error!("Failed to add peer {peer_id} address {addr}: {e}");
                             //     }
                             // }
 
                             //Ignore requesting images if there is a change for now.
                             if let Err(e) = store.process_message(&from_did, event, false).await {
-                                error!("Failed to process identity message from {from_did}: {e}");
+                               tracing::error!("Failed to process identity message from {from_did}: {e}");
                             }
                         }
                         Some(message) = event_stream.next() => {
@@ -581,7 +576,7 @@ impl IdentityStore {
                             }) {
                                 Ok(e) => e,
                                 Err(e) => {
-                                    error!("Failed to decrypt payload from {in_did}: {e}");
+                                   tracing::error!("Failed to decrypt payload from {in_did}: {e}");
                                     continue;
                                 }
                             };
@@ -589,7 +584,7 @@ impl IdentityStore {
                             tracing::debug!(from = %in_did, event = ?event);
 
                             if let Err(e) = store.process_message(&in_did, event, false).await {
-                                error!("Failed to process identity message from {in_did}: {e}");
+                               tracing::error!("Failed to process identity message from {in_did}: {e}");
                             }
 
 
@@ -629,7 +624,7 @@ impl IdentityStore {
                             tracing::debug!("Event from {did}: {:?}", data.event);
 
                             let result = store.check_request_message(data, &mut signal).await.map_err(|e| {
-                                error!("Error processing message: {e}");
+                               tracing::error!("Error processing message: {e}");
                                 e
                             });
 
@@ -640,10 +635,10 @@ impl IdentityStore {
                         // Used as the initial request/push
                         Ok(push) = discovery_rx.recv() => {
                             if let Err(e) = store.request(&push, RequestOption::Identity).await {
-                                error!("Error requesting identity: {e}");
+                               tracing::error!("Error requesting identity: {e}");
                             }
                             if let Err(e) = store.push(&push).await {
-                                error!("Error pushing identity: {e}");
+                               tracing::error!("Error pushing identity: {e}");
                             }
                         }
                         _ = &mut tick => {
@@ -704,7 +699,7 @@ impl IdentityStore {
             .unwrap_or_default()
             && data.event == Event::Request
         {
-            warn!("Request exist locally. Skipping");
+            tracing::warn!("Request exist locally. Skipping");
             return Ok(());
         }
 
@@ -1299,7 +1294,9 @@ impl IdentityStore {
                                         if let Err(e) =
                                             self.request(in_did, RequestOption::Metadata).await
                                         {
-                                            error!("Error requesting metadata from {in_did}: {e}");
+                                            tracing::error!(
+                                                "Error requesting metadata from {in_did}: {e}"
+                                            );
                                         }
                                     } else {
                                         let identity_meta_cid =
@@ -1345,7 +1342,7 @@ impl IdentityStore {
                                             )
                                             .await
                                         {
-                                            error!(
+                                            tracing::error!(
                                                 "Error requesting profile picture from {in_did}: {e}"
                                             );
                                         }
@@ -1410,7 +1407,7 @@ impl IdentityStore {
                                             )
                                             .await
                                         {
-                                            error!(
+                                            tracing::error!(
                                                 "Error requesting profile banner from {in_did}: {e}"
                                             );
                                         }
@@ -1651,7 +1648,7 @@ impl IdentityStore {
                 let phonebook = self.phonebook();
 
                 if let Err(_e) = phonebook.add_friend_list(&friends).await {
-                    error!("Error adding friends in phonebook: {_e}");
+                    tracing::error!("Error adding friends in phonebook: {_e}");
                 }
                 let _ = self.announce_identity_to_mesh().await;
             }
@@ -1749,7 +1746,7 @@ impl IdentityStore {
                 let phonebook = self.phonebook();
 
                 if let Err(_e) = phonebook.add_friend_list(&friends).await {
-                    error!("Error adding friends in phonebook: {_e}");
+                    tracing::error!("Error adding friends in phonebook: {_e}");
                 }
                 let _ = self.announce_identity_to_mesh().await;
             }
@@ -2136,15 +2133,15 @@ impl IdentityStore {
                                 break;
                             }
                             Ok(Ok(Err(e))) => {
-                                error!("Error registering identity to {peer_id}: {e}");
+                               tracing::error!("Error registering identity to {peer_id}: {e}");
                                 break;
                             }
                             Ok(Err(Canceled)) => {
-                                error!("Channel been unexpectedly closed for {peer_id}");
+                               tracing::error!("Channel been unexpectedly closed for {peer_id}");
                                 continue;
                             }
                             Err(_) => {
-                                error!("Request timed out for {peer_id}");
+                               tracing::error!("Request timed out for {peer_id}");
                                 continue;
                             }
                         }
@@ -2465,7 +2462,7 @@ impl IdentityStore {
             .ok_or(Error::CannotFindFriendRequest)?;
 
         if self.is_friend(pubkey).await? {
-            warn!("Already friends. Removing request");
+            tracing::warn!("Already friends. Removing request");
 
             self.root_document.remove_request(internal_request).await?;
 
@@ -2589,7 +2586,7 @@ impl IdentityStore {
 
         if self.is_friend(pubkey).await? {
             if let Err(e) = self.remove_friend(pubkey, false).await {
-                error!("Error removing item from friend list: {e}");
+                tracing::error!("Error removing item from friend list: {e}");
             }
         }
 
@@ -2663,7 +2660,7 @@ impl IdentityStore {
 
         let phonebook = self.phonebook();
         if let Err(_e) = phonebook.add_friend(pubkey).await {
-            error!("Error: {_e}");
+            tracing::error!("Error: {_e}");
         }
 
         // Push to give an update in the event any wasnt transmitted during the initial push
@@ -2692,7 +2689,7 @@ impl IdentityStore {
         let phonebook = self.phonebook();
 
         if let Err(_e) = phonebook.remove_friend(pubkey).await {
-            error!("Error: {_e}");
+            tracing::error!("Error: {_e}");
         }
 
         if broadcast {
