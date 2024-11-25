@@ -1,18 +1,32 @@
-use super::{conversation::message::MessageDocument, topics::ConversationTopic, PeerIdExt};
+use super::{
+    conversation::message::MessageDocument, keystore::Keystore, topics::ConversationTopic,
+    PeerIdExt,
+};
+use crate::store::conversation::reference::MessageReferenceList;
 use crate::store::DidExt;
 use chrono::{DateTime, Utc};
 use core::hash::Hash;
+use either::Either;
+use futures::{
+    stream::{self, BoxStream},
+    StreamExt, TryFutureExt,
+};
 use indexmap::{IndexMap, IndexSet};
 use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, Keypair};
 use serde::{Deserialize, Serialize};
+use std::{collections::BTreeSet, time::Duration};
 use uuid::Uuid;
 use warp::{
     crypto::DID,
     error::Error,
-    raygun::community::{
-        Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType,
-        CommunityInvite, CommunityPermission, CommunityPermissions, CommunityRole, RoleId,
+    raygun::{
+        community::{
+            Community, CommunityChannel, CommunityChannelPermission, CommunityChannelPermissions,
+            CommunityChannelType, CommunityInvite, CommunityPermission, CommunityPermissions,
+            CommunityRole, RoleId,
+        },
+        Message, MessageOptions, MessagePage, MessageReference, Messages, MessagesType,
     },
 };
 
@@ -164,47 +178,6 @@ impl CommunityDocument {
     }
 }
 impl CommunityDocument {
-    pub async fn insert_message_document(
-        &mut self,
-        _ipfs: &Ipfs,
-        _message_document: &MessageDocument,
-    ) -> Result<Cid, Error> {
-        // let mut list = self.message_reference_list(ipfs).await?;
-        // let cid = list.insert(ipfs, message_document).await?;
-        // self.set_message_reference_list(ipfs, list).await?;
-        // Ok(cid)
-        Err(Error::Unimplemented)
-    }
-
-    pub async fn update_message_document(
-        &mut self,
-        _ipfs: &Ipfs,
-        _message_document: &MessageDocument,
-    ) -> Result<Cid, Error> {
-        // let mut list = self.message_reference_list(ipfs).await?;
-        // let cid = list.update(ipfs, message_document).await?;
-        // self.set_message_reference_list(ipfs, list).await?;
-        // Ok(cid)
-        Err(Error::Unimplemented)
-    }
-
-    pub async fn get_message_document(
-        &self,
-        _ipfs: &Ipfs,
-        _message_id: Uuid,
-    ) -> Result<MessageDocument, Error> {
-        // let refs = self.message_reference_list(ipfs).await?;
-        // refs.get(ipfs, message_id).await
-        Err(Error::Unimplemented)
-    }
-
-    pub async fn contains(&self, _ipfs: &Ipfs, _message_id: Uuid) -> Result<bool, Error> {
-        // let list = self.message_reference_list(ipfs).await?;
-        // Ok(list.contains(ipfs, message_id).await)
-        Err(Error::Unimplemented)
-    }
-}
-impl CommunityDocument {
     pub fn new(keypair: &Keypair, name: String) -> Result<Self, Error> {
         let creator = keypair.to_did()?;
 
@@ -352,11 +325,14 @@ impl CommunityDocument {
 pub struct CommunityChannelDocument {
     pub id: Uuid,
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub created: DateTime<Utc>,
     pub modified: DateTime<Utc>,
     pub channel_type: CommunityChannelType,
     pub permissions: CommunityChannelPermissions,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub messages: Option<Cid>,
 }
 impl CommunityChannelDocument {
     pub fn new(
@@ -372,7 +348,327 @@ impl CommunityChannelDocument {
             modified: Utc::now(),
             channel_type,
             permissions: CommunityChannelPermissions::new(),
+            messages: None,
         }
+    }
+}
+impl CommunityChannelDocument {
+    pub async fn message_reference_list(&self, ipfs: &Ipfs) -> Result<MessageReferenceList, Error> {
+        let refs = match self.messages {
+            Some(cid) => {
+                ipfs.get_dag(cid)
+                    .timeout(Duration::from_secs(10))
+                    .deserialized()
+                    .await?
+            }
+            None => MessageReferenceList::default(),
+        };
+
+        Ok(refs)
+    }
+
+    pub async fn contains(&self, ipfs: &Ipfs, message_id: Uuid) -> Result<bool, Error> {
+        let list = self.message_reference_list(ipfs).await?;
+        Ok(list.contains(ipfs, message_id).await)
+    }
+
+    pub async fn set_message_reference_list(
+        &mut self,
+        ipfs: &Ipfs,
+        list: MessageReferenceList,
+    ) -> Result<(), Error> {
+        self.modified = Utc::now();
+        let next_cid = ipfs.put_dag(list).await?;
+        self.messages.replace(next_cid);
+        Ok(())
+    }
+
+    pub async fn insert_message_document(
+        &mut self,
+        ipfs: &Ipfs,
+        message_document: &MessageDocument,
+    ) -> Result<Cid, Error> {
+        let mut list = self.message_reference_list(ipfs).await?;
+        let cid = list.insert(ipfs, message_document).await?;
+        self.set_message_reference_list(ipfs, list).await?;
+        Ok(cid)
+    }
+
+    pub async fn update_message_document(
+        &mut self,
+        ipfs: &Ipfs,
+        message_document: &MessageDocument,
+    ) -> Result<Cid, Error> {
+        let mut list = self.message_reference_list(ipfs).await?;
+        let cid = list.update(ipfs, message_document).await?;
+        self.set_message_reference_list(ipfs, list).await?;
+        Ok(cid)
+    }
+
+    pub async fn messages_length(&self, ipfs: &Ipfs) -> Result<usize, Error> {
+        let list = self.message_reference_list(ipfs).await?;
+        Ok(list.count(ipfs).await)
+    }
+
+    pub async fn get_message_list(&self, ipfs: &Ipfs) -> Result<BTreeSet<MessageDocument>, Error> {
+        let refs = self.message_reference_list(ipfs).await?;
+        let list = refs.list(ipfs).collect::<BTreeSet<_>>().await;
+        Ok(list)
+    }
+
+    pub async fn get_messages(
+        &self,
+        ipfs: &Ipfs,
+        keypair: &Keypair,
+        option: MessageOptions,
+        keystore: Either<DID, Keystore>,
+    ) -> Result<Vec<Message>, Error> {
+        let list = self
+            .get_messages_stream(ipfs, keypair, option, keystore)
+            .await?
+            .collect::<Vec<_>>()
+            .await;
+        Ok(list)
+    }
+
+    pub async fn get_messages_reference_stream<'a>(
+        &self,
+        ipfs: &Ipfs,
+        option: MessageOptions,
+    ) -> Result<BoxStream<'a, MessageReference>, Error> {
+        let message_list = self.get_message_list(ipfs).await?;
+
+        if message_list.is_empty() {
+            return Ok(stream::empty().boxed());
+        }
+
+        let mut messages = Vec::from_iter(message_list);
+
+        if option.reverse() {
+            messages.reverse()
+        }
+
+        if option.first_message() && !messages.is_empty() {
+            let message = messages.first().cloned().ok_or(Error::MessageNotFound)?;
+            return Ok(stream::once(async move { message.into() }).boxed());
+        }
+
+        if option.last_message() && !messages.is_empty() {
+            let message = messages.last().cloned().ok_or(Error::MessageNotFound)?;
+            return Ok(stream::once(async move { message.into() }).boxed());
+        }
+
+        let stream = async_stream::stream! {
+            let mut remaining = option.limit();
+            for (index, document) in messages.iter().enumerate() {
+                if remaining.as_ref().map(|x| *x == 0).unwrap_or_default() {
+                    break;
+                }
+                if let Some(range) = option.range() {
+                    if range.start > index || range.end < index {
+                        continue
+                    }
+                }
+                if let Some(range) = option.date_range() {
+                    if !(document.date >= range.start && document.date <= range.end) {
+                        continue
+                    }
+                }
+
+                if option.pinned() && !document.pinned {
+                    continue;
+                }
+
+                if let Some(remaining) = remaining.as_mut() {
+                    *remaining = remaining.saturating_sub(1);
+                }
+
+                yield document.into()
+            }
+        };
+
+        Ok(stream.boxed())
+    }
+
+    pub async fn get_messages_stream<'a>(
+        &self,
+        ipfs: &Ipfs,
+        keypair: &Keypair,
+        option: MessageOptions,
+        keystore: Either<DID, Keystore>,
+    ) -> Result<BoxStream<'a, Message>, Error> {
+        let message_list = self.get_message_list(ipfs).await?;
+
+        if message_list.is_empty() {
+            return Ok(stream::empty().boxed());
+        }
+
+        let mut messages = Vec::from_iter(message_list);
+
+        if option.reverse() {
+            messages.reverse()
+        }
+
+        if option.first_message() && !messages.is_empty() {
+            let message = messages
+                .first()
+                .ok_or(Error::MessageNotFound)?
+                .resolve(ipfs, keypair, true, keystore.as_ref())
+                .await?;
+            return Ok(stream::once(async { message }).boxed());
+        }
+
+        if option.last_message() && !messages.is_empty() {
+            let message = messages
+                .last()
+                .ok_or(Error::MessageNotFound)?
+                .resolve(ipfs, keypair, true, keystore.as_ref())
+                .await?;
+            return Ok(stream::once(async { message }).boxed());
+        }
+        let keystore = keystore.clone();
+        let ipfs = ipfs.clone();
+        let keypair = keypair.clone();
+        let stream = async_stream::stream! {
+            let mut remaining = option.limit();
+            for (index, document) in messages.iter().enumerate() {
+                if remaining.as_ref().map(|x| *x == 0).unwrap_or_default() {
+                    break;
+                }
+                if let Some(range) = option.range() {
+                    if range.start > index || range.end < index {
+                        continue
+                    }
+                }
+                if let Some(range) = option.date_range() {
+                    if !(document.date >= range.start && document.date <= range.end) {
+                        continue
+                    }
+                }
+
+                if option.pinned() && !document.pinned {
+                    continue;
+                }
+
+                if let Ok(message) = document.resolve(&ipfs, &keypair, true, keystore.as_ref()).await {
+                    let should_yield = if let Some(keyword) = option.keyword() {
+                         message
+                            .lines()
+                            .iter()
+                            .any(|line| line.to_lowercase().contains(&keyword.to_lowercase()))
+                    } else {
+                        true
+                    };
+                    if should_yield {
+                        if let Some(remaining) = remaining.as_mut() {
+                            *remaining = remaining.saturating_sub(1);
+                        }
+                        yield message;
+                    }
+                }
+            }
+        };
+
+        Ok(stream.boxed())
+    }
+
+    pub async fn get_messages_pages(
+        &self,
+        ipfs: &Ipfs,
+        did: &Keypair,
+        option: MessageOptions,
+        keystore: Either<&DID, &Keystore>,
+    ) -> Result<Messages, Error> {
+        let message_list = self.get_message_list(ipfs).await?;
+
+        if message_list.is_empty() {
+            return Ok(Messages::Page {
+                pages: vec![],
+                total: 0,
+            });
+        }
+
+        let mut messages = Vec::from_iter(message_list);
+
+        if option.reverse() {
+            messages.reverse()
+        }
+
+        let (page_index, amount_per_page) = match option.messages_type() {
+            MessagesType::Pages {
+                page,
+                amount_per_page,
+            } => (
+                page,
+                amount_per_page
+                    .map(|amount| if amount == 0 { u8::MAX as _ } else { amount })
+                    .unwrap_or(u8::MAX as _),
+            ),
+            _ => (None, u8::MAX as _),
+        };
+
+        let messages_chunk = messages.chunks(amount_per_page as _).collect::<Vec<_>>();
+        let mut pages = vec![];
+        // First check to determine if there is a page that was selected
+        if let Some(index) = page_index {
+            let page = messages_chunk.get(index).ok_or(Error::PageNotFound)?;
+            let mut messages = vec![];
+            for document in page.iter() {
+                if let Ok(message) = document.resolve(ipfs, did, true, keystore).await {
+                    messages.push(message);
+                }
+            }
+            let total = messages.len();
+            pages.push(MessagePage::new(index, messages, total));
+            return Ok(Messages::Page { pages, total: 1 });
+        }
+
+        for (index, chunk) in messages_chunk.iter().enumerate() {
+            let mut messages = vec![];
+            for document in chunk.iter() {
+                if let Ok(message) = document.resolve(ipfs, did, true, keystore).await {
+                    if option.pinned() && !message.pinned() {
+                        continue;
+                    }
+                    messages.push(message);
+                }
+            }
+
+            let total = messages.len();
+            pages.push(MessagePage::new(index, messages, total));
+        }
+
+        let total = pages.len();
+
+        Ok(Messages::Page { pages, total })
+    }
+
+    pub async fn get_message_document(
+        &self,
+        ipfs: &Ipfs,
+        message_id: Uuid,
+    ) -> Result<MessageDocument, Error> {
+        let refs = self.message_reference_list(ipfs).await?;
+        refs.get(ipfs, message_id).await
+    }
+
+    pub async fn get_message(
+        &self,
+        ipfs: &Ipfs,
+        keypair: &Keypair,
+        message_id: Uuid,
+        keystore: Either<&DID, &Keystore>,
+    ) -> Result<Message, Error> {
+        self.get_message_document(ipfs, message_id)
+            .and_then(|doc| async move { doc.resolve(ipfs, keypair, true, keystore).await })
+            .await
+    }
+
+    pub async fn delete_message(&mut self, ipfs: &Ipfs, message_id: Uuid) -> Result<(), Error> {
+        let mut list = self.message_reference_list(ipfs).await?;
+        list.remove(ipfs, message_id).await?;
+        self.set_message_reference_list(ipfs, list).await?;
+        Ok(())
     }
 }
 impl From<CommunityChannelDocument> for CommunityChannel {
