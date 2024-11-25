@@ -1,12 +1,20 @@
+use std::path::PathBuf;
+
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
+use futures::stream::BoxStream;
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::constellation::ConstellationProgressStream;
 use crate::crypto::DID;
 use crate::raygun::{Error, Location};
 
-use super::{ConversationImage, MessageEventStream};
+use super::{
+    AttachmentEventStream, ConversationImage, Message, MessageEvent, MessageEventStream,
+    MessageOptions, MessageReference, MessageStatus, Messages, PinState, ReactionState,
+};
 
 pub type RoleId = Uuid;
 pub type CommunityRoles = IndexMap<RoleId, CommunityRole>;
@@ -522,20 +530,182 @@ pub trait RayGunCommunity: Sync + Send {
     ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
+
+    /// Retrieve all messages from a conversation
+    async fn get_community_channel_message(
+        &self,
+        _community_id: Uuid,
+        _channel_id: Uuid,
+        _message_id: Uuid,
+    ) -> Result<Message, Error> {
+        Err(Error::Unimplemented)
+    }
+    /// Retrieve all messages from a conversation
+    async fn get_community_channel_messages(
+        &self,
+        _community_id: Uuid,
+        _channel_id: Uuid,
+        _options: MessageOptions,
+    ) -> Result<Messages, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Get a number of messages in a conversation
+    async fn get_community_channel_message_count(
+        &self,
+        _community_id: Uuid,
+        _channel_id: Uuid,
+    ) -> Result<usize, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Retrieve a message reference from a conversation
+    async fn get_community_channel_message_reference(
+        &self,
+        _community_id: Uuid,
+        _channel_id: Uuid,
+        _message_id: Uuid,
+    ) -> Result<MessageReference, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Retrieve all message references from a conversation
+    async fn get_community_channel_message_references(
+        &self,
+        _community_id: Uuid,
+        _channel_id: Uuid,
+        _options: MessageOptions,
+    ) -> Result<BoxStream<'static, MessageReference>, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Get a status of a message in a conversation
+    async fn community_channel_message_status(
+        &self,
+        _community_id: Uuid,
+        _channel_id: Uuid,
+        _message_id: Uuid,
+    ) -> Result<MessageStatus, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Sends a message to a conversation.
     async fn send_community_channel_message(
         &mut self,
         _community_id: Uuid,
         _channel_id: Uuid,
-        _message: &str,
-    ) -> Result<(), Error> {
+        _message: Vec<String>,
+    ) -> Result<Uuid, Error> {
         Err(Error::Unimplemented)
     }
-    async fn delete_community_channel_message(
+
+    /// Edit an existing message in a conversation.
+    async fn edit_community_channel_message(
         &mut self,
         _community_id: Uuid,
         _channel_id: Uuid,
         _message_id: Uuid,
+        _message: Vec<String>,
     ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Reply to a message within a conversation
+    async fn reply_to_community_channel_message(
+        &mut self,
+        _community_id: Uuid,
+        _channel_id: Uuid,
+        _message_id: Uuid,
+        _message: Vec<String>,
+    ) -> Result<Uuid, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Delete message from a conversation
+    async fn delete_community_channel_message(
+        &mut self,
+        _community_id: Uuid,
+        _channel_id: Uuid,
+        _message_id: Option<Uuid>,
+    ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Pin a message within a conversation
+    async fn pin_community_channel_message(
+        &mut self,
+        _community_id: Uuid,
+        _channel_id: Uuid,
+        _message_id: Uuid,
+        _state: PinState,
+    ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// React to a message
+    async fn react_to_community_channel_message(
+        &mut self,
+        _community_id: Uuid,
+        _channel_id: Uuid,
+        _message_id: Uuid,
+        _state: ReactionState,
+        _emoji: String,
+    ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Send an event to a conversation
+    async fn send_community_channel_messsage_event(
+        &mut self,
+        _community_id: Uuid,
+        _channel_id: Uuid,
+        _event: MessageEvent,
+    ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Cancel event that was sent, if any.
+    async fn cancel_community_channel_messsage_event(
+        &mut self,
+        _community_id: Uuid,
+        _channel_id: Uuid,
+        _event: MessageEvent,
+    ) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+    /// Send files to a conversation.
+    /// If no files is provided in the array, it will throw an error
+    async fn attach_to_community_channel_message(
+        &mut self,
+        _community_id: Uuid,
+        _channel_id: Uuid,
+        _message_id: Option<Uuid>,
+        _locations: Vec<Location>,
+        _message: Vec<String>,
+    ) -> Result<(Uuid, AttachmentEventStream), Error> {
+        Err(Error::Unimplemented)
+    }
+    /// Downloads a file that been attached to a message
+    /// Note: Must use the filename associated when downloading
+    async fn download_from_community_channel_message(
+        &self,
+        _community_id: Uuid,
+        _channel_id: Uuid,
+        _message_id: Uuid,
+        _file: String,
+        _path: PathBuf,
+    ) -> Result<ConstellationProgressStream, Error> {
+        Err(Error::Unimplemented)
+    }
+    /// Stream a file that been attached to a message
+    /// Note: Must use the filename associated when downloading
+    async fn download_stream_from_community_channel_message(
+        &self,
+        _community_id: Uuid,
+        _channel_id: Uuid,
+        _message_id: Uuid,
+        _file: &str,
+    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error> {
         Err(Error::Unimplemented)
     }
 }

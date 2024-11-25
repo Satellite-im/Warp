@@ -3,12 +3,14 @@ mod common;
 mod test {
     use futures::{stream::FuturesUnordered, FutureExt, Stream, StreamExt, TryStreamExt};
     use std::time::Duration;
+    use uuid::Uuid;
     use warp::raygun::{
         community::{
             Community, CommunityChannelPermission, CommunityChannelType, CommunityInvite,
             CommunityPermission, RayGunCommunity,
         },
-        MessageEventKind, MessageEventStream, RayGunEventKind, RayGunStream,
+        Message, MessageEventKind, MessageEventStream, MessageOptions, MessageReference, Messages,
+        RayGunEventKind, RayGunStream,
     };
 
     #[cfg(target_arch = "wasm32")]
@@ -77,7 +79,7 @@ mod test {
         );
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -118,7 +120,7 @@ mod test {
         .await?;
         assert_eq!(
             next_event(&mut rg_stream_c, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -159,36 +161,127 @@ mod test {
         Ok(())
     }
 
-    // #[async_test]
-    // async fn delete_community_as_creator() -> anyhow::Result<()> {
-    //     let context = Some("test::delete_community_as_creator".into());
-    //     let account_opts = (None, None, context);
-    //     let mut accounts = create_accounts(vec![account_opts]).await?;
+    #[async_test]
+    async fn delete_community_as_owner() -> anyhow::Result<()> {
+        let context = Some("test::delete_community_as_owner".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, _, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
 
-    //     let (instance_a, _, _) = &mut accounts[0];
-    //     let community = instance_a.create_community("Community0").await?;
-    //     instance_a.delete_community(community.id()).await?;
-    //     Ok(())
-    // }
-    // #[async_test]
-    // async fn delete_community_as_non_creator() -> anyhow::Result<()> {
-    //     let context = Some("test::delete_community_as_non_creator".into());
-    //     let account_opts = (None, None, context);
-    //     let mut accounts = create_accounts(vec![account_opts.clone(), account_opts]).await?;
+        let mut rg_stream_a = instance_a.raygun_subscribe().await?;
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
+        let community = instance_a.create_community("Community0").await?;
+        assert_eq!(
+            next_event(&mut rg_stream_a, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityCreated {
+                community_id: community.id()
+            }
+        );
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvited {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
 
-    //     let (instance_a, _, _) = &mut accounts[0];
-    //     let community = instance_a.create_community("Community0").await?;
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+        instance_b
+            .accept_community_invite(community.id(), invite.id())
+            .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id(),
+                user: did_b.clone()
+            }
+        );
 
-    //     let (instance_b, _, _) = &mut accounts[1];
-    //     match instance_b.delete_community(community.id()).await {
-    //         Err(e) => match e {
-    //             Error::Unauthorized => {}
-    //             _ => panic!("error should be Error::Unauthorized"),
-    //         },
-    //         Ok(_) => panic!("should be unauthorized to delete community"),
-    //     }
-    //     Ok(())
-    // }
+        instance_a.delete_community(community.id()).await?;
+        assert_eq!(
+            next_event(&mut rg_stream_a, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityDeleted {
+                community_id: community.id()
+            }
+        );
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityDeleted {
+                community_id: community.id()
+            }
+        );
+
+        let community_a = instance_a.get_community(community.id()).await;
+        let community_b = instance_b.get_community(community.id()).await;
+
+        let expected_err = Err::<Community, warp::error::Error>(Error::InvalidCommunity);
+        assert_eq!(format!("{:?}", community_a), format!("{:?}", expected_err));
+        assert_eq!(format!("{:?}", community_b), format!("{:?}", expected_err));
+
+        Ok(())
+    }
+    #[async_test]
+    async fn delete_community_as_non_owner_member() -> anyhow::Result<()> {
+        let context = Some("test::delete_community_as_non_owner_member".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, _, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvited {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+        instance_b
+            .accept_community_invite(community.id(), invite.id())
+            .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id(),
+                user: did_b.clone()
+            }
+        );
+
+        let result = instance_b.delete_community(community.id()).await;
+        assert_eq!(
+            format!("{:?}", result),
+            format!("{:?}", Err::<Community, Error>(Error::Unauthorized))
+        );
+        Ok(())
+    }
+
+    #[async_test]
+    async fn delete_community_as_non_member() -> anyhow::Result<()> {
+        let context = Some("test::delete_community_as_non_member".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, _, _) = &mut accounts[0].clone();
+        let (instance_b, _, _) = &mut accounts[1].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+
+        let result = instance_b.delete_community(community.id()).await;
+        let expected_err = Err::<Community, warp::error::Error>(Error::InvalidCommunity);
+        assert_eq!(format!("{:?}", result), format!("{:?}", expected_err));
+        Ok(())
+    }
 
     #[async_test]
     async fn get_community_as_uninvited_user() -> anyhow::Result<()> {
@@ -226,7 +319,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -251,7 +344,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -281,7 +374,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -312,7 +405,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -371,7 +464,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -426,7 +519,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite_for_b.id()
             }
@@ -473,7 +566,7 @@ mod test {
         );
         assert_eq!(
             next_event(&mut rg_stream_c, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite_for_c.id()
             }
@@ -507,7 +600,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite_for_b.id()
             }
@@ -555,7 +648,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite_for_b.id()
             }
@@ -614,7 +707,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -641,7 +734,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite_for_b.id()
             }
@@ -688,7 +781,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite_for_b.id()
             }
@@ -746,7 +839,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite_for_b.id()
             }
@@ -782,7 +875,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_c, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite_for_b.id()
             }
@@ -816,7 +909,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite_for_b.id()
             }
@@ -861,7 +954,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -908,7 +1001,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -949,7 +1042,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -992,7 +1085,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -1051,7 +1144,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -1097,7 +1190,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -1159,7 +1252,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -1202,7 +1295,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -1254,7 +1347,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -1297,7 +1390,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -1340,8 +1433,8 @@ mod test {
         Ok(())
     }
     #[async_test]
-    async fn edit_community_description_as_creator() -> anyhow::Result<()> {
-        let context = Some("test::edit_community_description_as_creator".into());
+    async fn edit_community_description_as_owner() -> anyhow::Result<()> {
+        let context = Some("test::edit_community_description_as_owner".into());
         let acc = (None, None, context);
         let accounts = create_accounts(vec![acc]).await?;
         let (instance_a, _, _) = &mut accounts[0].clone();
@@ -1375,7 +1468,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -1418,7 +1511,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -1476,7 +1569,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -1519,7 +1612,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -1579,7 +1672,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -1604,7 +1697,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_c, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -1659,7 +1752,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -1708,7 +1801,7 @@ mod test {
         .await?;
         assert_eq!(
             next_event(&mut rg_stream_c, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -1764,7 +1857,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -1811,7 +1904,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -1874,7 +1967,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -1925,7 +2018,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -2003,7 +2096,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -2061,7 +2154,7 @@ mod test {
             .await?;
         assert_eq!(
             next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
-            RayGunEventKind::CommunityInvite {
+            RayGunEventKind::CommunityInvited {
                 community_id: community.id(),
                 invite_id: invite.id()
             }
@@ -2112,34 +2205,972 @@ mod test {
         Ok(())
     }
 
-    // #[async_test]
-    // async fn unauthorized_view_community_channel_messages() -> anyhow::Result<()> {
-    //     assert!(false);
-    //     Ok(())
-    // }
-    // #[async_test]
-    // async fn authorized_view_community_channel_messages() -> anyhow::Result<()> {
-    //     assert!(false);
-    //     Ok(())
-    // }
-    // #[async_test]
-    // async fn unauthorized_send_community_channel_message() -> anyhow::Result<()> {
-    //     assert!(false);
-    //     Ok(())
-    // }
-    // #[async_test]
-    // async fn authorized_send_community_channel_message() -> anyhow::Result<()> {
-    //     assert!(false);
-    //     Ok(())
-    // }
-    // #[async_test]
-    // async fn unauthorized_delete_community_channel_message() -> anyhow::Result<()> {
-    //     assert!(false);
-    //     Ok(())
-    // }
-    // #[async_test]
-    // async fn authorized_delete_community_channel_message() -> anyhow::Result<()> {
-    //     assert!(false);
-    //     Ok(())
-    // }
+    #[async_test]
+    async fn unauthorized_get_community_channel_message() -> anyhow::Result<()> {
+        let context = Some("test::unauthorized_get_community_channel_message".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, _, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+        let channel = instance_a
+            .create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard)
+            .await?;
+        instance_a
+            .revoke_community_channel_permission_for_all(
+                community.id(),
+                channel.id(),
+                CommunityChannelPermission::ViewChannel,
+            )
+            .await?;
+
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvited {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+        instance_b
+            .accept_community_invite(community.id(), invite.id())
+            .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id(),
+                user: did_b.clone()
+            }
+        );
+
+        let mut stream_b = instance_b.get_community_stream(community.id()).await?;
+        instance_a
+            .send_community_channel_message(community.id(), channel.id(), vec!["Hello".to_string()])
+            .await?;
+        let event_a = next_event(&mut stream_a, Duration::from_secs(60)).await?;
+        let message_id = match event_a {
+            MessageEventKind::CommunityMessageSent {
+                community_id: _,
+                channel_id: _,
+                message_id,
+            } => message_id,
+            _ => panic!(
+                "expected MessageEventKind::CommunityMessageSent event, got: {:?}",
+                event_a
+            ),
+        };
+        assert_eq!(
+            event_a,
+            MessageEventKind::CommunityMessageSent {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        assert_eq!(
+            next_event(&mut stream_b, Duration::from_secs(60)).await?,
+            MessageEventKind::CommunityMessageReceived {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        let result = instance_b
+            .get_community_channel_message(community.id(), channel.id(), message_id)
+            .await;
+        assert_eq!(
+            format!("{:?}", result),
+            format!("{:?}", Err::<Message, Error>(Error::Unauthorized))
+        );
+        Ok(())
+    }
+    #[async_test]
+    async fn authorized_get_community_channel_message() -> anyhow::Result<()> {
+        let context = Some("test::authorized_get_community_channel_message".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, _, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+        let channel = instance_a
+            .create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard)
+            .await?;
+
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvited {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+        instance_b
+            .accept_community_invite(community.id(), invite.id())
+            .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id(),
+                user: did_b.clone()
+            }
+        );
+
+        let mut stream_b = instance_b.get_community_stream(community.id()).await?;
+        let text = "Hello".to_string();
+        instance_a
+            .send_community_channel_message(community.id(), channel.id(), vec![text.clone()])
+            .await?;
+        let event_a = next_event(&mut stream_a, Duration::from_secs(60)).await?;
+        let message_id = match event_a {
+            MessageEventKind::CommunityMessageSent {
+                community_id: _,
+                channel_id: _,
+                message_id,
+            } => message_id,
+            _ => panic!(
+                "expected MessageEventKind::CommunityMessageSent event, got: {:?}",
+                event_a
+            ),
+        };
+        assert_eq!(
+            event_a,
+            MessageEventKind::CommunityMessageSent {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        assert_eq!(
+            next_event(&mut stream_b, Duration::from_secs(60)).await?,
+            MessageEventKind::CommunityMessageReceived {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        let message = instance_b
+            .get_community_channel_message(community.id(), channel.id(), message_id)
+            .await?;
+        assert_eq!(message.lines().len(), 1);
+        assert_eq!(message.lines()[0], text);
+        Ok(())
+    }
+    #[async_test]
+    async fn unauthorized_get_community_channel_messages() -> anyhow::Result<()> {
+        let context = Some("test::unauthorized_get_community_channel_messages".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, _, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+        let channel = instance_a
+            .create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard)
+            .await?;
+        instance_a
+            .revoke_community_channel_permission_for_all(
+                community.id(),
+                channel.id(),
+                CommunityChannelPermission::ViewChannel,
+            )
+            .await?;
+
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvited {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+        instance_b
+            .accept_community_invite(community.id(), invite.id())
+            .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id(),
+                user: did_b.clone()
+            }
+        );
+
+        let mut stream_b = instance_b.get_community_stream(community.id()).await?;
+        instance_a
+            .send_community_channel_message(community.id(), channel.id(), vec!["Hello".to_string()])
+            .await?;
+        let event_a = next_event(&mut stream_a, Duration::from_secs(60)).await?;
+        let message_id = match event_a {
+            MessageEventKind::CommunityMessageSent {
+                community_id: _,
+                channel_id: _,
+                message_id,
+            } => message_id,
+            _ => panic!(
+                "expected MessageEventKind::CommunityMessageSent event, got: {:?}",
+                event_a
+            ),
+        };
+        assert_eq!(
+            event_a,
+            MessageEventKind::CommunityMessageSent {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        assert_eq!(
+            next_event(&mut stream_b, Duration::from_secs(60)).await?,
+            MessageEventKind::CommunityMessageReceived {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        let result = instance_b
+            .get_community_channel_messages(community.id(), channel.id(), MessageOptions::default())
+            .await;
+        assert_eq!(
+            format!("{:?}", result),
+            format!("{:?}", Err::<Messages, Error>(Error::Unauthorized))
+        );
+        Ok(())
+    }
+    #[async_test]
+    async fn authorized_get_community_channel_messages() -> anyhow::Result<()> {
+        let context = Some("test::authorized_get_community_channel_messages".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, _, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+        let channel = instance_a
+            .create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard)
+            .await?;
+
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvited {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+        instance_b
+            .accept_community_invite(community.id(), invite.id())
+            .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id(),
+                user: did_b.clone()
+            }
+        );
+
+        let mut stream_b = instance_b.get_community_stream(community.id()).await?;
+        let text = "Hello".to_string();
+        instance_a
+            .send_community_channel_message(community.id(), channel.id(), vec![text.clone()])
+            .await?;
+        let event_a = next_event(&mut stream_a, Duration::from_secs(60)).await?;
+        let message_id = match event_a {
+            MessageEventKind::CommunityMessageSent {
+                community_id: _,
+                channel_id: _,
+                message_id,
+            } => message_id,
+            _ => panic!(
+                "expected MessageEventKind::CommunityMessageSent event, got: {:?}",
+                event_a
+            ),
+        };
+        assert_eq!(
+            event_a,
+            MessageEventKind::CommunityMessageSent {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        assert_eq!(
+            next_event(&mut stream_b, Duration::from_secs(60)).await?,
+            MessageEventKind::CommunityMessageReceived {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        let messages = instance_b
+            .get_community_channel_messages(community.id(), channel.id(), MessageOptions::default())
+            .await?;
+        match messages {
+            Messages::List(vec) => {
+                assert_eq!(vec.len(), 1);
+                assert_eq!(vec[0].lines().len(), 1);
+                assert_eq!(vec[0].lines()[0], text);
+            }
+            Messages::Stream(_) => panic!("should not be Messages::Stream"),
+            Messages::Page { pages: _, total: _ } => panic!("should not be Messages::Page"),
+        }
+        Ok(())
+    }
+    #[async_test]
+    async fn unauthorized_get_community_channel_message_count() -> anyhow::Result<()> {
+        let context = Some("test::unauthorized_get_community_channel_message_count".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, _, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+        let channel = instance_a
+            .create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard)
+            .await?;
+        instance_a
+            .revoke_community_channel_permission_for_all(
+                community.id(),
+                channel.id(),
+                CommunityChannelPermission::ViewChannel,
+            )
+            .await?;
+
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvited {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+        instance_b
+            .accept_community_invite(community.id(), invite.id())
+            .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id(),
+                user: did_b.clone()
+            }
+        );
+
+        let mut stream_b = instance_b.get_community_stream(community.id()).await?;
+        instance_a
+            .send_community_channel_message(community.id(), channel.id(), vec!["Hello".to_string()])
+            .await?;
+        let event_a = next_event(&mut stream_a, Duration::from_secs(60)).await?;
+        let message_id = match event_a {
+            MessageEventKind::CommunityMessageSent {
+                community_id: _,
+                channel_id: _,
+                message_id,
+            } => message_id,
+            _ => panic!(
+                "expected MessageEventKind::CommunityMessageSent event, got: {:?}",
+                event_a
+            ),
+        };
+        assert_eq!(
+            event_a,
+            MessageEventKind::CommunityMessageSent {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        assert_eq!(
+            next_event(&mut stream_b, Duration::from_secs(60)).await?,
+            MessageEventKind::CommunityMessageReceived {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        let result = instance_b
+            .get_community_channel_message_count(community.id(), channel.id())
+            .await;
+        assert_eq!(
+            format!("{:?}", result),
+            format!("{:?}", Err::<usize, Error>(Error::Unauthorized))
+        );
+        Ok(())
+    }
+    #[async_test]
+    async fn authorized_get_community_channel_message_count() -> anyhow::Result<()> {
+        let context = Some("test::authorized_get_community_channel_message_count".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, _, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+        let channel = instance_a
+            .create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard)
+            .await?;
+
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvited {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+        instance_b
+            .accept_community_invite(community.id(), invite.id())
+            .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id(),
+                user: did_b.clone()
+            }
+        );
+
+        let mut stream_b = instance_b.get_community_stream(community.id()).await?;
+        instance_a
+            .send_community_channel_message(community.id(), channel.id(), vec!["Hello".to_string()])
+            .await?;
+        let event_a = next_event(&mut stream_a, Duration::from_secs(60)).await?;
+        let message_id = match event_a {
+            MessageEventKind::CommunityMessageSent {
+                community_id: _,
+                channel_id: _,
+                message_id,
+            } => message_id,
+            _ => panic!(
+                "expected MessageEventKind::CommunityMessageSent event, got: {:?}",
+                event_a
+            ),
+        };
+        assert_eq!(
+            event_a,
+            MessageEventKind::CommunityMessageSent {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        assert_eq!(
+            next_event(&mut stream_b, Duration::from_secs(60)).await?,
+            MessageEventKind::CommunityMessageReceived {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        let count = instance_b
+            .get_community_channel_message_count(community.id(), channel.id())
+            .await?;
+        assert_eq!(count, 1);
+        Ok(())
+    }
+    #[async_test]
+    async fn unauthorized_get_community_channel_message_reference() -> anyhow::Result<()> {
+        let context = Some("test::unauthorized_get_community_channel_message_reference".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, _, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+        let channel = instance_a
+            .create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard)
+            .await?;
+        instance_a
+            .revoke_community_channel_permission_for_all(
+                community.id(),
+                channel.id(),
+                CommunityChannelPermission::ViewChannel,
+            )
+            .await?;
+
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvited {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+        instance_b
+            .accept_community_invite(community.id(), invite.id())
+            .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id(),
+                user: did_b.clone()
+            }
+        );
+
+        let mut stream_b = instance_b.get_community_stream(community.id()).await?;
+        instance_a
+            .send_community_channel_message(community.id(), channel.id(), vec!["Hello".to_string()])
+            .await?;
+        let event_a = next_event(&mut stream_a, Duration::from_secs(60)).await?;
+        let message_id = match event_a {
+            MessageEventKind::CommunityMessageSent {
+                community_id: _,
+                channel_id: _,
+                message_id,
+            } => message_id,
+            _ => panic!(
+                "expected MessageEventKind::CommunityMessageSent event, got: {:?}",
+                event_a
+            ),
+        };
+        assert_eq!(
+            event_a,
+            MessageEventKind::CommunityMessageSent {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        assert_eq!(
+            next_event(&mut stream_b, Duration::from_secs(60)).await?,
+            MessageEventKind::CommunityMessageReceived {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        let result = instance_b
+            .get_community_channel_message_reference(community.id(), channel.id(), message_id)
+            .await;
+        assert_eq!(
+            format!("{:?}", result),
+            format!("{:?}", Err::<MessageReference, Error>(Error::Unauthorized))
+        );
+        Ok(())
+    }
+    #[async_test]
+    async fn authorized_get_community_channel_message_reference() -> anyhow::Result<()> {
+        let context = Some("test::authorized_get_community_channel_message_reference".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, did_a, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+        let channel = instance_a
+            .create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard)
+            .await?;
+
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvited {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+        instance_b
+            .accept_community_invite(community.id(), invite.id())
+            .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id(),
+                user: did_b.clone()
+            }
+        );
+
+        let mut stream_b = instance_b.get_community_stream(community.id()).await?;
+        instance_a
+            .send_community_channel_message(community.id(), channel.id(), vec!["Hello".to_string()])
+            .await?;
+        let event_a = next_event(&mut stream_a, Duration::from_secs(60)).await?;
+        let message_id = match event_a {
+            MessageEventKind::CommunityMessageSent {
+                community_id: _,
+                channel_id: _,
+                message_id,
+            } => message_id,
+            _ => panic!(
+                "expected MessageEventKind::CommunityMessageSent event, got: {:?}",
+                event_a
+            ),
+        };
+        assert_eq!(
+            event_a,
+            MessageEventKind::CommunityMessageSent {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        assert_eq!(
+            next_event(&mut stream_b, Duration::from_secs(60)).await?,
+            MessageEventKind::CommunityMessageReceived {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        let reference = instance_b
+            .get_community_channel_message_reference(community.id(), channel.id(), message_id)
+            .await?;
+        assert_eq!(reference.id(), message_id);
+        assert_eq!(reference.sender(), did_a);
+        assert_eq!(reference.conversation_id(), channel.id());
+        Ok(())
+    }
+    #[async_test]
+    async fn unauthorized_get_community_channel_message_references() -> anyhow::Result<()> {
+        let context = Some("test::unauthorized_get_community_channel_message_references".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, _, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+        let channel = instance_a
+            .create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard)
+            .await?;
+        instance_a
+            .revoke_community_channel_permission_for_all(
+                community.id(),
+                channel.id(),
+                CommunityChannelPermission::ViewChannel,
+            )
+            .await?;
+
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvited {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+        instance_b
+            .accept_community_invite(community.id(), invite.id())
+            .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id(),
+                user: did_b.clone()
+            }
+        );
+
+        let mut stream_b = instance_b.get_community_stream(community.id()).await?;
+        instance_a
+            .send_community_channel_message(community.id(), channel.id(), vec!["Hello".to_string()])
+            .await?;
+        let event_a = next_event(&mut stream_a, Duration::from_secs(60)).await?;
+        let message_id = match event_a {
+            MessageEventKind::CommunityMessageSent {
+                community_id: _,
+                channel_id: _,
+                message_id,
+            } => message_id,
+            _ => panic!(
+                "expected MessageEventKind::CommunityMessageSent event, got: {:?}",
+                event_a
+            ),
+        };
+        assert_eq!(
+            event_a,
+            MessageEventKind::CommunityMessageSent {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        assert_eq!(
+            next_event(&mut stream_b, Duration::from_secs(60)).await?,
+            MessageEventKind::CommunityMessageReceived {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        let result = instance_b
+            .get_community_channel_message_references(
+                community.id(),
+                channel.id(),
+                MessageOptions::default(),
+            )
+            .await;
+        match result {
+            Ok(_) => panic!("should not have succeeded"),
+            Err(e) => assert_eq!(format!("{:?}", e), format!("{:?}", Error::Unauthorized),),
+        }
+        Ok(())
+    }
+    #[async_test]
+    async fn authorized_get_community_channel_message_references() -> anyhow::Result<()> {
+        let context = Some("test::authorized_get_community_channel_message_references".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, did_a, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+        let channel = instance_a
+            .create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard)
+            .await?;
+
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvited {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+        instance_b
+            .accept_community_invite(community.id(), invite.id())
+            .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id(),
+                user: did_b.clone()
+            }
+        );
+
+        let mut stream_b = instance_b.get_community_stream(community.id()).await?;
+        instance_a
+            .send_community_channel_message(community.id(), channel.id(), vec!["Hello".to_string()])
+            .await?;
+        let event_a = next_event(&mut stream_a, Duration::from_secs(60)).await?;
+        let message_id = match event_a {
+            MessageEventKind::CommunityMessageSent {
+                community_id: _,
+                channel_id: _,
+                message_id,
+            } => message_id,
+            _ => panic!(
+                "expected MessageEventKind::CommunityMessageSent event, got: {:?}",
+                event_a
+            ),
+        };
+        assert_eq!(
+            event_a,
+            MessageEventKind::CommunityMessageSent {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        assert_eq!(
+            next_event(&mut stream_b, Duration::from_secs(60)).await?,
+            MessageEventKind::CommunityMessageReceived {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        let mut references = instance_b
+            .get_community_channel_message_references(
+                community.id(),
+                channel.id(),
+                MessageOptions::default(),
+            )
+            .await?;
+        let reference: MessageReference =
+            references.next().await.expect("should contain a reference");
+        assert_eq!(reference.id(), message_id);
+        assert_eq!(reference.sender(), did_a);
+        assert_eq!(reference.conversation_id(), channel.id());
+        Ok(())
+    }
+    #[async_test]
+    async fn unauthorized_send_community_channel_message() -> anyhow::Result<()> {
+        let context = Some("test::unauthorized_send_community_channel_message".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, _, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+        let channel = instance_a
+            .create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard)
+            .await?;
+        instance_a
+            .revoke_community_channel_permission_for_all(
+                community.id(),
+                channel.id(),
+                CommunityChannelPermission::SendMessages,
+            )
+            .await?;
+
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvited {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+        instance_b
+            .accept_community_invite(community.id(), invite.id())
+            .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id(),
+                user: did_b.clone()
+            }
+        );
+
+        let result = instance_b
+            .send_community_channel_message(community.id(), channel.id(), vec!["Hello".to_string()])
+            .await;
+        assert_eq!(
+            format!("{:?}", result),
+            format!("{:?}", Err::<Uuid, Error>(Error::Unauthorized))
+        );
+        Ok(())
+    }
+    #[async_test]
+    async fn authorized_send_community_channel_message() -> anyhow::Result<()> {
+        let context = Some("test::authorized_send_community_channel_message".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, _, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+        let channel = instance_a
+            .create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard)
+            .await?;
+
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvited {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+        instance_b
+            .accept_community_invite(community.id(), invite.id())
+            .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id(),
+                user: did_b.clone()
+            }
+        );
+
+        let mut stream_b = instance_b.get_community_stream(community.id()).await?;
+        let text = "Hello".to_string();
+        instance_a
+            .send_community_channel_message(community.id(), channel.id(), vec![text.clone()])
+            .await?;
+        let event_a = next_event(&mut stream_a, Duration::from_secs(60)).await?;
+        let message_id = match event_a {
+            MessageEventKind::CommunityMessageSent {
+                community_id: _,
+                channel_id: _,
+                message_id,
+            } => message_id,
+            _ => panic!(
+                "expected MessageEventKind::CommunityMessageSent event, got: {:?}",
+                event_a
+            ),
+        };
+        assert_eq!(
+            event_a,
+            MessageEventKind::CommunityMessageSent {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        assert_eq!(
+            next_event(&mut stream_b, Duration::from_secs(60)).await?,
+            MessageEventKind::CommunityMessageReceived {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        let message = instance_b
+            .get_community_channel_message(community.id(), channel.id(), message_id)
+            .await?;
+
+        assert_eq!(message.lines().len(), 1);
+        assert_eq!(message.lines()[0], text);
+        Ok(())
+    }
 }

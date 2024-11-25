@@ -36,8 +36,8 @@ pub enum RayGunEventKind {
     ConversationUnarchived { conversation_id: Uuid },
     ConversationDeleted { conversation_id: Uuid },
     CommunityCreated { community_id: Uuid },
-    CommunityInvite { community_id: Uuid, invite_id: Uuid },
-    CommunityUpdate { community_id: Uuid },
+    CommunityInvited { community_id: Uuid, invite_id: Uuid },
+    CommunityDeleted { community_id: Uuid },
 }
 
 pub type RayGunEventStream = BoxStream<'static, RayGunEventKind>;
@@ -241,6 +241,50 @@ pub enum MessageEventKind {
         community_id: Uuid,
         channel_id: Uuid,
         permission: CommunityChannelPermission,
+    },
+    CommunityMessageSent {
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+    },
+    CommunityMessageReceived {
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+    },
+    CommunityMessageEdited {
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+    },
+    CommunityMessageDeleted {
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+    },
+    CommunityMessagePinned {
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+    },
+    CommunityMessageUnpinned {
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+    },
+    CommunityMessageReactionAdded {
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+        did_key: DID,
+        reaction: String,
+    },
+    CommunityMessageReactionRemoved {
+        community_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
+        did_key: DID,
+        reaction: String,
     },
 }
 
@@ -880,7 +924,20 @@ impl Conversation {
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
 pub enum GroupPermission {
     AddParticipants,
-    SetGroupName,
+    RemoveParticipants,
+    EditGroupInfo,
+    EditGroupImages,
+}
+
+impl GroupPermission {
+    pub fn values() -> Vec<GroupPermission> {
+        vec![
+            Self::AddParticipants,
+            Self::RemoveParticipants,
+            Self::EditGroupInfo,
+            Self::EditGroupImages,
+        ]
+    }
 }
 
 #[derive(Default, Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq, Display)]
