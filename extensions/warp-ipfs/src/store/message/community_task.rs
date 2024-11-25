@@ -2052,7 +2052,7 @@ impl CommunityTask {
             .iter()
             .map(|p| p.to_string())
             .collect();
-        if permission.is_empty() {
+        if permissions.is_empty() {
             return Err(Error::InvalidPermission);
         }
         for permission in &permissions {
@@ -2108,7 +2108,7 @@ impl CommunityTask {
             .iter()
             .map(|p| p.to_string())
             .collect();
-        if permission.is_empty() {
+        if permissions.is_empty() {
             return Err(Error::InvalidPermission);
         }
         for permission in &permissions {
@@ -2155,7 +2155,7 @@ impl CommunityTask {
             .iter()
             .map(|p| p.to_string())
             .collect();
-        if permission.is_empty() {
+        if permissions.is_empty() {
             return Err(Error::InvalidPermission);
         }
         for permission in &permissions {
@@ -2201,7 +2201,7 @@ impl CommunityTask {
             .iter()
             .map(|p| p.to_string())
             .collect();
-        if permission.is_empty() {
+        if permissions.is_empty() {
             return Err(Error::InvalidPermission);
         }
         for permission in &permissions {
@@ -2375,11 +2375,11 @@ impl CommunityTask {
             .channels
             .get_mut(&channel_id.to_string())
             .ok_or(Error::CommunityChannelDoesntExist)?;
-        let permissions: Vec<String> = CommunityPermission::sub_permissions(&permission)
+        let permissions: Vec<String> = CommunityChannelPermission::sub_permissions(&permission)
             .iter()
             .map(|p| p.to_string())
             .collect();
-        if permission.is_empty() {
+        if permissions.is_empty() {
             return Err(Error::InvalidPermission);
         }
         for permission in &permissions {
@@ -2439,11 +2439,11 @@ impl CommunityTask {
             .channels
             .get_mut(&channel_id.to_string())
             .ok_or(Error::CommunityChannelDoesntExist)?;
-        let permissions: Vec<String> = CommunityPermission::sub_permissions(&permission)
+        let permissions: Vec<String> = CommunityChannelPermission::sub_permissions(&permission)
             .iter()
             .map(|p| p.to_string())
             .collect();
-        if permission.is_empty() {
+        if permissions.is_empty() {
             return Err(Error::InvalidPermission);
         }
         for permission in &permissions {
@@ -2495,11 +2495,11 @@ impl CommunityTask {
             .channels
             .get_mut(&channel_id.to_string())
             .ok_or(Error::CommunityChannelDoesntExist)?;
-        let permissions: Vec<String> = CommunityPermission::sub_permissions(&permission)
+        let permissions: Vec<String> = CommunityChannelPermission::sub_permissions(&permission)
             .iter()
             .map(|p| p.to_string())
             .collect();
-        if permission.is_empty() {
+        if permissions.is_empty() {
             return Err(Error::InvalidPermission);
         }
         for permission in &permissions {
@@ -2550,11 +2550,11 @@ impl CommunityTask {
             .channels
             .get_mut(&channel_id.to_string())
             .ok_or(Error::CommunityChannelDoesntExist)?;
-        let permissions: Vec<String> = CommunityPermission::sub_permissions(&permission)
+        let permissions: Vec<String> = CommunityChannelPermission::sub_permissions(&permission)
             .iter()
             .map(|p| p.to_string())
             .collect();
-        if permission.is_empty() {
+        if permissions.is_empty() {
             return Err(Error::InvalidPermission);
         }
         for permission in &permissions {
