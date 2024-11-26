@@ -2066,7 +2066,7 @@ impl RayGunCommunity for WarpIpfs {
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
-        message_id: Option<Uuid>,
+        message_id: Uuid,
     ) -> Result<(), Error> {
         self.messaging_store()?
             .delete_community_channel_message(community_id, channel_id, message_id)
