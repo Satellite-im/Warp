@@ -19,11 +19,11 @@ use rust_ipfs::{
     Keypair, Multiaddr, NetworkBehaviour, PeerId,
 };
 
-use crate::store::payload::PayloadMessage;
+use crate::store::{payload::PayloadMessage, protocols::SHUTTLE_IDENTITY};
 
 use super::protocol::{payload_message_construct, Request, Synchronized};
 
-use super::protocol::{self, Message, Response};
+use super::protocol::{Message, Response};
 
 type Payload = PayloadMessage<Message>;
 
@@ -66,7 +66,7 @@ impl Behaviour {
     ) -> Self {
         Self {
             inner: request_response::json::Behaviour::new(
-                [(protocol::PROTOCOL, request_response::ProtocolSupport::Full)],
+                [(SHUTTLE_IDENTITY, request_response::ProtocolSupport::Full)],
                 request_response::Config::default()
                     .with_request_timeout(Duration::from_secs(30))
                     .with_max_concurrent_streams(1000),

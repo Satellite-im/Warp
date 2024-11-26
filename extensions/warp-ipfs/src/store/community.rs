@@ -208,6 +208,7 @@ impl CommunityDocument {
         permissions.insert(CommunityPermission::RemoveMembers, IndexSet::new());
 
         permissions.insert(CommunityPermission::DeleteMessages, IndexSet::new());
+        permissions.insert(CommunityPermission::PinMessages, IndexSet::new());
 
         let mut members = IndexSet::new();
         members.insert(creator.clone());
