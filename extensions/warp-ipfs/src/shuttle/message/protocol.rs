@@ -1,14 +1,12 @@
 use std::collections::BTreeMap;
 
 use ipld_core::cid::Cid;
-use rust_ipfs::{libp2p::StreamProtocol, Keypair};
+use rust_ipfs::Keypair;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warp::crypto::DID;
 
 use crate::store::payload::{PayloadBuilder, PayloadMessage};
-
-pub const PROTOCOL: StreamProtocol = StreamProtocol::new("/shuttle/message/0.0.1");
 
 pub fn payload_message_construct(
     keypair: &Keypair,

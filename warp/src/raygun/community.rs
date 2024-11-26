@@ -266,6 +266,7 @@ pub enum CommunityPermission {
     RemoveMembers,
 
     DeleteMessages,
+    PinMessages,
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -626,7 +627,7 @@ pub trait RayGunCommunity: Sync + Send {
         &mut self,
         _community_id: Uuid,
         _channel_id: Uuid,
-        _message_id: Option<Uuid>,
+        _message_id: Uuid,
     ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }

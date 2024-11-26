@@ -22,7 +22,10 @@ use rust_ipfs::{
 };
 use warp::crypto::DID;
 
-use crate::store::{document::identity::IdentityDocument, payload::PayloadMessage, PeerIdExt};
+use crate::store::{
+    document::identity::IdentityDocument, payload::PayloadMessage, protocols::SHUTTLE_IDENTITY,
+    PeerIdExt,
+};
 
 use super::protocol::payload_message_construct;
 
@@ -130,10 +133,7 @@ impl Behaviour {
     ) -> Self {
         let mut client = Self {
             inner: request_response::json::Behaviour::new(
-                [(
-                    super::protocol::PROTOCOL,
-                    request_response::ProtocolSupport::Full,
-                )],
+                [(SHUTTLE_IDENTITY, request_response::ProtocolSupport::Full)],
                 request_response::Config::default()
                     .with_request_timeout(Duration::from_secs(60))
                     .with_max_concurrent_streams(1000),
