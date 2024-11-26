@@ -19,12 +19,12 @@ use rust_ipfs::{
     Keypair, Multiaddr, NetworkBehaviour, PeerId,
 };
 
-use crate::store::payload::PayloadMessage;
+use crate::store::{payload::PayloadMessage, protocols::SHUTTLE_MESSAGE};
 
 use super::protocol::MessageUpdate;
 use super::protocol::{payload_message_construct, Request};
 
-use super::protocol::{self, Message, Response};
+use super::protocol::{Message, Response};
 
 type Payload = PayloadMessage<Message>;
 type OntshotSender<T> = futures::channel::oneshot::Sender<T>;
@@ -61,7 +61,7 @@ impl Behaviour {
     ) -> Self {
         Self {
             inner: request_response::json::Behaviour::new(
-                [(protocol::PROTOCOL, request_response::ProtocolSupport::Full)],
+                [(SHUTTLE_MESSAGE, request_response::ProtocolSupport::Full)],
                 request_response::Config::default()
                     .with_request_timeout(Duration::from_secs(30))
                     .with_max_concurrent_streams(1000),
