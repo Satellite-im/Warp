@@ -58,6 +58,21 @@ pub const MAX_CONVERSATION_ICON_SIZE: usize = 4 * 1024 * 1024;
 pub const MAX_CONVERSATION_BANNER_SIZE: usize = 8 * 1024 * 1024;
 pub const MAX_COMMUNITY_CHANNELS: usize = 20;
 
+pub(crate) mod protocols {
+    use rust_ipfs::libp2p::StreamProtocol;
+
+    /// Protocol for exchanging direct metadata information (eg ping, document reference, etc)
+    pub const EXCHANGE_PROTOCOL: StreamProtocol = StreamProtocol::new("/warp/exchange");
+    /// Protocol for providing identity information and direct friend requests acknowledgement
+    pub const IDENTITY_PROTOCOL: StreamProtocol = StreamProtocol::new("/warp/identity");
+    /// Bootstrap discovery
+    pub const DISCOVERY_PROTOCOL: StreamProtocol = StreamProtocol::new("/warp/discovery");
+
+    // shuttle various protocols
+    pub const SHUTTLE_IDENTITY: StreamProtocol = StreamProtocol::new("/shuttle/identity/0.0.1");
+    pub const SHUTTLE_MESSAGE: StreamProtocol = StreamProtocol::new("/shuttle/message/0.0.1");
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ConversationImageType {
     Icon,
