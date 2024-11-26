@@ -112,10 +112,7 @@ impl Behaviour {
     ) -> Self {
         let mut client = Self {
             inner: request_response::json::Behaviour::new(
-                [(
-                    SHUTTLE_MESSAGE,
-                    request_response::ProtocolSupport::Full,
-                )],
+                [(SHUTTLE_MESSAGE, request_response::ProtocolSupport::Full)],
                 request_response::Config::default()
                     .with_request_timeout(Duration::from_secs(60))
                     .with_max_concurrent_streams(1000),
