@@ -22,7 +22,7 @@ use warp::{
     error::Error,
     raygun::{
         community::{
-            Community, CommunityChannel, CommunityChannelPermission, CommunityChannelPermissions,
+            Community, CommunityChannel, CommunityChannelPermissions,
             CommunityChannelType, CommunityInvite, CommunityPermission, CommunityPermissions,
             CommunityRole, RoleId,
         },
