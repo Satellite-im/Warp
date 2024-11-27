@@ -765,10 +765,10 @@ async fn main() -> anyhow::Result<()> {
 
                                     let mut table = Table::new();
                                     table.set_header(vec!["Username", "Public Key", "Created", "Last Updated", "Status Message", "Banner", "Picture", "Platform", "Status", "KV"]);
-                                    let status = account.identity_status(&identity.did_key()).await.unwrap_or(IdentityStatus::Offline);
-                                    let platform = account.identity_platform(&identity.did_key()).await.unwrap_or_default();
-                                    let profile_picture = account.identity_picture(&identity.did_key()).await.unwrap_or_default();
-                                    let profile_banner = account.identity_banner(&identity.did_key()).await.unwrap_or_default();
+                                    let status = account.identity_status(identity.did_key()).await.unwrap_or(IdentityStatus::Offline);
+                                    let platform = account.identity_platform(identity.did_key()).await.unwrap_or_default();
+                                    let profile_picture = account.identity_picture(identity.did_key()).await.unwrap_or_default();
+                                    let profile_banner = account.identity_banner(identity.did_key()).await.unwrap_or_default();
                                     let created = identity.created();
                                     let modified = identity.modified();
                                     let meta = identity.metadata();
@@ -802,10 +802,10 @@ async fn main() -> anyhow::Result<()> {
                                     let mut table = Table::new();
                                     table.set_header(vec!["Username", "Public Key", "Created", "Last Updated", "Status Message", "Banner", "Picture", "Platform", "Status", "KV"]);
                                     for identity in idents {
-                                        let status = account.identity_status(&identity.did_key()).await.unwrap_or(IdentityStatus::Offline);
-                                        let platform = account.identity_platform(&identity.did_key()).await.unwrap_or_default();
-                                        let profile_picture = account.identity_picture(&identity.did_key()).await.unwrap_or_default();
-                                        let profile_banner = account.identity_banner(&identity.did_key()).await.unwrap_or_default();
+                                        let status = account.identity_status(identity.did_key()).await.unwrap_or(IdentityStatus::Offline);
+                                        let platform = account.identity_platform(identity.did_key()).await.unwrap_or_default();
+                                        let profile_picture = account.identity_picture(identity.did_key()).await.unwrap_or_default();
+                                        let profile_banner = account.identity_banner(identity.did_key()).await.unwrap_or_default();
                                         let created = identity.created();
                                         let modified = identity.modified();
                                         let meta = identity.metadata();
