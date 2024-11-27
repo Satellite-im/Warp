@@ -333,9 +333,7 @@ mod test {
 
         //upload file to constellation to attach file from constellation
 
-        instance_a
-            .put_buffer("image.png", PROFILE_IMAGE.into())
-            .await?;
+        instance_a.put_buffer("image.png", PROFILE_IMAGE).await?;
 
         let (_, mut stream) = instance_a
             .attach(
@@ -1049,7 +1047,7 @@ mod test {
         .await?;
 
         let conversation = instance_a.get_conversation(id_a).await?;
-        assert_eq!(conversation.description().as_deref(), Some("hello, world!"));
+        assert_eq!(conversation.description(), Some("hello, world!"));
 
         instance_a.set_conversation_description(id_a, None).await?;
 
