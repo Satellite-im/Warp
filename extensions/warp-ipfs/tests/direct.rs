@@ -333,9 +333,7 @@ mod test {
 
         //upload file to constellation to attach file from constellation
 
-        instance_a
-            .put_buffer("image.png", PROFILE_IMAGE)
-            .await?;
+        instance_a.put_buffer("image.png", PROFILE_IMAGE).await?;
 
         let (_, mut stream) = instance_a
             .attach(

@@ -94,8 +94,7 @@ mod test {
         let (mut fs, _, _) = create_account(None, None, None).await?;
         let root_directory = fs.root_directory();
         fs.create_directory("images", false).await?;
-        fs.put_buffer("/images/image.png", PROFILE_IMAGE)
-            .await?;
+        fs.put_buffer("/images/image.png", PROFILE_IMAGE).await?;
         let item = root_directory.get_item_by_path("/images/image.png")?;
         // Note: Checking the item name would be sure that the file was actually uploaded to the directory
         //       and not just be named after the directory
