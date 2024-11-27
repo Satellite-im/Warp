@@ -440,7 +440,7 @@ mod test {
 
         let conversation = instance_a.get_conversation(id_a).await?;
         assert_eq!(conversation.permissions(), &permissions,);
-        assert_eq!(conversation.name().as_deref(), Some("test"));
+        assert_eq!(conversation.name(), Some("test"));
         assert_eq!(conversation.recipients().len(), 4);
         assert!(conversation.recipients().contains(&did_a));
         assert!(conversation.recipients().contains(&did_b));

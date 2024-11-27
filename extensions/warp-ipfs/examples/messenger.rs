@@ -528,7 +528,7 @@ async fn main() -> anyhow::Result<()> {
                                 Ok(conversation) => {
                                     let mut permissions = GroupPermissions::new();
                                     if open {
-                                        for did in conversation.recipients().to_owned() {
+                                        for did in conversation.recipients().iter().cloned() {
                                             permissions.insert(did, GroupPermission::values().into_iter().collect());
                                         }
                                     }
@@ -957,10 +957,10 @@ async fn main() -> anyhow::Result<()> {
                             let mut table = Table::new();
                             table.set_header(vec!["Username", "Public Key", "Created", "Last Updated", "Status Message", "Banner", "Picture", "Platform", "Status"]);
                             for identity in identities {
-                                let status = instance.identity_status(&identity.did_key()).await.unwrap_or(IdentityStatus::Offline);
-                                let platform = instance.identity_platform(&identity.did_key()).await.unwrap_or_default();
-                                let profile_picture = instance.identity_picture(&identity.did_key()).await.unwrap_or_default();
-                                let profile_banner = instance.identity_banner(&identity.did_key()).await.unwrap_or_default();
+                                let status = instance.identity_status(identity.did_key()).await.unwrap_or(IdentityStatus::Offline);
+                                let platform = instance.identity_platform(identity.did_key()).await.unwrap_or_default();
+                                let profile_picture = instance.identity_picture(identity.did_key()).await.unwrap_or_default();
+                                let profile_banner = instance.identity_banner(identity.did_key()).await.unwrap_or_default();
                                 let created = identity.created();
                                 let modified = identity.modified();
 
