@@ -52,7 +52,7 @@ use crate::store::event_subscription::EventSubscription;
 use crate::store::topics::PeerTopic;
 use crate::store::{
     CommunityUpdateKind, ConversationEvents, MAX_COMMUNITY_CHANNELS, MAX_COMMUNITY_DESCRIPTION,
-    MAX_MESSAGE_SIZE, MIN_MESSAGE_SIZE, SHUTTLE_TIMEOUT,
+    MAX_MESSAGE_SIZE, MAX_REACTIONS, MIN_MESSAGE_SIZE, SHUTTLE_TIMEOUT,
 };
 use crate::{
     // rt::LocalExecutor,
@@ -273,7 +273,7 @@ pub enum CommunityTaskCommand {
     },
     DeleteCommunityChannelMessage {
         channel_id: Uuid,
-        message_id: Option<Uuid>,
+        message_id: Uuid,
         response: oneshot::Sender<Result<(), Error>>,
     },
     PinCommunityChannelMessage {
@@ -1356,69 +1356,33 @@ impl CommunityTask {
         Ok(())
     }
 
-    // pub async fn send_event(
-    //     &self,
-    //     community_channel_id: Uuid,
-    //     event: MessageEvent,
-    // ) -> Result<(), Error> {
-    //     let community_id = self.community_id;
-    //     let member = self.identity.did_key();
+    pub async fn send_message_event(&self, event: CommunityMessagingEvents) -> Result<(), Error> {
+        let event = serde_json::to_vec(&event)?;
 
-    //     let event = CommunityMessagingEvents::Event {
-    //         community_id,
-    //         community_channel_id,
-    //         member,
-    //         event,
-    //         cancelled: false,
-    //     };
-    //     self.send_message_event(event).await
-    // }
+        let key = self.community_key(None)?;
 
-    // pub async fn cancel_event(
-    //     &self,
-    //     community_channel_id: Uuid,
-    //     event: MessageEvent,
-    // ) -> Result<(), Error> {
-    //     let community_id = self.community_id;
-    //     let member = self.identity.did_key();
+        let bytes = Cipher::direct_encrypt(&event, &key)?;
 
-    //     let event = CommunityMessagingEvents::Event {
-    //         community_id,
-    //         community_channel_id,
-    //         member,
-    //         event,
-    //         cancelled: true,
-    //     };
-    //     self.send_message_event(event).await
-    // }
+        let payload = PayloadBuilder::new(self.root.keypair(), bytes)
+            .from_ipfs(&self.ipfs)
+            .await?;
 
-    // pub async fn send_message_event(&self, event: CommunityMessagingEvents) -> Result<(), Error> {
-    //     let event = serde_json::to_vec(&event)?;
+        let peers = self
+            .ipfs
+            .pubsub_peers(Some(self.document.event_topic()))
+            .await?;
 
-    //     let key = self.community_key(None)?;
-
-    //     let bytes = Cipher::direct_encrypt(&event, &key)?;
-
-    //     let payload = PayloadBuilder::new(self.root.keypair(), bytes)
-    //         .from_ipfs(&self.ipfs)
-    //         .await?;
-
-    //     let peers = self
-    //         .ipfs
-    //         .pubsub_peers(Some(self.document.event_topic()))
-    //         .await?;
-
-    //     if !peers.is_empty() {
-    //         if let Err(e) = self
-    //             .ipfs
-    //             .pubsub_publish(self.document.event_topic(), payload.to_bytes()?)
-    //             .await
-    //         {
-    //             tracing::error!(id=%self.community_id, "Unable to send event: {e}");
-    //         }
-    //     }
-    //     Ok(())
-    // }
+        if !peers.is_empty() {
+            if let Err(e) = self
+                .ipfs
+                .pubsub_publish(self.document.event_topic(), payload.to_bytes()?)
+                .await
+            {
+                tracing::error!(id=%self.community_id, "Unable to send event: {e}");
+            }
+        }
+        Ok(())
+    }
 
     pub async fn leave_community(&mut self) -> Result<(), Error> {
         let own_did = &self.identity.did_key();
@@ -2739,10 +2703,55 @@ impl CommunityTask {
     }
     pub async fn community_channel_message_status(
         &self,
-        _channel_id: Uuid,
-        _message_id: Uuid,
+        channel_id: Uuid,
+        message_id: Uuid,
     ) -> Result<MessageStatus, Error> {
-        Err(Error::Unimplemented)
+        let own_did = &self.identity.did_key();
+        if !self.document.has_channel_permission(
+            own_did,
+            &CommunityChannelPermission::ViewChannel,
+            channel_id,
+        ) {
+            return Err(Error::Unauthorized);
+        }
+
+        let channel = match self.document.channels.get(&channel_id.to_string()) {
+            None => return Err(Error::CommunityChannelDoesntExist),
+            Some(c) => c,
+        };
+
+        let messages = channel.get_message_list(&self.ipfs).await?;
+
+        if !messages.iter().any(|document| document.id == message_id) {
+            return Err(Error::MessageNotFound);
+        }
+
+        let _list = self
+            .document
+            .participants()
+            .iter()
+            .filter(|did| own_did.ne(did))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        // TODO:
+        // for peer in list {
+        //     if let Some(list) = self.queue.get(&peer) {
+        //         for item in list {
+        //             let Queue { id, m_id, .. } = item;
+        //             if self.document.id() == *id {
+        //                 if let Some(m_id) = m_id {
+        //                     if message_id == *m_id {
+        //                         return Ok(MessageStatus::NotSent);
+        //                     }
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
+
+        //Not a guarantee that it been sent but for now since the message exist locally and not marked in queue, we will assume it have been sent
+        Ok(MessageStatus::Sent)
     }
     pub async fn send_community_channel_message(
         &mut self,
@@ -2825,7 +2834,11 @@ impl CommunityTask {
 
         let message_id = message.id;
 
-        let event = CommunityMessagingEvents::New { message };
+        let event = CommunityMessagingEvents::New {
+            community_id: self.community_id,
+            channel_id,
+            message,
+        };
 
         if !recipients.is_empty() {
             if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
@@ -2851,57 +2864,562 @@ impl CommunityTask {
     }
     pub async fn edit_community_channel_message(
         &mut self,
-        _channel_id: Uuid,
-        _message_id: Uuid,
-        _message: Vec<String>,
+        channel_id: Uuid,
+        message_id: Uuid,
+        messages: Vec<String>,
     ) -> Result<(), Error> {
-        Err(Error::Unimplemented)
+        let own_did = &self.identity.did_key();
+        if !self.document.has_channel_permission(
+            own_did,
+            &CommunityChannelPermission::SendMessages,
+            channel_id,
+        ) {
+            return Err(Error::Unauthorized);
+        }
+
+        let tx = self.event_broadcast.clone();
+
+        if messages.is_empty() {
+            return Err(Error::EmptyMessage);
+        }
+
+        let lines_value_length: usize = messages
+            .iter()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.trim())
+            .map(|s| s.chars().count())
+            .sum();
+
+        if lines_value_length == 0 || lines_value_length > MAX_MESSAGE_SIZE {
+            tracing::error!(
+                current_size = lines_value_length,
+                max = MAX_MESSAGE_SIZE,
+                "length of message is invalid"
+            );
+            return Err(Error::InvalidLength {
+                context: "message".into(),
+                current: lines_value_length,
+                minimum: Some(MIN_MESSAGE_SIZE),
+                maximum: Some(MAX_MESSAGE_SIZE),
+            });
+        }
+
+        let keypair = self.root.keypair();
+
+        let keystore = pubkey_or_keystore(&*self)?;
+
+        let channel = match self.document.channels.get_mut(&channel_id.to_string()) {
+            Some(c) => c,
+            None => return Err(Error::CommunityChannelDoesntExist),
+        };
+
+        let mut message_document = channel.get_message_document(&self.ipfs, message_id).await?;
+
+        let mut message = message_document
+            .resolve(&self.ipfs, keypair, true, keystore.as_ref())
+            .await?;
+
+        let sender = message.sender();
+
+        let own_did = &self.identity.did_key();
+
+        if sender.ne(own_did) {
+            return Err(Error::InvalidMessage);
+        }
+
+        message.lines_mut().clone_from(&messages);
+        message.set_modified(Utc::now());
+
+        message_document
+            .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
+            .await?;
+
+        let nonce = message_document.nonce_from_message()?;
+        let signature = message_document.signature.expect("message to be signed");
+
+        let message_cid = channel
+            .update_message_document(&self.ipfs, &message_document)
+            .await?;
+
+        let recipients = self.document.participants();
+
+        self.set_document().await?;
+
+        let _ = tx.send(MessageEventKind::CommunityMessageEdited {
+            community_id: self.community_id,
+            channel_id,
+            message_id,
+        });
+
+        let event = CommunityMessagingEvents::Edit {
+            community_id: self.community_id,
+            channel_id,
+            message_id,
+            modified: message_document.modified.expect("message to be modified"),
+            lines: messages,
+            nonce: nonce.to_vec(),
+            signature: signature.into(),
+        };
+
+        if !recipients.is_empty() {
+            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                    let _ = self
+                        .message_command
+                        .clone()
+                        .send(MessageCommand::InsertMessage {
+                            peer_id,
+                            conversation_id: channel_id,
+                            recipients: recipients.iter().cloned().collect(),
+                            message_id,
+                            message_cid,
+                        })
+                        .await;
+                }
+            }
+        }
+
+        self.publish(None, event, true, vec![]).await
     }
     pub async fn reply_to_community_channel_message(
         &mut self,
-        _channel_id: Uuid,
-        _message_id: Uuid,
-        _message: Vec<String>,
+        channel_id: Uuid,
+        message_id: Uuid,
+        messages: Vec<String>,
     ) -> Result<Uuid, Error> {
-        Err(Error::Unimplemented)
+        let own_did = &self.identity.did_key();
+        if !self.document.has_channel_permission(
+            own_did,
+            &CommunityChannelPermission::SendMessages,
+            channel_id,
+        ) {
+            return Err(Error::Unauthorized);
+        }
+
+        let tx = self.event_broadcast.clone();
+
+        if messages.is_empty() {
+            return Err(Error::EmptyMessage);
+        }
+
+        let lines_value_length: usize = messages
+            .iter()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.trim())
+            .map(|s| s.chars().count())
+            .sum();
+
+        if lines_value_length == 0 || lines_value_length > MAX_MESSAGE_SIZE {
+            tracing::error!(
+                current_size = lines_value_length,
+                max = MAX_MESSAGE_SIZE,
+                "length of message is invalid"
+            );
+            return Err(Error::InvalidLength {
+                context: "message".into(),
+                current: lines_value_length,
+                minimum: Some(MIN_MESSAGE_SIZE),
+                maximum: Some(MAX_MESSAGE_SIZE),
+            });
+        }
+
+        let keypair = self.root.keypair();
+
+        let own_did = self.identity.did_key();
+
+        let mut message = warp::raygun::Message::default();
+        message.set_conversation_id(channel_id);
+        message.set_sender(own_did.clone());
+        message.set_lines(messages);
+        message.set_replied(Some(message_id));
+
+        let keystore = pubkey_or_keystore(&*self)?;
+
+        let message = MessageDocument::new(&self.ipfs, keypair, message, keystore.as_ref()).await?;
+
+        let message_id = message.id;
+
+        let channel = match self.document.channels.get_mut(&channel_id.to_string()) {
+            Some(c) => c,
+            None => return Err(Error::CommunityChannelDoesntExist),
+        };
+
+        let message_cid = channel
+            .insert_message_document(&self.ipfs, &message)
+            .await?;
+
+        let recipients = self.document.participants();
+
+        self.set_document().await?;
+
+        let event = MessageEventKind::CommunityMessageSent {
+            community_id: self.community_id,
+            channel_id,
+            message_id,
+        };
+
+        if let Err(e) = tx.send(event) {
+            tracing::error!(id=%self.community_id, error = %e, "Error broadcasting event");
+        }
+
+        let event = CommunityMessagingEvents::New {
+            community_id: self.community_id,
+            channel_id,
+            message,
+        };
+
+        if !recipients.is_empty() {
+            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                    let _ = self
+                        .message_command
+                        .clone()
+                        .send(MessageCommand::InsertMessage {
+                            peer_id,
+                            conversation_id: channel_id,
+                            recipients: recipients.iter().cloned().collect(),
+                            message_id,
+                            message_cid,
+                        })
+                        .await;
+                }
+            }
+        }
+
+        self.publish(Some(message_id), event, true, vec![])
+            .await
+            .map(|_| message_id)
     }
     pub async fn delete_community_channel_message(
         &mut self,
-        _channel_id: Uuid,
-        _message_id: Option<Uuid>,
+        channel_id: Uuid,
+        message_id: Uuid,
     ) -> Result<(), Error> {
-        Err(Error::Unimplemented)
+        let own_did = &self.identity.did_key();
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::DeleteMessages)
+        {
+            return Err(Error::Unauthorized);
+        }
+
+        let tx = self.event_broadcast.clone();
+
+        let event = CommunityMessagingEvents::Delete {
+            community_id: self.community_id,
+            channel_id,
+            message_id,
+        };
+
+        let channel = match self.document.channels.get_mut(&channel_id.to_string()) {
+            Some(c) => c,
+            None => return Err(Error::CommunityChannelDoesntExist),
+        };
+
+        channel.delete_message(&self.ipfs, message_id).await?;
+
+        self.set_document().await?;
+
+        if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+            for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                let _ = self
+                    .message_command
+                    .clone()
+                    .send(MessageCommand::RemoveMessage {
+                        peer_id,
+                        conversation_id: channel_id,
+                        message_id,
+                    })
+                    .await;
+            }
+        }
+
+        let _ = tx.send(MessageEventKind::CommunityMessageDeleted {
+            community_id: self.community_id,
+            channel_id,
+            message_id,
+        });
+        self.publish(None, event, true, vec![]).await?;
+        Ok(())
     }
     pub async fn pin_community_channel_message(
         &mut self,
-        _channel_id: Uuid,
-        _message_id: Uuid,
-        _state: PinState,
+        channel_id: Uuid,
+        message_id: Uuid,
+        state: PinState,
     ) -> Result<(), Error> {
-        Err(Error::Unimplemented)
+        let own_did = &self.identity.did_key();
+        if !self
+            .document
+            .has_permission(own_did, &CommunityPermission::PinMessages)
+        {
+            return Err(Error::Unauthorized);
+        }
+
+        let tx = self.event_broadcast.clone();
+
+        let keypair = self.root.keypair();
+        let own_did = self.identity.did_key();
+
+        let keystore = pubkey_or_keystore(&*self)?;
+
+        let channel = match self.document.channels.get_mut(&channel_id.to_string()) {
+            Some(c) => c,
+            None => return Err(Error::CommunityChannelDoesntExist),
+        };
+
+        let mut message_document = channel.get_message_document(&self.ipfs, message_id).await?;
+
+        let mut message = message_document
+            .resolve(&self.ipfs, keypair, true, keystore.as_ref())
+            .await?;
+
+        let event = match state {
+            PinState::Pin => {
+                if message.pinned() {
+                    return Ok(());
+                }
+                *message.pinned_mut() = true;
+                MessageEventKind::CommunityMessagePinned {
+                    community_id: self.community_id,
+                    channel_id,
+                    message_id,
+                }
+            }
+            PinState::Unpin => {
+                if !message.pinned() {
+                    return Ok(());
+                }
+                *message.pinned_mut() = false;
+                MessageEventKind::CommunityMessageUnpinned {
+                    community_id: self.community_id,
+                    channel_id,
+                    message_id,
+                }
+            }
+        };
+
+        message_document
+            .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
+            .await?;
+
+        let message_cid = channel
+            .update_message_document(&self.ipfs, &message_document)
+            .await?;
+
+        let recipients = self.document.participants();
+
+        self.set_document().await?;
+
+        let _ = tx.send(event);
+
+        if !recipients.is_empty() {
+            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                    let _ = self
+                        .message_command
+                        .clone()
+                        .send(MessageCommand::InsertMessage {
+                            peer_id,
+                            conversation_id: channel_id,
+                            recipients: recipients.iter().cloned().collect(),
+                            message_id,
+                            message_cid,
+                        })
+                        .await;
+                }
+            }
+        }
+
+        let event = CommunityMessagingEvents::Pin {
+            community_id: self.community_id,
+            channel_id,
+            member: own_did,
+            message_id,
+            state,
+        };
+
+        self.publish(None, event, true, vec![]).await
     }
     pub async fn react_to_community_channel_message(
         &mut self,
-        _channel_id: Uuid,
-        _message_id: Uuid,
-        _state: ReactionState,
-        _emoji: String,
+        channel_id: Uuid,
+        message_id: Uuid,
+        state: ReactionState,
+        emoji: String,
     ) -> Result<(), Error> {
-        Err(Error::Unimplemented)
+        let own_did = &self.identity.did_key();
+        if !self.document.has_channel_permission(
+            own_did,
+            &CommunityChannelPermission::ViewChannel,
+            channel_id,
+        ) {
+            return Err(Error::Unauthorized);
+        }
+
+        let tx = self.event_broadcast.clone();
+
+        let keypair = self.root.keypair();
+
+        let own_did = self.identity.did_key();
+
+        let keystore = pubkey_or_keystore(&*self)?;
+
+        let recipients = self.document.participants();
+
+        let channel = match self.document.channels.get_mut(&channel_id.to_string()) {
+            Some(c) => c,
+            None => return Err(Error::CommunityChannelDoesntExist),
+        };
+
+        let mut message_document = channel.get_message_document(&self.ipfs, message_id).await?;
+
+        let mut message = message_document
+            .resolve(&self.ipfs, keypair, true, keystore.as_ref())
+            .await?;
+
+        let reactions = message.reactions_mut();
+
+        let message_cid;
+
+        match state {
+            ReactionState::Add => {
+                if reactions.len() >= MAX_REACTIONS {
+                    return Err(Error::InvalidLength {
+                        context: "reactions".into(),
+                        current: reactions.len(),
+                        minimum: None,
+                        maximum: Some(MAX_REACTIONS),
+                    });
+                }
+
+                let entry = reactions.entry(emoji.clone()).or_default();
+
+                if entry.contains(&own_did) {
+                    return Err(Error::ReactionExist);
+                }
+
+                entry.push(own_did.clone());
+
+                message_document
+                    .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
+                    .await?;
+
+                message_cid = channel
+                    .update_message_document(&self.ipfs, &message_document)
+                    .await?;
+                self.set_document().await?;
+
+                _ = tx.send(MessageEventKind::CommunityMessageReactionAdded {
+                    community_id: self.community_id,
+                    channel_id,
+                    message_id,
+                    did_key: own_did.clone(),
+                    reaction: emoji.clone(),
+                });
+            }
+            ReactionState::Remove => {
+                match reactions.entry(emoji.clone()) {
+                    indexmap::map::Entry::Occupied(mut e) => {
+                        let list = e.get_mut();
+
+                        if !list.contains(&own_did) {
+                            return Err(Error::ReactionDoesntExist);
+                        }
+
+                        list.retain(|did| did != &own_did);
+                        if list.is_empty() {
+                            e.swap_remove();
+                        }
+                    }
+                    indexmap::map::Entry::Vacant(_) => return Err(Error::ReactionDoesntExist),
+                };
+
+                message_document
+                    .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
+                    .await?;
+
+                message_cid = channel
+                    .update_message_document(&self.ipfs, &message_document)
+                    .await?;
+
+                self.set_document().await?;
+
+                let _ = tx.send(MessageEventKind::CommunityMessageReactionRemoved {
+                    community_id: self.community_id,
+                    channel_id,
+                    message_id,
+                    did_key: own_did.clone(),
+                    reaction: emoji.clone(),
+                });
+            }
+        }
+
+        let event = CommunityMessagingEvents::React {
+            community_id: self.community_id,
+            channel_id,
+            reactor: own_did,
+            message_id,
+            state,
+            emoji,
+        };
+
+        if !recipients.is_empty() {
+            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                    let _ = self
+                        .message_command
+                        .clone()
+                        .send(MessageCommand::InsertMessage {
+                            peer_id,
+                            conversation_id: channel_id,
+                            recipients: recipients.iter().cloned().collect(),
+                            message_id,
+                            message_cid,
+                        })
+                        .await;
+                }
+            }
+        }
+
+        self.publish(None, event, true, vec![]).await
     }
     pub async fn send_community_channel_messsage_event(
         &mut self,
-        _channel_id: Uuid,
-        _event: MessageEvent,
+        channel_id: Uuid,
+        event: MessageEvent,
     ) -> Result<(), Error> {
-        Err(Error::Unimplemented)
+        let own_did = &self.identity.did_key();
+        if !self.document.has_channel_permission(
+            own_did,
+            &CommunityChannelPermission::SendMessages,
+            channel_id,
+        ) {
+            return Err(Error::Unauthorized);
+        }
+        let event = CommunityMessagingEvents::Event {
+            community_id: self.community_id,
+            channel_id,
+            member: own_did.clone(),
+            event,
+            cancelled: false,
+        };
+        self.send_message_event(event).await
     }
     pub async fn cancel_community_channel_messsage_event(
         &mut self,
-        _channel_id: Uuid,
-        _event: MessageEvent,
+        channel_id: Uuid,
+        event: MessageEvent,
     ) -> Result<(), Error> {
-        Err(Error::Unimplemented)
+        let member = self.identity.did_key();
+        let event = CommunityMessagingEvents::Event {
+            community_id: self.community_id,
+            channel_id,
+            member,
+            event,
+            cancelled: true,
+        };
+        self.send_message_event(event).await
     }
     pub async fn attach_to_community_channel_message(
         &mut self,
@@ -2957,7 +3475,11 @@ impl CommunityTask {
             tracing::error!(%channel_id, error = %e, "Error broadcasting event");
         }
 
-        let event = CommunityMessagingEvents::New { message };
+        let event = CommunityMessagingEvents::New {
+            community_id: self.community_id,
+            channel_id,
+            message,
+        };
 
         if !recipients.is_empty() {
             if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
@@ -3110,12 +3632,16 @@ async fn message_event(
     let community_id = this.community_id;
 
     let keypair = this.root.keypair();
-    let _own_did = this.identity.did_key();
+    let own_did = this.identity.did_key();
 
     let keystore = pubkey_or_keystore(&*this)?;
 
     match events {
-        CommunityMessagingEvents::New { message } => {
+        CommunityMessagingEvents::New {
+            community_id,
+            channel_id,
+            message,
+        } => {
             if !message.verify() {
                 return Err(Error::InvalidMessage);
             }
@@ -3129,8 +3655,6 @@ async fn message_event(
             {
                 return Err(Error::IdentityDoesntExist);
             }
-
-            let channel_id = message.conversation_id;
 
             let channel = match this.document.channels.get_mut(&channel_id.to_string()) {
                 Some(c) => c,
@@ -3175,7 +3699,7 @@ async fn message_event(
             if let Err(e) = this
                 .event_broadcast
                 .send(MessageEventKind::CommunityMessageReceived {
-                    community_id: this.community_id,
+                    community_id,
                     channel_id,
                     message_id,
                 })
@@ -3184,34 +3708,279 @@ async fn message_event(
             }
         }
         CommunityMessagingEvents::Edit {
-            community_id: _,
-            community_channel_id: _,
-            message_id: _,
-            modified: _,
-            lines: _,
-            nonce: _,
-            signature: _,
-        } => todo!(),
+            community_id,
+            channel_id,
+            message_id,
+            modified,
+            lines,
+            nonce,
+            signature,
+        } => {
+            let channel = match this.document.channels.get_mut(&channel_id.to_string()) {
+                Some(c) => c,
+                None => return Err(Error::CommunityChannelDoesntExist),
+            };
+
+            let mut message_document = channel.get_message_document(&this.ipfs, message_id).await?;
+
+            let mut message = message_document
+                .resolve(&this.ipfs, keypair, true, keystore.as_ref())
+                .await?;
+
+            let lines_value_length: usize = lines
+                .iter()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.chars().count())
+                .sum();
+
+            if lines_value_length == 0 && lines_value_length > MAX_MESSAGE_SIZE {
+                tracing::error!(
+                    current_size = lines_value_length,
+                    max = MAX_MESSAGE_SIZE,
+                    "length of message is invalid"
+                );
+                return Err(Error::InvalidLength {
+                    context: "message".into(),
+                    current: lines_value_length,
+                    minimum: Some(MIN_MESSAGE_SIZE),
+                    maximum: Some(MAX_MESSAGE_SIZE),
+                });
+            }
+
+            *message.lines_mut() = lines;
+            message.set_modified(modified);
+
+            let sender = message.sender().to_owned();
+
+            message_document
+                .update(
+                    &this.ipfs,
+                    keypair,
+                    message,
+                    (!signature.is_empty() && sender.ne(&own_did)).then_some(signature),
+                    keystore.as_ref(),
+                    Some(nonce.as_slice()),
+                )
+                .await?;
+
+            channel
+                .update_message_document(&this.ipfs, &message_document)
+                .await?;
+
+            this.set_document().await?;
+
+            if let Err(e) = this
+                .event_broadcast
+                .send(MessageEventKind::CommunityMessageEdited {
+                    community_id,
+                    channel_id,
+                    message_id,
+                })
+            {
+                tracing::error!(%channel_id, error = %e, "Error broadcasting event");
+            }
+        }
         CommunityMessagingEvents::Delete {
-            community_id: _,
-            community_channel_id: _,
-            message_id: _,
-        } => todo!(),
+            community_id,
+            channel_id,
+            message_id,
+        } => {
+            let channel = match this.document.channels.get_mut(&channel_id.to_string()) {
+                Some(c) => c,
+                None => return Err(Error::CommunityChannelDoesntExist),
+            };
+
+            // if opt.keep_if_owned.load(Ordering::SeqCst) {
+            //     let message_document = document
+            //         .get_message_document(&self.ipfs, message_id)
+            //         .await?;
+
+            //     let message = message_document
+            //         .resolve(&self.ipfs, &self.keypair, true, keystore.as_ref())
+            //         .await?;
+
+            //     if message.sender() == *self.keypair {
+            //         return Ok(());
+            //     }
+            // }
+
+            channel.delete_message(&this.ipfs, message_id).await?;
+
+            this.set_document().await?;
+
+            if let Err(e) = this
+                .event_broadcast
+                .send(MessageEventKind::CommunityMessageDeleted {
+                    community_id,
+                    channel_id,
+                    message_id,
+                })
+            {
+                tracing::warn!(%channel_id, error = %e, "Error broadcasting event");
+            }
+        }
         CommunityMessagingEvents::Pin {
-            community_id: _,
-            community_channel_id: _,
+            community_id,
+            channel_id,
             member: _,
-            message_id: _,
-            state: _,
-        } => todo!(),
+            message_id,
+            state,
+        } => {
+            let channel = match this.document.channels.get_mut(&channel_id.to_string()) {
+                Some(c) => c,
+                None => return Err(Error::CommunityChannelDoesntExist),
+            };
+
+            let mut message_document = channel.get_message_document(&this.ipfs, message_id).await?;
+
+            let mut message = message_document
+                .resolve(&this.ipfs, keypair, true, keystore.as_ref())
+                .await?;
+
+            let event = match state {
+                PinState::Pin => {
+                    if message.pinned() {
+                        return Ok(());
+                    }
+                    *message.pinned_mut() = true;
+                    MessageEventKind::CommunityMessagePinned {
+                        community_id,
+                        channel_id,
+                        message_id,
+                    }
+                }
+                PinState::Unpin => {
+                    if !message.pinned() {
+                        return Ok(());
+                    }
+                    *message.pinned_mut() = false;
+                    MessageEventKind::CommunityMessageUnpinned {
+                        community_id,
+                        channel_id,
+                        message_id,
+                    }
+                }
+            };
+
+            message_document
+                .update(&this.ipfs, keypair, message, None, keystore.as_ref(), None)
+                .await?;
+
+            channel
+                .update_message_document(&this.ipfs, &message_document)
+                .await?;
+
+            this.set_document().await?;
+
+            if let Err(e) = this.event_broadcast.send(event) {
+                tracing::warn!(%channel_id, error = %e, "Error broadcasting event");
+            }
+        }
         CommunityMessagingEvents::React {
-            community_id: _,
-            community_channel_id: _,
-            reactor: _,
-            message_id: _,
-            state: _,
-            emoji: _,
-        } => todo!(),
+            community_id,
+            channel_id,
+            reactor,
+            message_id,
+            state,
+            emoji,
+        } => {
+            let channel = match this.document.channels.get_mut(&channel_id.to_string()) {
+                Some(c) => c,
+                None => return Err(Error::CommunityChannelDoesntExist),
+            };
+
+            let mut message_document = channel.get_message_document(&this.ipfs, message_id).await?;
+
+            let mut message = message_document
+                .resolve(&this.ipfs, keypair, true, keystore.as_ref())
+                .await?;
+
+            let reactions = message.reactions_mut();
+
+            match state {
+                ReactionState::Add => {
+                    if reactions.len() >= MAX_REACTIONS {
+                        return Err(Error::InvalidLength {
+                            context: "reactions".into(),
+                            current: reactions.len(),
+                            minimum: None,
+                            maximum: Some(MAX_REACTIONS),
+                        });
+                    }
+
+                    let entry = reactions.entry(emoji.clone()).or_default();
+
+                    if entry.contains(&reactor) {
+                        return Err(Error::ReactionExist);
+                    }
+
+                    entry.push(reactor.clone());
+
+                    message_document
+                        .update(&this.ipfs, keypair, message, None, keystore.as_ref(), None)
+                        .await?;
+
+                    channel
+                        .update_message_document(&this.ipfs, &message_document)
+                        .await?;
+
+                    this.set_document().await?;
+
+                    if let Err(e) =
+                        this.event_broadcast
+                            .send(MessageEventKind::CommunityMessageReactionAdded {
+                                community_id,
+                                channel_id,
+                                message_id,
+                                did_key: reactor,
+                                reaction: emoji,
+                            })
+                    {
+                        tracing::warn!(%channel_id, error = %e, "Error broadcasting event");
+                    }
+                }
+                ReactionState::Remove => {
+                    match reactions.entry(emoji.clone()) {
+                        indexmap::map::Entry::Occupied(mut e) => {
+                            let list = e.get_mut();
+
+                            if !list.contains(&reactor) {
+                                return Err(Error::ReactionDoesntExist);
+                            }
+
+                            list.retain(|did| did != &reactor);
+                            if list.is_empty() {
+                                e.swap_remove();
+                            }
+                        }
+                        indexmap::map::Entry::Vacant(_) => return Err(Error::ReactionDoesntExist),
+                    };
+
+                    message_document
+                        .update(&this.ipfs, keypair, message, None, keystore.as_ref(), None)
+                        .await?;
+
+                    channel
+                        .update_message_document(&this.ipfs, &message_document)
+                        .await?;
+
+                    this.set_document().await?;
+
+                    if let Err(e) = this.event_broadcast.send(
+                        MessageEventKind::CommunityMessageReactionRemoved {
+                            community_id,
+                            channel_id,
+                            message_id,
+                            did_key: reactor,
+                            reaction: emoji,
+                        },
+                    ) {
+                        tracing::warn!(%channel_id, error = %e, "Error broadcasting event");
+                    }
+                }
+            }
+        }
         CommunityMessagingEvents::UpdateCommunity { community, kind } => {
             match kind {
                 CommunityUpdateKind::LeaveCommunity => {
@@ -3755,7 +4524,7 @@ async fn process_community_event(this: &mut CommunityTask, message: Message) -> 
 
     if let CommunityMessagingEvents::Event {
         community_id,
-        community_channel_id,
+        channel_id: community_channel_id,
         member,
         event,
         cancelled,

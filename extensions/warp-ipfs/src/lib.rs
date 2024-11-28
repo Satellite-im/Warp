@@ -12,13 +12,14 @@ use ipfs::p2p::{
 use ipfs::{DhtMode, Ipfs, Keypair, Protocol, UninitializedIpfs};
 use parking_lot::RwLock;
 use rust_ipfs as ipfs;
-use rust_ipfs::p2p::UpgradeVersion;
+use rust_ipfs::p2p::{RequestResponseConfig, UpgradeVersion};
 use std::any::Any;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use store::protocols;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio_util::compat::TokioAsyncReadCompatExt;
 use tracing::{Instrument, Span};
@@ -330,6 +331,39 @@ impl WarpIpfs {
                 ..Default::default()
             })
             .with_relay(true)
+            .with_request_response(vec![
+                RequestResponseConfig {
+                    protocol: protocols::EXCHANGE_PROTOCOL.as_ref().into(),
+                    max_request_size: 8 * 1024,
+                    max_response_size: 16 * 1024,
+                    ..Default::default()
+                },
+                RequestResponseConfig {
+                    protocol: protocols::IDENTITY_PROTOCOL.as_ref().into(),
+                    max_request_size: 256 * 1024,
+                    max_response_size: 512 * 1024,
+                    ..Default::default()
+                },
+                RequestResponseConfig {
+                    protocol: protocols::DISCOVERY_PROTOCOL.as_ref().into(),
+                    max_request_size: 256 * 1024,
+                    max_response_size: 512 * 1024,
+                    ..Default::default()
+                },
+                // TODO: Uncomment or remove during shuttle protocol refactor
+                // RequestResponseConfig {
+                //     protocol: protocols::SHUTTLE_IDENTITY.as_ref().into(),
+                //     max_request_size: 256 * 1024,
+                //     max_response_size: 512 * 1024,
+                //     ..Default::default()
+                // },
+                // RequestResponseConfig {
+                //     protocol: protocols::SHUTTLE_MESSAGE.as_ref().into(),
+                //     max_request_size: 256 * 1024,
+                //     max_response_size: 512 * 1024,
+                //     ..Default::default()
+                // },
+            ])
             .set_listening_addrs(self.inner.config.listen_on().to_vec())
             .with_custom_behaviour(behaviour)
             .set_keypair(&keypair)
@@ -2138,7 +2172,7 @@ impl RayGunCommunity for WarpIpfs {
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
-        message_id: Option<Uuid>,
+        message_id: Uuid,
     ) -> Result<(), Error> {
         self.messaging_store()?
             .delete_community_channel_message(community_id, channel_id, message_id)

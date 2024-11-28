@@ -1886,7 +1886,7 @@ impl MessageStore {
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
-        message_id: Option<Uuid>,
+        message_id: Uuid,
     ) -> Result<(), Error> {
         let inner = &*self.inner.read().await;
         let community_meta = inner

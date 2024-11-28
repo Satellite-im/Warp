@@ -1,5 +1,5 @@
 use ipld_core::cid::Cid;
-use rust_ipfs::{libp2p::StreamProtocol, Keypair};
+use rust_ipfs::Keypair;
 use serde::{Deserialize, Serialize};
 use warp::{crypto::DID, multipass::identity::ShortId};
 
@@ -9,8 +9,6 @@ use crate::store::{
 };
 
 use super::RequestPayload;
-
-pub const PROTOCOL: StreamProtocol = StreamProtocol::new("/shuttle/identity/0.0.1");
 
 pub fn payload_message_construct(
     keypair: &Keypair,

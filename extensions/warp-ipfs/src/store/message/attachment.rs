@@ -459,7 +459,6 @@ impl Stream for AttachmentStream {
                             return Poll::Ready(Some(attachment_kind));
                         }
                         None => {
-                            tracing::error!(?this.successful_attachment);
                             if this.successful_attachment.is_empty() {
                                 this.state = AttachmentState::Complete;
                                 let kind = AttachmentKind::Pending(Err(Error::NoAttachments));

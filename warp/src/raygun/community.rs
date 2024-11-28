@@ -285,6 +285,8 @@ pub enum CommunityPermission {
 
     #[serde(rename = "community.messages.delete_messages")]
     DeleteMessages,
+    #[serde(rename = "community.messages.pin_messages")]
+    PinMessages,
 }
 
 impl ToString for CommunityPermission {
@@ -315,6 +317,7 @@ impl CommunityPermission {
             CommunityPermission::DeleteChannels,
             CommunityPermission::RemoveMembers,
             CommunityPermission::DeleteMessages,
+            CommunityPermission::PinMessages,
         ]
     }
 
@@ -750,7 +753,7 @@ pub trait RayGunCommunity: Sync + Send {
         &mut self,
         _community_id: Uuid,
         _channel_id: Uuid,
-        _message_id: Option<Uuid>,
+        _message_id: Uuid,
     ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }

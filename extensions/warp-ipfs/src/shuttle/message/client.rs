@@ -23,7 +23,7 @@ use rust_ipfs::{
 use uuid::Uuid;
 use warp::{crypto::DID, error::Error};
 
-use crate::store::payload::PayloadMessage;
+use crate::store::{payload::PayloadMessage, protocols::SHUTTLE_MESSAGE};
 
 use super::protocol::{payload_message_construct, MessageUpdate, RegisterConversation};
 
@@ -112,10 +112,7 @@ impl Behaviour {
     ) -> Self {
         let mut client = Self {
             inner: request_response::json::Behaviour::new(
-                [(
-                    super::protocol::PROTOCOL,
-                    request_response::ProtocolSupport::Full,
-                )],
+                [(SHUTTLE_MESSAGE, request_response::ProtocolSupport::Full)],
                 request_response::Config::default()
                     .with_request_timeout(Duration::from_secs(60))
                     .with_max_concurrent_streams(1000),
