@@ -22,9 +22,8 @@ use warp::{
     error::Error,
     raygun::{
         community::{
-            Community, CommunityChannel, CommunityChannelPermissions,
-            CommunityChannelType, CommunityInvite, CommunityPermission, CommunityPermissions,
-            CommunityRole, RoleId,
+            Community, CommunityChannel, CommunityChannelPermissions, CommunityChannelType,
+            CommunityInvite, CommunityPermission, CommunityPermissions, CommunityRole, RoleId,
         },
         Message, MessageOptions, MessagePage, MessageReference, Messages, MessagesType,
     },

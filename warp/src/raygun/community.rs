@@ -15,7 +15,7 @@ use super::{
     AttachmentEventStream, ConversationImage, Message, MessageEvent, MessageEventStream,
     MessageOptions, MessageReference, MessageStatus, Messages, PinState, ReactionState,
 };
-use enum_macro::{EnumFormatting, EnumValues};
+use enum_macro::EnumValues;
 
 pub type RoleId = Uuid;
 pub type CommunityRoles = IndexMap<RoleId, CommunityRole>;
@@ -238,54 +238,59 @@ pub enum CommunityChannelType {
     VoiceEnabled,
 }
 
-/// Built-in CommunityPermission for ease of access
-#[derive(Debug, Copy, Clone, EnumFormatting, EnumValues, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, EnumValues, PartialEq, Eq, Hash)]
 pub enum CommunityPermission {
-    #[permission(formatting = "community.visuals.{}")]
+    #[serde(rename = "community.visuals.edit_name")]
     EditName,
-    #[permission(formatting = "community.visuals.{}")]
+    #[serde(rename = "community.visuals.edit_description")]
     EditDescription,
-    #[permission(formatting = "community.visuals.{}")]
+    #[serde(rename = "community.visuals.edit_icon")]
     EditIcon,
-    #[permission(formatting = "community.visuals.{}")]
+    #[serde(rename = "community.visuals.edit_banner")]
     EditBanner,
 
-    #[permission(formatting = "community.roles.{}")]
+    #[serde(rename = "community.roles.create_roles")]
     CreateRoles,
-    #[permission(formatting = "community.roles.{}")]
+    #[serde(rename = "community.roles.edit_roles")]
     EditRoles,
-    #[permission(formatting = "community.roles.{}")]
+    #[serde(rename = "community.roles.delete_roles")]
     DeleteRoles,
 
-    #[permission(formatting = "community.roles.{}")]
+    #[serde(rename = "community.roles.grant_roles")]
     GrantRoles,
-    #[permission(formatting = "community.roles.{}")]
+    #[serde(rename = "community.roles.revoke_roles")]
     RevokeRoles,
 
-    #[permission(formatting = "community.permissions.{}")]
+    #[serde(rename = "community.permissions.grant_permissions")]
     GrantPermissions,
-    #[permission(formatting = "community.permissions.{}")]
+    #[serde(rename = "community.permissions.revoke_permissions")]
     RevokePermissions,
 
-    #[permission(formatting = "community.invites.{}")]
+    #[serde(rename = "community.invites.create_invites")]
     CreateInvites,
-    #[permission(formatting = "community.invites.{}")]
+    #[serde(rename = "community.invites.edit_invites")]
     EditInvites,
-    #[permission(formatting = "community.invites.{}")]
+    #[serde(rename = "community.invites.delete_invites")]
     DeleteInvites,
 
-    #[permission(formatting = "community.channels.{}")]
+    #[serde(rename = "community.channels.create_channels")]
     CreateChannels,
-    #[permission(formatting = "community.channels.{}")]
+    #[serde(rename = "community.channels.edit_channels")]
     EditChannels,
-    #[permission(formatting = "community.channels.{}")]
+    #[serde(rename = "community.channels.delete_channels")]
     DeleteChannels,
 
-    #[permission(formatting = "community.members.{}")]
+    #[serde(rename = "community.members.remove_members")]
     RemoveMembers,
 
-    #[permission(formatting = "community.messages.{}")]
+    #[serde(rename = "community.messages.delete_messages")]
     DeleteMessages,
+}
+
+impl ToString for CommunityPermission {
+    fn to_string(&self) -> String {
+        serde_json::to_string(self).unwrap()
+    }
 }
 
 impl CommunityPermission {
@@ -323,12 +328,18 @@ impl CommunityPermission {
 }
 
 /// Built-in CommunityChannelPermission for ease of access
-#[derive(Debug, Copy, Clone, EnumFormatting, EnumValues, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, EnumValues, PartialEq, Eq, Hash)]
 pub enum CommunityChannelPermission {
-    #[permission(formatting = "community_channel.{}")]
+    #[serde(rename = "community_channel.view_channel")]
     ViewChannel,
-    #[permission(formatting = "community_channel.{}")]
+    #[serde(rename = "community_channel.messages.send_messages")]
     SendMessages,
+}
+
+impl ToString for CommunityChannelPermission {
+    fn to_string(&self) -> String {
+        serde_json::to_string(self).unwrap()
+    }
 }
 
 impl CommunityChannelPermission {
