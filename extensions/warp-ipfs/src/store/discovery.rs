@@ -411,7 +411,7 @@ struct DiscoveryPeerTask {
     connections: HashMap<ConnectionId, Multiaddr>,
     connected: bool,
     status: DiscoveryPeerStatus,
-    dialing_task: Option<BoxFuture<'static, Result<(), Error>>>,
+    dialing_task: Option<BoxFuture<'static, Result<ConnectionId, Error>>>,
     is_connected_fut: Option<BoxFuture<'static, bool>>,
     waker: Option<Waker>,
 }
@@ -501,6 +501,7 @@ enum DiscoveryPeerEvent {
 
 impl Stream for DiscoveryPeerTask {
     type Item = DiscoveryPeerEvent;
+    #[tracing::instrument(name = "DiscoveryPeerTask::poll_next", skip(self), fields(peer_id = ?self.peer_id, connected = self.connected))]
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         if let Some(fut) = self.is_connected_fut.as_mut() {
             if let Poll::Ready(connected) = fut.poll_unpin(cx) {
@@ -516,10 +517,15 @@ impl Stream for DiscoveryPeerTask {
 
         if let Some(fut) = self.dialing_task.as_mut() {
             if let Poll::Ready(result) = fut.poll_unpin(cx) {
-                if let Err(e) = result {
-                    tracing::error!(error = %e, "dialing failed");
-                }
                 self.dialing_task.take();
+                match result {
+                    Ok(id) => {
+                        tracing::info!(%id, "successful connection.");
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "dialing failed");
+                    }
+                }
             }
         }
 
