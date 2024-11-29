@@ -516,7 +516,7 @@ impl Directory {
         }
         let name = path.remove(0);
         let item = self.get_item(name)?;
-        return match item {
+        match item {
             Item::Directory(dir) => {
                 if path.is_empty() {
                     return Ok(dir);
@@ -526,7 +526,7 @@ impl Directory {
                     .unwrap_or(dir));
             }
             _ => Err(Error::DirectoryNotFound),
-        };
+        }
     }
 
     /// Get an `Item` from a path
@@ -558,7 +558,7 @@ impl Directory {
         }
         let name = path.remove(0);
         let item = self.get_item(name)?;
-        return match &item {
+        match &item {
             Item::Directory(dir) => {
                 if path.is_empty() {
                     return Ok(item);
@@ -566,7 +566,7 @@ impl Directory {
                 return dir.get_item_by_path(path.join("/").as_str());
             }
             _ => Ok(item),
-        };
+        }
     }
 }
 
