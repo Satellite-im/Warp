@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::path::PathBuf;
 
 use bytes::Bytes;
@@ -289,9 +290,9 @@ pub enum CommunityPermission {
     PinMessages,
 }
 
-impl ToString for CommunityPermission {
-    fn to_string(&self) -> String {
-        serde_json::to_string(self).unwrap()
+impl Display for CommunityPermission {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&serde_json::to_string(self).unwrap())
     }
 }
 
@@ -339,9 +340,9 @@ pub enum CommunityChannelPermission {
     SendMessages,
 }
 
-impl ToString for CommunityChannelPermission {
-    fn to_string(&self) -> String {
-        serde_json::to_string(self).unwrap()
+impl Display for CommunityChannelPermission {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&serde_json::to_string(self).unwrap())
     }
 }
 
