@@ -521,9 +521,9 @@ impl Directory {
                 if path.is_empty() {
                     return Ok(dir);
                 }
-                return Ok(dir
+                Ok(dir
                     .get_last_directory_from_path(path.join("/").as_str())
-                    .unwrap_or(dir));
+                    .unwrap_or(dir))
             }
             _ => Err(Error::DirectoryNotFound),
         }
@@ -563,7 +563,7 @@ impl Directory {
                 if path.is_empty() {
                     return Ok(item);
                 }
-                return dir.get_item_by_path(path.join("/").as_str());
+                dir.get_item_by_path(path.join("/").as_str())
             }
             _ => Ok(item),
         }
