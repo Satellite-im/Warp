@@ -90,7 +90,7 @@ impl Default for RelayClient {
             #[cfg(target_arch="wasm32")]
             relay_address: vec![
                 //NYC-1
-                "/dns4/nyc-3-dev.relay.satellite.im/tcp/4410/wss/p2p/12D3KooWKmRupXFyBqJtm6FAySPe6Krmi6v5i6SsQ96NMZ9J4Nns".parse().unwrap(),
+                "/dns4/nyc-3-dev.relay.satellite.im/tcp/4410/wss/p2p/12D3KooWJWw4KG2KKpUxQAc8kZZDqmownRvjWGxnr5Y6XRur8WSx".parse().unwrap(),
             ],
             background: true,
             quorum: Default::default()
