@@ -946,10 +946,6 @@ impl IdentityStore {
     pub async fn request(&self, out_did: &DID, option: RequestOption) -> Result<(), Error> {
         let out_peer_id = out_did.to_peer_id()?;
 
-        if !self.ipfs.is_connected(out_peer_id).await? {
-            return Err(Error::IdentityDoesntExist);
-        }
-
         let pk_did = self.root_document.keypair();
 
         let event = IdentityEvent::Request { option };
@@ -979,10 +975,6 @@ impl IdentityStore {
     #[tracing::instrument(skip(self))]
     pub async fn push(&self, out_did: &DID) -> Result<(), Error> {
         let out_peer_id = out_did.to_peer_id()?;
-
-        if !self.ipfs.is_connected(out_peer_id).await? {
-            return Err(Error::IdentityDoesntExist);
-        }
 
         let pk_did = self.root_document.keypair();
 
