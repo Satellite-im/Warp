@@ -11,7 +11,7 @@ use bytes::Bytes;
 use futures::channel::oneshot;
 use futures::future::BoxFuture;
 use futures::stream::BoxStream;
-use futures_timeout::TimeoutExt;
+use futures_timer::Delay;
 use indexmap::IndexSet;
 use pollable_map::stream::StreamMap;
 use rust_ipfs::libp2p::swarm::ConnectionId;
@@ -261,7 +261,7 @@ impl Discovery {
             PeerType::DID(did_key) => did_key.to_peer_id()?,
         };
 
-        let (tx, rx) = futures::channel::oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         let _ = self
             .command_tx
             .clone()
@@ -280,7 +280,7 @@ impl Discovery {
             PeerType::DID(did_key) => did_key.to_peer_id()?,
         };
 
-        let (tx, rx) = futures::channel::oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         let _ = self
             .command_tx
             .clone()
@@ -299,7 +299,7 @@ impl Discovery {
             PeerType::DID(did_key) => did_key.to_peer_id()?,
         };
 
-        let (tx, rx) = futures::channel::oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         let _ = self
             .command_tx
             .clone()
@@ -323,7 +323,7 @@ impl Discovery {
             }
         };
 
-        let (tx, rx) = futures::channel::oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         let _ = self
             .command_tx
             .clone()
@@ -337,7 +337,7 @@ impl Discovery {
     }
 
     pub async fn list(&self) -> HashSet<DiscoveryRecord> {
-        let (tx, rx) = futures::channel::oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         let _ = self
             .command_tx
             .clone()
@@ -426,6 +426,7 @@ struct DiscoveryPeerTask {
     dialing_task: Option<BoxFuture<'static, Result<ConnectionId, Error>>>,
     is_connected_fut: Option<BoxFuture<'static, bool>>,
     ping_fut: Option<BoxFuture<'static, Result<Duration, Error>>>,
+    ping_timer: Option<Delay>,
     waker: Option<Waker>,
 }
 
@@ -454,6 +455,7 @@ impl DiscoveryPeerTask {
             is_connected_fut,
             dialing_task: None,
             ping_fut: None,
+            ping_timer: Some(Delay::new(Duration::from_secs(5))),
             waker: None,
         }
     }
@@ -573,20 +575,6 @@ impl Stream for DiscoveryPeerTask {
             }
         }
 
-        if let Some(fut) = self.ping_fut.as_mut() {
-            if let Poll::Ready(result) = fut.poll_unpin(cx) {
-                self.ping_fut.take();
-                match result {
-                    Ok(duration) => {
-                        tracing::info!(duration = duration.as_millis(), peer_id = ?self.peer_id, "peer responded to ping");
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, peer_id = ?self.peer_id, "pinging failed");
-                    }
-                }
-            }
-        }
-
         loop {
             match self.status {
                 DiscoveryPeerStatus::Initial { ref mut fut } => match fut.poll_unpin(cx) {
@@ -632,6 +620,31 @@ impl Stream for DiscoveryPeerTask {
                 }
             }
         }
+
+        if let Some(timer) = self.ping_timer.as_mut() {
+            if timer.poll_unpin(cx).is_ready() {
+                self.ping_timer.take();
+                self.ping();
+            }
+        }
+
+        if let Some(fut) = self.ping_fut.as_mut() {
+            if let Poll::Ready(result) = fut.poll_unpin(cx) {
+                self.ping_fut.take();
+                match result {
+                    Ok(duration) => {
+                        tracing::info!(duration = duration.as_millis(), peer_id = ?self.peer_id, "peer responded to ping");
+                        self.ping_timer = Some(Delay::new(Duration::from_secs(30)));
+                    }
+                    Err(e) => {
+                        // TODO: probably close connection
+                        self.ping_timer = Some(Delay::new(Duration::from_secs(60)));
+                        tracing::error!(error = %e, peer_id = ?self.peer_id, "pinging failed");
+                    }
+                }
+            }
+        }
+
         self.waker = Some(cx.waker().clone());
         Poll::Pending
     }
@@ -703,6 +716,7 @@ enum DiscoveryResponse {
 }
 
 impl DiscoveryTask {
+    #[allow(dead_code)]
     pub fn discover_initial_peers(&mut self, ns: Option<String>) {
         match self.config {
             DiscoveryConfig::Shuttle { .. } => {}
@@ -866,7 +880,7 @@ impl Future for DiscoveryTask {
                     pl.to_bytes().expect("valid payload")
                 }
             };
-
+            tracing::error!("ping sent to {peer_id}");
             _ = response.send(bytes);
         }
 
