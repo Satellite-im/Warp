@@ -427,6 +427,7 @@ struct DiscoveryPeerTask {
     is_connected_fut: Option<BoxFuture<'static, bool>>,
     ping_fut: Option<BoxFuture<'static, Result<Duration, Error>>>,
     ping_timer: Option<Delay>,
+    confirmed: bool,
     waker: Option<Waker>,
 }
 
@@ -453,9 +454,10 @@ impl DiscoveryPeerTask {
             connected: false,
             status,
             is_connected_fut,
+            confirmed: false,
             dialing_task: None,
             ping_fut: None,
-            ping_timer: Some(Delay::new(Duration::from_secs(5))),
+            ping_timer: None,
             waker: None,
         }
     }
@@ -463,6 +465,9 @@ impl DiscoveryPeerTask {
     pub fn set_connection(mut self, connection_id: ConnectionId, addr: Multiaddr) -> Self {
         self.addresses.insert(addr.clone());
         self.connections.insert(connection_id, addr);
+        if self.ping_fut.is_none() && self.ping_timer.is_none() {
+            self.ping();
+        }
         self
     }
 
@@ -542,6 +547,7 @@ impl DiscoveryPeerTask {
 
 enum DiscoveryPeerEvent {
     Connected,
+    Confirmed,
     Disconnected,
 }
 
@@ -554,7 +560,10 @@ impl Stream for DiscoveryPeerTask {
                 self.connected = connected;
                 self.is_connected_fut.take();
                 let event = match connected {
-                    true => DiscoveryPeerEvent::Connected,
+                    true => {
+                        self.ping();
+                        DiscoveryPeerEvent::Connected
+                    }
                     false => DiscoveryPeerEvent::Disconnected,
                 };
                 return Poll::Ready(Some(event));
@@ -600,6 +609,8 @@ impl Stream for DiscoveryPeerTask {
                                     self.connections.remove(&connection_id);
                                     if self.connections.is_empty() {
                                         self.connected = false;
+                                        self.ping_fut.take();
+                                        self.ping_timer.take();
                                         return Poll::Ready(Some(DiscoveryPeerEvent::Disconnected));
                                     }
                                     continue;
@@ -611,6 +622,7 @@ impl Stream for DiscoveryPeerTask {
                             self.connections.insert(id, addr);
                             self.connected = true;
                             if !currently_connected {
+                                self.ping();
                                 return Poll::Ready(Some(DiscoveryPeerEvent::Connected));
                             }
                         }
@@ -635,6 +647,10 @@ impl Stream for DiscoveryPeerTask {
                     Ok(duration) => {
                         tracing::info!(duration = duration.as_millis(), peer_id = ?self.peer_id, "peer responded to ping");
                         self.ping_timer = Some(Delay::new(Duration::from_secs(30)));
+                        if !self.confirmed {
+                            self.confirmed = true;
+                            return Poll::Ready(Some(DiscoveryPeerEvent::Confirmed));
+                        }
                     }
                     Err(e) => {
                         // TODO: probably close connection
@@ -787,14 +803,13 @@ impl DiscoveryTask {
 impl Future for DiscoveryTask {
     type Output = ();
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        loop {
-            if let Some(peer_id) = self.pending_broadcast.pop_front() {
-                if let Ok(did) = peer_id.to_did() {
-                    let _ = self.broadcast_tx.send(did);
-                }
-                continue;
+        while let Some(peer_id) = self.pending_broadcast.pop_front() {
+            if let Ok(did) = peer_id.to_did() {
+                let _ = self.broadcast_tx.send(did);
             }
+        }
 
+        loop {
             match self.command_rx.poll_next_unpin(cx) {
                 Poll::Ready(Some(command)) => match command {
                     DiscoveryCommand::Insert { peer_id, response } => {
@@ -880,7 +895,6 @@ impl Future for DiscoveryTask {
                     pl.to_bytes().expect("valid payload")
                 }
             };
-            tracing::error!("ping sent to {peer_id}");
             _ = response.send(bytes);
         }
 
@@ -940,7 +954,14 @@ impl Future for DiscoveryTask {
         loop {
             match self.peers.poll_next_unpin(cx) {
                 Poll::Ready(Some((peer_id, event))) => match event {
-                    DiscoveryPeerEvent::Connected => {
+                    DiscoveryPeerEvent::Connected => {}
+                    DiscoveryPeerEvent::Confirmed => {
+                        // Since the peer is confirmed, we can send the broadcast out for the initial identity request
+                        let peer_task = self.peers.get(&peer_id).expect("peer apart of task");
+                        if !peer_task.is_connected() {
+                            // note: peer state should be connected if it is confirmed. We could probably assert here
+                            continue;
+                        }
                         if !self.pending_broadcast.contains(&peer_id) {
                             self.pending_broadcast.push_back(peer_id);
                         }
