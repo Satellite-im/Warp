@@ -75,8 +75,8 @@ impl Discovery {
         }
     }
 
-    /// Start discovery task
-    /// Note: This starting will only work across a provided namespace
+    // Start discovery task
+    // Note: This starting will only work across a provided namespace
     // pub async fn start(&self) -> Result<(), Error> {
     //     match &self.config {
     //         DiscoveryConfig::Namespace {
