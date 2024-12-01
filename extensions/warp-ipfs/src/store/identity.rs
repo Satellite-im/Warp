@@ -635,10 +635,10 @@ impl IdentityStore {
                         // Used as the initial request/push
                         Ok(push) = discovery_rx.recv() => {
                             if let Err(e) = store.request(&push, RequestOption::Identity).await {
-                               tracing::error!("Error requesting identity: {e}");
+                               tracing::error!(error = %e, "error requesting identity");
                             }
                             if let Err(e) = store.push(&push).await {
-                               tracing::error!("Error pushing identity: {e}");
+                               tracing::error!(error = %e, "error pushing identity");
                             }
                         }
                         _ = &mut tick => {
