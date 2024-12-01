@@ -609,10 +609,15 @@ impl DiscoveryTask {
         if self.discovery_fut.is_some() {
             return;
         }
+
+        // TODO: show that we are registered so we dont repeat multiple registration to the namespace when discovering peers
+
         let ipfs = self.ipfs.clone();
         let fut = async move {
+            ipfs.rendezvous_register_namespace(&namespace, None, rz_peer_id)
+                .await?;
             let peers = ipfs
-                .rendezvous_namespace_discovery(namespace, None, rz_peer_id)
+                .rendezvous_namespace_discovery(&namespace, None, rz_peer_id)
                 .await?;
             let peers = peers.keys().copied().collect::<Vec<_>>();
             Ok::<_, Error>(peers)
