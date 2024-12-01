@@ -32,9 +32,6 @@ use super::{protocols, DidExt, PeerIdExt, PeerType};
 use crate::config::{Discovery as DiscoveryConfig, DiscoveryType};
 use crate::store::payload::{PayloadBuilder, PayloadMessage};
 
-//TODO: Deprecate for separate discovery service
-
-#[allow(dead_code)]
 #[derive(Clone)]
 pub struct Discovery {
     ipfs: Ipfs,
@@ -482,7 +479,7 @@ impl Stream for DiscoveryPeerTask {
                         }
                     }
                     Err(e) => {
-                        // TODO: probably close connection
+                        // TODO: probably close connection?
                         self.ping_timer = Some(Delay::new(Duration::from_secs(60)));
                         tracing::error!(error = %e, peer_id = ?self.peer_id, "pinging failed");
                     }
@@ -562,7 +559,7 @@ enum DiscoveryResponse {
 
 impl DiscoveryTask {
     #[allow(dead_code)]
-    pub fn discover_initial_peers(&mut self, ns: Option<String>) {
+    pub fn discovery(&mut self, ns: Option<String>) {
         match self.config {
             DiscoveryConfig::Shuttle { .. } => {}
             DiscoveryConfig::Namespace {
@@ -584,6 +581,7 @@ impl DiscoveryTask {
                             .collect::<IndexSet<_>>();
 
                         if !peers.is_empty() {
+                            // We will use the first instance instead of the whole set for now
                             let peer_id = peers.get_index(0).copied().expect("should not fail");
                             self.rz_discovery(namespace, peer_id);
                         }
@@ -594,7 +592,6 @@ impl DiscoveryTask {
         }
     }
 
-    #[allow(dead_code)]
     pub fn dht_discovery(&mut self, namespace: String) {
         if self.discovery_fut.is_some() {
             return;
@@ -604,7 +601,7 @@ impl DiscoveryTask {
             let bytes = namespace.as_bytes();
             let stream = ipfs.dht_get_providers(bytes.to_vec()).await?;
             // We collect instead of passing the stream through and polling there is to try to maintain compatibility in discovery
-            // Note: This may change in the future where we would focus on a single discovery method
+            // Note: This may change in the future where we would focus on a single discovery method (ie shuttle)
             let peers = stream.collect::<IndexSet<_>>().await;
             Ok::<_, Error>(Vec::from_iter(peers))
         };
@@ -612,7 +609,6 @@ impl DiscoveryTask {
         self.discovery_fut.replace(Box::pin(fut));
     }
 
-    #[allow(dead_code)]
     pub fn rz_discovery(&mut self, namespace: String, rz_peer_id: PeerId) {
         if self.discovery_fut.is_some() {
             return;
