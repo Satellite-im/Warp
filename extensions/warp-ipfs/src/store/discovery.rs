@@ -34,12 +34,10 @@ use crate::store::payload::{PayloadBuilder, PayloadMessage};
 
 #[derive(Clone)]
 pub struct Discovery {
-    ipfs: Ipfs,
     config: DiscoveryConfig,
     command_tx: futures::channel::mpsc::Sender<DiscoveryCommand>,
     broadcast_tx: broadcast::Sender<DID>,
-    handle: AbortableJoinHandle<()>,
-    executor: LocalExecutor,
+    _handle: AbortableJoinHandle<()>,
 }
 
 impl Discovery {
@@ -61,14 +59,12 @@ impl Discovery {
             relays.to_vec(),
         )
         .await;
-        let handle = executor.spawn_abortable(task);
+        let _handle = executor.spawn_abortable(task);
         Self {
             command_tx,
-            ipfs: ipfs.clone(),
             config: config.clone(),
             broadcast_tx,
-            handle,
-            executor,
+            _handle,
         }
     }
 
