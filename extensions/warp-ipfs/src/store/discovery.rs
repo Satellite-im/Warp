@@ -50,7 +50,7 @@ impl Discovery {
         let executor = LocalExecutor;
         let (command_tx, command_rx) = futures::channel::mpsc::channel(0);
         let (broadcast_tx, _) = broadcast::channel(2048);
-        let task = DiscoveryTask::new(
+        let mut task = DiscoveryTask::new(
             ipfs,
             keypair,
             command_rx,
@@ -59,6 +59,9 @@ impl Discovery {
             relays.to_vec(),
         )
         .await;
+
+        task.discovery(None);
+
         let _handle = executor.spawn_abortable(task);
         Self {
             command_tx,
@@ -611,7 +614,6 @@ impl DiscoveryTask {
         }
 
         // TODO: show that we are registered so we dont repeat multiple registration to the namespace when discovering peers
-
         let ipfs = self.ipfs.clone();
         let fut = async move {
             ipfs.rendezvous_register_namespace(&namespace, None, rz_peer_id)
