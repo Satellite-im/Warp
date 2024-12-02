@@ -4310,4 +4310,244 @@ mod test {
         .await?;
         Ok(())
     }
+    #[async_test]
+    async fn unauthorized_attach_to_community_channel_message() -> anyhow::Result<()> {
+        let context = Some("test::unauthorized_attach_to_community_channel_message".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, did_a, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+        let channel = instance_a
+            .create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard)
+            .await?;
+
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvited {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+        instance_b
+            .accept_community_invite(community.id(), invite.id())
+            .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id(),
+                user: did_b.clone()
+            }
+        );
+        assert!(false);
+        Ok(())
+    }
+    #[async_test]
+    async fn authorized_attach_to_community_channel_message() -> anyhow::Result<()> {
+        let context = Some("test::authorized_attach_to_community_channel_message".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, did_a, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+        let channel = instance_a
+            .create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard)
+            .await?;
+
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvited {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+        instance_b
+            .accept_community_invite(community.id(), invite.id())
+            .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id(),
+                user: did_b.clone()
+            }
+        );
+        assert!(false);
+        Ok(())
+    }
+    #[async_test]
+    async fn unauthorized_download_from_community_channel_message() -> anyhow::Result<()> {
+        let context = Some("test::unauthorized_download_from_community_channel_message".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, did_a, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+        let channel = instance_a
+            .create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard)
+            .await?;
+
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvited {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+        instance_b
+            .accept_community_invite(community.id(), invite.id())
+            .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id(),
+                user: did_b.clone()
+            }
+        );
+        assert!(false);
+        Ok(())
+    }
+    #[async_test]
+    async fn authorized_download_from_community_channel_message() -> anyhow::Result<()> {
+        let context = Some("test::authorized_download_from_community_channel_message".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, did_a, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+        let channel = instance_a
+            .create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard)
+            .await?;
+
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvited {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+        instance_b
+            .accept_community_invite(community.id(), invite.id())
+            .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id(),
+                user: did_b.clone()
+            }
+        );
+        assert!(false);
+        Ok(())
+    }
+    #[async_test]
+    async fn unauthorized_download_stream_from_community_channel_message() -> anyhow::Result<()> {
+        let context = Some("test::unauthorized_download_stream_from_community_channel_message".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, did_a, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+        let channel = instance_a
+            .create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard)
+            .await?;
+
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvited {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+        instance_b
+            .accept_community_invite(community.id(), invite.id())
+            .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id(),
+                user: did_b.clone()
+            }
+        );
+        assert!(false);
+        Ok(())
+    }
+    #[async_test]
+    async fn authorized_download_stream_from_community_channel_message() -> anyhow::Result<()> {
+        let context = Some("test::authorized_download_stream_from_community_channel_message".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, did_a, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+        let channel = instance_a
+            .create_community_channel(community.id(), "Channel0", CommunityChannelType::Standard)
+            .await?;
+
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvited {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+        instance_b
+            .accept_community_invite(community.id(), invite.id())
+            .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id(),
+                user: did_b.clone()
+            }
+        );
+        assert!(false);
+        Ok(())
+    }
 }
