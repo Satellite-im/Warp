@@ -591,11 +591,13 @@ impl DiscoveryTask {
                             .filter_map(|addr| addr.clone().extract_peer_id())
                             .collect::<IndexSet<_>>();
 
-                        if !peers.is_empty() {
+                        if peers.is_empty() {
                             // We will use the first instance instead of the whole set for now
-                            let peer_id = peers.get_index(0).copied().expect("should not fail");
-                            self.rz_discovery(namespace, peer_id);
+                            return;
                         }
+
+                        let peer_id = peers.get_index(0).copied().expect("should not fail");
+                        self.rz_discovery(namespace, peer_id);
                     }
                 }
             }
@@ -625,8 +627,9 @@ impl DiscoveryTask {
                     .boxed(),
                     DiscoveryType::RzPoint { addresses } => {
                         let peers = addresses
-                            .iter()
-                            .filter_map(|addr| addr.clone().extract_peer_id())
+                            .clone()
+                            .into_iter()
+                            .filter_map(|mut addr| addr.extract_peer_id())
                             .collect::<IndexSet<_>>();
 
                         if peers.is_empty() {
