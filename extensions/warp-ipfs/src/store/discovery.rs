@@ -791,7 +791,11 @@ impl Future for DiscoveryTask {
 
             if peer_id.ne(payload.sender()) {
                 // TODO: When adding cosigner into the payload, we will check both fields before not only rejecting the connection
-                //
+                let pl = PayloadBuilder::new(&self.keypair, DiscoveryResponse::InvalidRequest)
+                    .build()
+                    .expect("valid payload");
+                let bytes = pl.to_bytes().expect("valid payload");
+                _ = response.send(bytes);
                 continue;
             }
 
