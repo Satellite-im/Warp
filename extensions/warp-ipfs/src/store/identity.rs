@@ -1991,6 +1991,9 @@ impl IdentityStore {
             // first lets evaluate the cache
             let cache = store.identity_cache.list().await;
 
+            // any identity that where found based on the lookup pattern
+            let mut found_identity = HashSet::new();
+
             // anything missing we will push off to additional discovery service
             let mut missing = HashSet::new();
 
@@ -2045,10 +2048,11 @@ impl IdentityStore {
                 },
                 LookupBy::Username(ref username) if username.contains('#') => {
                     let split_data = username.split('#').collect::<Vec<&str>>();
-
+                    let mut found = HashSet::new();
                     if split_data.len() != 2 {
                         for await document in cache {
                             if document.username.to_lowercase().contains(&username.to_lowercase()) {
+                                found.insert(document.clone());
                                 let id = resolve_identity(&store, document).await;
                                 yield id;
                             }
@@ -2059,20 +2063,26 @@ impl IdentityStore {
                     ) {
                         for await document in cache {
                             if document.username.to_lowercase().eq(&name) && String::from_utf8_lossy(&document.short_id).to_lowercase().eq(&code) {
+                                found.insert(document.clone());
                                 let id = resolve_identity(&store, document).await;
                                 yield id;
                             }
                         }
                     }
+
+                    found_identity.extend(found);
                 }
                 LookupBy::Username(ref username) => {
                     let username = username.to_lowercase();
+                    let mut found = HashSet::new();
                     for await document in cache {
                         if document.username.to_lowercase().contains(&username) {
+                            found.insert(document.clone());
                             let id = resolve_identity(&store, document).await;
                             yield id;
                         }
                     }
+                    found_identity.extend(found);
                 }
                 LookupBy::ShortId(short_id) => {
                     for await document in cache {
@@ -2120,9 +2130,11 @@ impl IdentityStore {
                                     let ident = ident.clone();
                                     let did = ident.did.clone();
 
-                                  let _ = store.identity_cache.insert(&ident).await;
+                                    let _ = store.identity_cache.insert(&ident).await;
 
-                                    yield resolve_identity(&store, ident).await;
+                                    if !found_identity.contains(&ident) {
+                                        yield resolve_identity(&store, ident).await;
+                                    }
 
                                     if store.discovery.contains(&did).await {
                                         continue;
