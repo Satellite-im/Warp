@@ -60,7 +60,7 @@ impl Discovery {
         )
         .await;
 
-        task.discovery(None);
+        task.publish_discovery();
 
         let _handle = executor.spawn_abortable(task);
         Self {
@@ -508,6 +508,10 @@ struct DiscoveryTask {
 
     broadcast_tx: broadcast::Sender<DID>,
 
+    discovery_publish_confirmed: bool,
+
+    discovery_publish_fut: Option<BoxFuture<'static, DiscoveryPublish>>,
+
     waker: Option<Waker>,
 }
 
@@ -537,6 +541,8 @@ impl DiscoveryTask {
             command_rx,
             connection_event,
             discovery_request_st,
+            discovery_publish_confirmed: false,
+            discovery_publish_fut: None,
             discovery_fut: None,
             waker: None,
         }
@@ -554,6 +560,12 @@ enum DiscoveryRequest {
 enum DiscoveryResponse {
     Pong,
     InvalidRequest,
+}
+
+enum DiscoveryPublish {
+    Dht,
+    Rz,
+    None,
 }
 
 impl DiscoveryTask {
@@ -591,10 +603,68 @@ impl DiscoveryTask {
         }
     }
 
+    pub fn publish_discovery(&mut self) {
+        let ipfs = self.ipfs.clone();
+        let fut = match self.config {
+            DiscoveryConfig::Shuttle { .. } => {
+                futures::future::ready(DiscoveryPublish::None).boxed()
+            }
+            DiscoveryConfig::Namespace {
+                ref namespace,
+                ref discovery_type,
+            } => {
+                let namespace = namespace.clone().unwrap_or("satellite-warp".to_string());
+                match discovery_type {
+                    DiscoveryType::DHT => async move {
+                        if let Err(e) = ipfs.dht_provide(namespace.as_bytes().to_vec()).await {
+                            tracing::error!(error = %e, "cannot provide {namespace}");
+                            return DiscoveryPublish::None;
+                        }
+                        DiscoveryPublish::Dht
+                    }
+                    .boxed(),
+                    DiscoveryType::RzPoint { addresses } => {
+                        let peers = addresses
+                            .iter()
+                            .filter_map(|addr| addr.clone().extract_peer_id())
+                            .collect::<IndexSet<_>>();
+
+                        if peers.is_empty() {
+                            return;
+                        }
+
+                        // We will use the first instance instead of the whole set for now
+                        let peer_id = peers.get_index(0).copied().expect("should not fail");
+
+                        async move {
+                            if let Err(e) = ipfs
+                                .rendezvous_register_namespace(&namespace, None, peer_id)
+                                .await
+                            {
+                                tracing::error!(error = %e, "cannot provide {namespace}");
+                                return DiscoveryPublish::None;
+                            }
+                            DiscoveryPublish::Rz
+                        }
+                        .boxed()
+                    }
+                }
+            }
+            DiscoveryConfig::None => futures::future::ready(DiscoveryPublish::None).boxed(),
+        };
+
+        self.discovery_publish_fut = Some(fut);
+    }
+
     pub fn dht_discovery(&mut self, namespace: String) {
         if self.discovery_fut.is_some() {
             return;
         }
+
+        if !self.discovery_publish_confirmed {
+            return;
+        }
+
         let ipfs = self.ipfs.clone();
         let fut = async move {
             let bytes = namespace.as_bytes();
@@ -613,11 +683,12 @@ impl DiscoveryTask {
             return;
         }
 
-        // TODO: show that we are registered so we dont repeat multiple registration to the namespace when discovering peers
+        if !self.discovery_publish_confirmed {
+            return;
+        }
+
         let ipfs = self.ipfs.clone();
         let fut = async move {
-            ipfs.rendezvous_register_namespace(&namespace, None, rz_peer_id)
-                .await?;
             let peers = ipfs
                 .rendezvous_namespace_discovery(&namespace, None, rz_peer_id)
                 .await?;
@@ -697,6 +768,15 @@ impl Future for DiscoveryTask {
             }
         }
 
+        if let Some(fut) = self.discovery_publish_fut.as_mut() {
+            if let Poll::Ready(discovery_publish_type) = fut.poll_unpin(cx) {
+                self.discovery_publish_fut.take();
+                self.discovery_publish_confirmed =
+                    !matches!(discovery_publish_type, DiscoveryPublish::None);
+                self.discovery(None);
+            }
+        }
+
         while let Poll::Ready(Some((peer_id, request, response))) =
             self.discovery_request_st.poll_next_unpin(cx)
         {
@@ -723,7 +803,10 @@ impl Future for DiscoveryTask {
                     pl.to_bytes().expect("valid payload")
                 }
             };
-            _ = response.send(bytes);
+
+            if response.send(bytes).is_err() {
+                tracing::warn!(%peer_id, "unable to respond to peer due to request being dropped.");
+            }
         }
 
         if let Some(fut) = self.discovery_fut.as_mut() {
