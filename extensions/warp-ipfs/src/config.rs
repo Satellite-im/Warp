@@ -158,7 +158,7 @@ impl Default for StoreSetting {
             disable_images: false,
             with_friends: false,
             default_profile_picture: None,
-            announce_to_mesh: false,
+            announce_to_mesh: true,
         }
     }
 }
