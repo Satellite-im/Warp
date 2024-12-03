@@ -4356,7 +4356,7 @@ mod test {
             .revoke_community_channel_permission_for_all(
                 community.id(),
                 channel.id(),
-                CommunityChannelPermission::SendMessages,
+                CommunityChannelPermission::SendAttachments,
             )
             .await?;
         assert_next_msg_event(
@@ -4365,7 +4365,7 @@ mod test {
             MessageEventKind::RevokedCommunityChannelPermissionForAll {
                 community_id: community.id(),
                 channel_id: channel.id(),
-                permission: CommunityChannelPermission::SendMessages,
+                permission: CommunityChannelPermission::SendAttachments,
             },
         )
         .await?;

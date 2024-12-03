@@ -3319,6 +3319,13 @@ impl CommunityTask {
         ) {
             return Err(Error::Unauthorized);
         }
+        if !self.document.has_channel_permission(
+            own_did,
+            &CommunityChannelPermission::SendAttachments,
+            channel_id,
+        ) {
+            return Err(Error::Unauthorized);
+        }
 
         let keystore = pubkey_or_keystore(&*self)?;
 
