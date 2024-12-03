@@ -29,7 +29,9 @@ use warp::raygun::community::{
     CommunityPermission, CommunityRole, RoleId,
 };
 use warp::raygun::{
-    AttachmentEventStream, ConversationImage, Location, MessageEvent, MessageOptions, MessageReference, MessageStatus, MessageType, Messages, MessagesType, PinState, RayGunEventKind, ReactionState
+    AttachmentEventStream, ConversationImage, Location, MessageEvent, MessageOptions,
+    MessageReference, MessageStatus, MessageType, Messages, MessagesType, PinState,
+    RayGunEventKind, ReactionState,
 };
 use warp::{
     crypto::{cipher::Cipher, generate},
@@ -3365,9 +3367,7 @@ impl CommunityTask {
             .filter_map(|did| did.to_peer_id().ok())
             .collect::<Vec<_>>();
 
-        let message = channel
-            .get_message_document(&self.ipfs, message_id)
-            .await?;
+        let message = channel.get_message_document(&self.ipfs, message_id).await?;
 
         if message.message_type != MessageType::Attachment {
             return Err(Error::InvalidMessage);
@@ -3397,7 +3397,7 @@ impl CommunityTask {
         ) {
             return Err(Error::Unauthorized);
         }
-        
+
         let channel = match self.document.channels.get(&channel_id.to_string()) {
             Some(c) => c,
             None => return Err(Error::CommunityChannelDoesntExist),
@@ -3410,9 +3410,7 @@ impl CommunityTask {
             .filter_map(|did| did.to_peer_id().ok())
             .collect::<Vec<_>>();
 
-        let message = channel
-            .get_message_document(&self.ipfs, message_id)
-            .await?;
+        let message = channel.get_message_document(&self.ipfs, message_id).await?;
 
         if message.message_type != MessageType::Attachment {
             return Err(Error::InvalidMessage);

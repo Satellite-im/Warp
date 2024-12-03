@@ -2,15 +2,18 @@ mod common;
 #[cfg(test)]
 mod test {
     use futures::{stream::FuturesUnordered, FutureExt, Stream, StreamExt, TryStreamExt};
-    use std::time::Duration;
+    use std::{path::PathBuf, time::Duration};
     use uuid::Uuid;
-    use warp::raygun::{
-        community::{
-            Community, CommunityChannelPermission, CommunityChannelType, CommunityInvite,
-            CommunityPermission, RayGunCommunity,
+    use warp::{
+        constellation::{Constellation, Progression},
+        raygun::{
+            community::{
+                Community, CommunityChannelPermission, CommunityChannelType, CommunityInvite,
+                CommunityPermission, RayGunCommunity,
+            },
+            Location, Message, MessageEvent, MessageEventKind, MessageEventStream, MessageOptions,
+            MessageReference, MessageStatus, Messages, RayGunEventKind, RayGunStream,
         },
-        Message, MessageEvent, MessageEventKind, MessageEventStream, MessageOptions,
-        MessageReference, MessageStatus, Messages, RayGunEventKind, RayGunStream,
     };
 
     #[cfg(target_arch = "wasm32")]
@@ -4315,7 +4318,7 @@ mod test {
         let context = Some("test::unauthorized_attach_to_community_channel_message".into());
         let acc = (None, None, context);
         let accounts = create_accounts(vec![acc.clone(), acc]).await?;
-        let (instance_a, did_a, _) = &mut accounts[0].clone();
+        let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
@@ -4347,7 +4350,49 @@ mod test {
                 user: did_b.clone()
             }
         );
-        assert!(false);
+
+        let mut stream_b = instance_b.get_community_stream(community.id()).await?;
+        instance_a
+            .revoke_community_channel_permission_for_all(
+                community.id(),
+                channel.id(),
+                CommunityChannelPermission::SendMessages,
+            )
+            .await?;
+        assert_next_msg_event(
+            vec![&mut stream_a, &mut stream_b],
+            Duration::from_secs(60),
+            MessageEventKind::RevokedCommunityChannelPermissionForAll {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                permission: CommunityChannelPermission::SendMessages,
+            },
+        )
+        .await?;
+
+        let file_name = "my_file.txt";
+        let file = b"Thanks for reading my file";
+        instance_b.put_buffer(file_name, file).await?;
+        let locations = vec![Location::Constellation {
+            path: file_name.to_string(),
+        }];
+        let message = vec!["here is my file".to_string()];
+        let result = instance_b
+            .attach_to_community_channel_message(
+                community.id(),
+                channel.id(),
+                None,
+                locations,
+                message,
+            )
+            .await;
+
+        match result {
+            Ok(_) => panic!("should not have succeeded"),
+            Err(e) => {
+                assert_eq!(format!("{:?}", e), format!("{:?}", Error::Unauthorized));
+            }
+        }
         Ok(())
     }
     #[async_test]
@@ -4355,7 +4400,7 @@ mod test {
         let context = Some("test::authorized_attach_to_community_channel_message".into());
         let acc = (None, None, context);
         let accounts = create_accounts(vec![acc.clone(), acc]).await?;
-        let (instance_a, did_a, _) = &mut accounts[0].clone();
+        let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
@@ -4387,7 +4432,23 @@ mod test {
                 user: did_b.clone()
             }
         );
-        assert!(false);
+
+        let file_name = "my_file.txt";
+        let file = b"Thanks for reading my file";
+        instance_b.put_buffer(file_name, file).await?;
+        let locations = vec![Location::Constellation {
+            path: file_name.to_string(),
+        }];
+        let message = vec!["here is my file".to_string()];
+        let _ = instance_b
+            .attach_to_community_channel_message(
+                community.id(),
+                channel.id(),
+                None,
+                locations,
+                message,
+            )
+            .await?;
         Ok(())
     }
     #[async_test]
@@ -4395,7 +4456,7 @@ mod test {
         let context = Some("test::unauthorized_download_from_community_channel_message".into());
         let acc = (None, None, context);
         let accounts = create_accounts(vec![acc.clone(), acc]).await?;
-        let (instance_a, did_a, _) = &mut accounts[0].clone();
+        let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
@@ -4427,7 +4488,77 @@ mod test {
                 user: did_b.clone()
             }
         );
-        assert!(false);
+
+        let mut stream_b = instance_b.get_community_stream(community.id()).await?;
+        let file_name = "my_file.txt";
+        let file = b"Thanks for reading my file";
+        instance_b.put_buffer(file_name, file).await?;
+        let locations = vec![Location::Constellation {
+            path: file_name.to_string(),
+        }];
+        let message = vec!["here is my file".to_string()];
+        let (message_id, mut attachment_event_stream) = instance_b
+            .attach_to_community_channel_message(
+                community.id(),
+                channel.id(),
+                None,
+                locations,
+                message,
+            )
+            .await?;
+        loop {
+            if attachment_event_stream.next().await.is_none() {
+                break;
+            }
+        }
+        assert_eq!(
+            next_event(&mut stream_b, Duration::from_secs(60)).await?,
+            MessageEventKind::CommunityMessageSent {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::CommunityMessageReceived {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id
+            }
+        );
+
+        instance_a
+            .revoke_community_channel_permission_for_all(
+                community.id(),
+                channel.id(),
+                CommunityChannelPermission::ViewChannel,
+            )
+            .await?;
+        assert_next_msg_event(
+            vec![&mut stream_a, &mut stream_b],
+            Duration::from_secs(60),
+            MessageEventKind::RevokedCommunityChannelPermissionForAll {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                permission: CommunityChannelPermission::ViewChannel,
+            },
+        )
+        .await?;
+
+        let result = instance_b
+            .download_from_community_channel_message(
+                community.id(),
+                channel.id(),
+                message_id,
+                file_name.to_string(),
+                PathBuf::new(),
+            )
+            .await;
+        match result {
+            Ok(_) => panic!("should not have succeeded"),
+            Err(e) => assert_eq!(format!("{:?}", e), format!("{:?}", Error::Unauthorized)),
+        }
         Ok(())
     }
     #[async_test]
@@ -4435,7 +4566,7 @@ mod test {
         let context = Some("test::authorized_download_from_community_channel_message".into());
         let acc = (None, None, context);
         let accounts = create_accounts(vec![acc.clone(), acc]).await?;
-        let (instance_a, did_a, _) = &mut accounts[0].clone();
+        let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
@@ -4467,15 +4598,95 @@ mod test {
                 user: did_b.clone()
             }
         );
-        assert!(false);
+
+        let mut stream_b = instance_b.get_community_stream(community.id()).await?;
+        let file_name = "my_file.txt";
+        let file = b"Thanks for reading my file";
+        instance_b.put_buffer(file_name, file).await?;
+        let locations = vec![Location::Constellation {
+            path: file_name.to_string(),
+        }];
+        let message = vec!["here is my file".to_string()];
+        let (message_id, mut attachment_event_stream) = instance_b
+            .attach_to_community_channel_message(
+                community.id(),
+                channel.id(),
+                None,
+                locations,
+                message.clone(),
+            )
+            .await?;
+        loop {
+            if attachment_event_stream.next().await.is_none() {
+                break;
+            }
+        }
+        assert_eq!(
+            next_event(&mut stream_b, Duration::from_secs(60)).await?,
+            MessageEventKind::CommunityMessageSent {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::CommunityMessageReceived {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id
+            }
+        );
+        let path = PathBuf::from("test::authorized_download_from_community_channel_message");
+        let mut constellation_progress_stream = instance_b
+            .download_from_community_channel_message(
+                community.id(),
+                channel.id(),
+                message_id,
+                file_name.to_string(),
+                path.clone(),
+            )
+            .await?;
+        loop {
+            if let Some(progress) = constellation_progress_stream.next().await {
+                match progress {
+                    Progression::ProgressComplete { name: _, total } => {
+                        assert_eq!(total, Some(file.len()));
+                        break;
+                    }
+                    Progression::ProgressFailed {
+                        name: _,
+                        last_size: _,
+                        error,
+                    } => panic!("progress shouldn't have failed: {}", error),
+                    Progression::CurrentProgress {
+                        name,
+                        current,
+                        total,
+                    } => {
+                        println!("name: {}, current: {}, total: {:?}", name, current, total)
+                    }
+                }
+            }
+        }
+        let contents = fs::read(path.clone()).await?;
+        assert_eq!(contents, file.to_vec());
+        fs::remove_file(path).await?;
+
+        let msg = instance_a
+            .get_community_channel_message(community.id(), channel.id(), message_id)
+            .await?;
+        assert_eq!(msg.lines(), &message);
+        assert_eq!(msg.attachments().len(), 1);
         Ok(())
     }
     #[async_test]
     async fn unauthorized_download_stream_from_community_channel_message() -> anyhow::Result<()> {
-        let context = Some("test::unauthorized_download_stream_from_community_channel_message".into());
+        let context =
+            Some("test::unauthorized_download_stream_from_community_channel_message".into());
         let acc = (None, None, context);
         let accounts = create_accounts(vec![acc.clone(), acc]).await?;
-        let (instance_a, did_a, _) = &mut accounts[0].clone();
+        let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
@@ -4507,15 +4718,85 @@ mod test {
                 user: did_b.clone()
             }
         );
-        assert!(false);
+
+        let mut stream_b = instance_b.get_community_stream(community.id()).await?;
+        let file_name = "my_file.txt";
+        let file = b"Thanks for reading my file";
+        instance_b.put_buffer(file_name, file).await?;
+        let locations = vec![Location::Constellation {
+            path: file_name.to_string(),
+        }];
+        let message = vec!["here is my file".to_string()];
+        let (message_id, mut attachment_event_stream) = instance_b
+            .attach_to_community_channel_message(
+                community.id(),
+                channel.id(),
+                None,
+                locations,
+                message.clone(),
+            )
+            .await?;
+        loop {
+            if attachment_event_stream.next().await.is_none() {
+                break;
+            }
+        }
+        assert_eq!(
+            next_event(&mut stream_b, Duration::from_secs(60)).await?,
+            MessageEventKind::CommunityMessageSent {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::CommunityMessageReceived {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id
+            }
+        );
+
+        instance_a
+            .revoke_community_channel_permission_for_all(
+                community.id(),
+                channel.id(),
+                CommunityChannelPermission::ViewChannel,
+            )
+            .await?;
+        assert_next_msg_event(
+            vec![&mut stream_a, &mut stream_b],
+            Duration::from_secs(60),
+            MessageEventKind::RevokedCommunityChannelPermissionForAll {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                permission: CommunityChannelPermission::ViewChannel,
+            },
+        )
+        .await?;
+
+        let result = instance_b
+            .download_stream_from_community_channel_message(
+                community.id(),
+                channel.id(),
+                message_id,
+                file_name,
+            )
+            .await;
+        match result {
+            Ok(_) => panic!("should not have succeeded"),
+            Err(e) => assert_eq!(format!("{:?}", e), format!("{:?}", Error::Unauthorized)),
+        }
         Ok(())
     }
     #[async_test]
     async fn authorized_download_stream_from_community_channel_message() -> anyhow::Result<()> {
-        let context = Some("test::authorized_download_stream_from_community_channel_message".into());
+        let context =
+            Some("test::authorized_download_stream_from_community_channel_message".into());
         let acc = (None, None, context);
         let accounts = create_accounts(vec![acc.clone(), acc]).await?;
-        let (instance_a, did_a, _) = &mut accounts[0].clone();
+        let (instance_a, _, _) = &mut accounts[0].clone();
         let (instance_b, did_b, _) = &mut accounts[1].clone();
 
         let community = instance_a.create_community("Community0").await?;
@@ -4547,7 +4828,71 @@ mod test {
                 user: did_b.clone()
             }
         );
-        assert!(false);
+
+        let mut stream_b = instance_b.get_community_stream(community.id()).await?;
+        let file_name = "my_file.txt";
+        let file = b"Thanks for reading my file";
+        instance_b.put_buffer(file_name, file).await?;
+        let locations = vec![Location::Constellation {
+            path: file_name.to_string(),
+        }];
+        let message = vec!["here is my file".to_string()];
+        let (message_id, mut attachment_event_stream) = instance_b
+            .attach_to_community_channel_message(
+                community.id(),
+                channel.id(),
+                None,
+                locations,
+                message.clone(),
+            )
+            .await?;
+        loop {
+            if attachment_event_stream.next().await.is_none() {
+                break;
+            }
+        }
+        assert_eq!(
+            next_event(&mut stream_b, Duration::from_secs(60)).await?,
+            MessageEventKind::CommunityMessageSent {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id,
+            }
+        );
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::CommunityMessageReceived {
+                community_id: community.id(),
+                channel_id: channel.id(),
+                message_id
+            }
+        );
+        let mut download_stream = instance_b
+            .download_stream_from_community_channel_message(
+                community.id(),
+                channel.id(),
+                message_id,
+                file_name,
+            )
+            .await?;
+
+        let mut bytes = vec![];
+        loop {
+            match download_stream.next().await {
+                Some(b) => {
+                    let mut b = b.unwrap().to_vec();
+                    bytes.append(&mut b);
+                }
+                None => break,
+            }
+        }
+        assert_eq!(bytes, file.to_vec());
+
+        let msg = instance_a
+            .get_community_channel_message(community.id(), channel.id(), message_id)
+            .await?;
+        assert_eq!(msg.lines(), &message);
+        assert_eq!(msg.attachments().len(), 1);
         Ok(())
     }
 }
