@@ -1,4 +1,4 @@
-use crate::rt::{Executor, LocalExecutor};
+use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
 use futures::{
     channel::{
         mpsc::{channel, Receiver, Sender},
@@ -7,11 +7,9 @@ use futures::{
     stream::BoxStream,
     SinkExt, StreamExt,
 };
+use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::task::{Poll, Waker};
-use std::{collections::VecDeque, sync::Arc};
-use tokio::select;
-use tokio_util::sync::{CancellationToken, DropGuard};
 use warp::error::Error;
 
 #[allow(clippy::large_enum_variant)]
@@ -27,7 +25,7 @@ enum Command<T: Clone + Debug + Send + 'static> {
 #[derive(Clone, Debug)]
 pub struct EventSubscription<T: Clone + Debug + Send + 'static> {
     tx: Sender<Command<T>>,
-    _task_cancellation: Arc<DropGuard>,
+    _handle: AbortableJoinHandle<()>,
 }
 
 impl<T: Clone + Debug + Send + 'static> EventSubscription<T> {
@@ -43,19 +41,9 @@ impl<T: Clone + Debug + Send + 'static> EventSubscription<T> {
             rx,
         };
 
-        let token = CancellationToken::new();
-        let drop_guard = token.clone().drop_guard();
-        executor.dispatch(async move {
-            select! {
-                _ = token.cancelled() => {}
-                _ = task.run() => {}
-            }
-        });
+        let _handle = executor.spawn_abortable(async move { task.run().await });
 
-        Self {
-            tx,
-            _task_cancellation: Arc::new(drop_guard),
-        }
+        Self { tx, _handle }
     }
 
     pub async fn subscribe<'a>(&self) -> Result<BoxStream<'a, T>, Error> {
