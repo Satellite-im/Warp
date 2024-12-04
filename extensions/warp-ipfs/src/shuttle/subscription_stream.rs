@@ -1,8 +1,6 @@
-use futures::stream::BoxStream;
 use futures::SinkExt;
 use futures::StreamExt;
 use pollable_map::stream::StreamMap;
-use rust_ipfs::libp2p::gossipsub::Message;
 use rust_ipfs::{Ipfs, SubscriptionStream};
 
 use super::store::{identity::IdentityStorage, messages::MessageStorage};

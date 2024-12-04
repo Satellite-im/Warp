@@ -2,19 +2,17 @@ use bytes::Bytes;
 use chrono::Utc;
 use either::Either;
 use futures::channel::oneshot;
-use futures::stream::{BoxStream, FuturesUnordered};
-use futures::{FutureExt, SinkExt, StreamExt, TryFutureExt};
-use futures_timeout::TimeoutExt;
+use futures::stream::BoxStream;
+use futures::{StreamExt, TryFutureExt};
 use futures_timer::Delay;
 use indexmap::{IndexMap, IndexSet};
 use ipld_core::cid::Cid;
-use rust_ipfs::p2p::MultiaddrExt;
 use rust_ipfs::{libp2p::gossipsub::Message, Ipfs};
 use rust_ipfs::{IpfsPath, PeerId, SubscriptionStream};
 use serde::{Deserialize, Serialize};
 use std::borrow::BorrowMut;
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -39,7 +37,7 @@ use warp::{
 };
 use web_time::Instant;
 
-use crate::config;
+// use crate::config;
 // use crate::shuttle::message::client::MessageCommand;
 use crate::store::conversation::message::MessageDocument;
 use crate::store::discovery::Discovery;
@@ -51,7 +49,7 @@ use crate::store::message::attachment::AttachmentStream;
 use crate::store::topics::PeerTopic;
 use crate::store::{
     ecdh_shared_key, verify_serde_sig, ConversationEvents, ConversationImageType,
-    MAX_CONVERSATION_BANNER_SIZE, MAX_CONVERSATION_ICON_SIZE, SHUTTLE_TIMEOUT,
+    MAX_CONVERSATION_BANNER_SIZE, MAX_CONVERSATION_ICON_SIZE,
 };
 use crate::utils::{ByteCollection, ExtensionType};
 use crate::{
@@ -1300,12 +1298,12 @@ impl ConversationTask {
 
         let message = MessageDocument::new(&self.ipfs, keypair, message, keystore.as_ref()).await?;
 
-        let message_cid = self
+        let _message_cid = self
             .document
             .insert_message_document(&self.ipfs, &message)
             .await?;
 
-        let recipients = self.document.recipients();
+        // let recipients = self.document.recipients();
 
         self.set_document().await?;
 
@@ -1408,12 +1406,12 @@ impl ConversationTask {
         let nonce = message_document.nonce_from_message()?;
         let signature = message_document.signature.expect("message to be signed");
 
-        let message_cid = self
+        let _message_cid = self
             .document
             .update_message_document(&self.ipfs, &message_document)
             .await?;
 
-        let recipients = self.document.recipients();
+        // let recipients = self.document.recipients();
 
         self.set_document().await?;
 
@@ -1500,12 +1498,12 @@ impl ConversationTask {
 
         let message_id = message.id;
 
-        let message_cid = self
+        let _message_cid = self
             .document
             .insert_message_document(&self.ipfs, &message)
             .await?;
 
-        let recipients = self.document.recipients();
+        // let recipients = self.document.recipients();
 
         self.set_document().await?;
 
@@ -1625,12 +1623,12 @@ impl ConversationTask {
             .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
             .await?;
 
-        let message_cid = self
+        let _message_cid = self
             .document
             .update_message_document(&self.ipfs, &message_document)
             .await?;
 
-        let recipients = self.document.recipients();
+        // let recipients = self.document.recipients();
 
         self.set_document().await?;
 
@@ -1687,11 +1685,11 @@ impl ConversationTask {
             .resolve(&self.ipfs, keypair, true, keystore.as_ref())
             .await?;
 
-        let recipients = self.document.recipients();
+        // let recipients = self.document.recipients();
 
         let reactions = message.reactions_mut();
 
-        let message_cid;
+        let _message_cid;
 
         match state {
             ReactionState::Add => {
@@ -1716,7 +1714,7 @@ impl ConversationTask {
                     .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
                     .await?;
 
-                message_cid = self
+                _message_cid = self
                     .document
                     .update_message_document(&self.ipfs, &message_document)
                     .await?;
@@ -1750,7 +1748,7 @@ impl ConversationTask {
                     .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
                     .await?;
 
-                message_cid = self
+                _message_cid = self
                     .document
                     .update_message_document(&self.ipfs, &message_document)
                     .await?;
@@ -2440,12 +2438,12 @@ impl ConversationTask {
         let conversation_id = self.conversation_id;
         let message_id = message.id;
 
-        let message_cid = self
+        let _message_cid = self
             .document
             .insert_message_document(&self.ipfs, &message)
             .await?;
 
-        let recipients = self.document.recipients();
+        // let recipients = self.document.recipients();
 
         self.set_document().await?;
 

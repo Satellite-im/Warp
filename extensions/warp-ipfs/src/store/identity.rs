@@ -6,10 +6,7 @@ use std::{
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use futures::{
-    channel::oneshot::{self, Canceled},
-    SinkExt, StreamExt,
-};
+use futures::{channel::oneshot, StreamExt};
 use futures_timeout::TimeoutExt;
 use futures_timer::Delay;
 use indexmap::IndexMap;
@@ -53,10 +50,8 @@ use super::{
     queue::Queue,
     topics::IDENTITY_ANNOUNCEMENT,
     MAX_IMAGE_SIZE, MAX_METADATA_ENTRIES, MAX_METADATA_KEY_LENGTH, MAX_METADATA_VALUE_LENGTH,
-    SHUTTLE_TIMEOUT,
 };
 use crate::rt::{Executor, LocalExecutor};
-use crate::shuttle::identity::protocol::Request::Synchronized;
 use crate::shuttle::identity::protocol::{
     LookupResponse, MailboxResponse, RegisterResponse, Response, SynchronizedResponse,
 };
@@ -2131,6 +2126,21 @@ impl IdentityStore {
                             continue;
                         }
                     };
+
+                match payload.message() {
+                    Response::MailboxResponse(MailboxResponse::Sent) => {}
+                    Response::InvalidPayload => {
+                        tracing::error!(%peer_id, "request was invalid");
+                        continue;
+                    }
+                    Response::Error(e) => {
+                        tracing::error!(error = %e, %peer_id, "error handling request");
+                    }
+                    _ => {
+                        tracing::error!(%peer_id, "response from shuttle node was invalid");
+                        continue;
+                    }
+                }
             }
         }
         Ok(())

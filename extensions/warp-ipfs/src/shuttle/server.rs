@@ -1,17 +1,11 @@
 use bytes::Bytes;
 use futures::channel::oneshot;
 use futures::stream::BoxStream;
-use futures::{
-    channel::mpsc, future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt, TryStreamExt,
-};
+use futures::{future::BoxFuture, FutureExt, StreamExt};
 use pollable_map::futures::ordered::OrderedFutureSet;
-use pollable_map::futures::FutureMap;
 use pollable_map::stream::StreamMap;
 use rust_ipfs::{
-    libp2p::{
-        request_response::{InboundRequestId, ResponseChannel},
-        swarm::behaviour::toggle::Toggle,
-    },
+    libp2p::swarm::behaviour::toggle::Toggle,
     p2p::{IdentifyConfiguration, RelayConfig, TransportConfig},
     FDLimit, Ipfs, IpfsPath, Keypair, Multiaddr, NetworkBehaviour, PeerId, UninitializedIpfs,
 };
@@ -21,7 +15,7 @@ use std::task::{Context, Poll};
 use std::{path::Path, time::Duration};
 use warp::error::{Error as WarpError, Error};
 
-use crate::shuttle::identity::protocol::RegisterError;
+// use crate::shuttle::identity::protocol::RegisterError;
 use crate::store::{
     document::identity::IdentityDocument,
     payload::{PayloadBuilder, PayloadMessage},
@@ -29,10 +23,9 @@ use crate::store::{
     topics::PeerTopic,
     PeerIdExt,
 };
-use rust_ipfs::libp2p::StreamProtocol;
 use rust_ipfs::p2p::RequestResponseConfig;
 use rust_ipfs::{
-    libp2p::{self, core::PeerRecord},
+    libp2p::{self},
     p2p::PubsubConfig,
 };
 use tokio::task::JoinHandle;
@@ -41,7 +34,7 @@ use super::{
     identity::{
         self,
         protocol::{
-            payload_message_construct, Lookup, LookupResponse, Message, Register, RegisterResponse,
+            payload_message_construct, Lookup, LookupResponse, Register, RegisterResponse,
             Response, Synchronized, SynchronizedError, SynchronizedResponse,
         },
     },

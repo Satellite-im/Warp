@@ -2,23 +2,20 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use either::Either;
 use futures::channel::oneshot;
-use futures::stream::{BoxStream, FuturesUnordered};
-use futures::{FutureExt, SinkExt, StreamExt, TryFutureExt};
-use futures_timeout::TimeoutExt;
+use futures::stream::BoxStream;
+use futures::{StreamExt, TryFutureExt};
 use futures_timer::Delay;
 use indexmap::{IndexMap, IndexSet};
 use ipld_core::cid::Cid;
 use rust_ipfs::libp2p::gossipsub::Message;
-use rust_ipfs::p2p::MultiaddrExt;
 use rust_ipfs::Ipfs;
 use rust_ipfs::{PeerId, SubscriptionStream};
 use serde::{Deserialize, Serialize};
 use std::borrow::BorrowMut;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::str::FromStr;
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 use uuid::Uuid;
@@ -40,7 +37,6 @@ use warp::{
 };
 use web_time::Instant;
 
-use crate::config;
 use crate::store::community::{
     CommunityChannelDocument, CommunityDocument, CommunityInviteDocument, CommunityRoleDocument,
 };
@@ -51,7 +47,7 @@ use crate::store::event_subscription::EventSubscription;
 use crate::store::topics::PeerTopic;
 use crate::store::{
     CommunityUpdateKind, ConversationEvents, MAX_COMMUNITY_CHANNELS, MAX_COMMUNITY_DESCRIPTION,
-    MAX_MESSAGE_SIZE, MAX_REACTIONS, MIN_MESSAGE_SIZE, SHUTTLE_TIMEOUT,
+    MAX_MESSAGE_SIZE, MAX_REACTIONS, MIN_MESSAGE_SIZE,
 };
 use crate::{
     // rt::LocalExecutor,
@@ -2691,11 +2687,11 @@ impl CommunityTask {
             None => return Err(Error::CommunityChannelDoesntExist),
         };
 
-        let message_cid = channel
+        let _message_cid = channel
             .insert_message_document(&self.ipfs, &message)
             .await?;
 
-        let recipients = self.document.participants();
+        // let recipients = self.document.participants();
 
         self.set_document().await?;
 
@@ -2814,11 +2810,11 @@ impl CommunityTask {
         let nonce = message_document.nonce_from_message()?;
         let signature = message_document.signature.expect("message to be signed");
 
-        let message_cid = channel
+        let _message_cid = channel
             .update_message_document(&self.ipfs, &message_document)
             .await?;
 
-        let recipients = self.document.participants();
+        // let recipients = self.document.participants();
 
         self.set_document().await?;
 
@@ -2921,11 +2917,11 @@ impl CommunityTask {
             None => return Err(Error::CommunityChannelDoesntExist),
         };
 
-        let message_cid = channel
+        let _message_cid = channel
             .insert_message_document(&self.ipfs, &message)
             .await?;
 
-        let recipients = self.document.participants();
+        // let recipients = self.document.participants();
 
         self.set_document().await?;
 
@@ -3080,11 +3076,11 @@ impl CommunityTask {
             .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
             .await?;
 
-        let message_cid = channel
+        let _message_cid = channel
             .update_message_document(&self.ipfs, &message_document)
             .await?;
 
-        let recipients = self.document.participants();
+        // let recipients = self.document.participants();
 
         self.set_document().await?;
 
@@ -3142,7 +3138,7 @@ impl CommunityTask {
 
         let keystore = pubkey_or_keystore(&*self)?;
 
-        let recipients = self.document.participants();
+        // let recipients = self.document.participants();
 
         let channel = match self.document.channels.get_mut(&channel_id.to_string()) {
             Some(c) => c,
@@ -3241,6 +3237,8 @@ impl CommunityTask {
             emoji,
         };
 
+        _ = message_cid;
+
         // if !recipients.is_empty() {
         //     if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
         //         for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
@@ -3334,11 +3332,11 @@ impl CommunityTask {
             None => return Err(Error::CommunityChannelDoesntExist),
         };
 
-        let message_cid = channel
+        let _message_cid = channel
             .insert_message_document(&self.ipfs, &message)
             .await?;
 
-        let recipients = self.document.participants().clone();
+        // let recipients = self.document.participants().clone();
 
         self.set_document().await?;
 
