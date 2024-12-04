@@ -29,7 +29,6 @@ use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, PeerId};
 
 use serde::{Deserialize, Serialize};
-use tokio_util::sync::{CancellationToken, DropGuard};
 use uuid::Uuid;
 
 use super::{document::root::RootDocumentMap, ds_key::DataStoreKey, PeerIdExt};
@@ -76,7 +75,7 @@ pub type DownloadStream = BoxStream<'static, Result<Bytes, std::io::Error>>;
 #[derive(Clone)]
 pub struct MessageStore {
     inner: Arc<tokio::sync::RwLock<ConversationInner>>,
-    _task_cancellation: Arc<DropGuard>,
+    _handle: AbortableJoinHandle<()>,
 }
 
 impl MessageStore {
@@ -89,9 +88,6 @@ impl MessageStore {
     ) -> Self {
         let executor = LocalExecutor;
         tracing::info!("Initializing MessageStore");
-
-        let token = CancellationToken::new();
-        let drop_guard = token.clone().drop_guard();
 
         let root = identity.root_document().clone();
 
@@ -122,19 +118,9 @@ impl MessageStore {
             identity: identity.clone(),
         };
 
-        executor.dispatch({
-            async move {
-                tokio::select! {
-                    _ = token.cancelled() => {}
-                    _ = task.run() => {}
-                }
-            }
-        });
+        let _handle = executor.spawn_abortable(task.run());
 
-        Self {
-            inner,
-            _task_cancellation: Arc::new(drop_guard),
-        }
+        Self { inner, _handle }
     }
 }
 

@@ -15,7 +15,6 @@ use futures_finally::try_stream::FinallyTryStreamExt;
 
 use rust_ipfs::{unixfs::UnixfsStatus, Ipfs, IpfsPath};
 
-use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{Instrument, Span};
 use warp::{
     constellation::{
@@ -31,7 +30,7 @@ use super::{
     document::root::RootDocumentMap, event_subscription::EventSubscription,
     MAX_THUMBNAIL_STREAM_SIZE,
 };
-use crate::rt::{Executor, LocalExecutor};
+use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
 use crate::{
     config::{self, Config},
     thumbnail::ThumbnailGenerator,
@@ -44,7 +43,7 @@ pub struct FileStore {
     path: Arc<RwLock<PathBuf>>,
     config: config::Config,
     command_sender: mpsc::Sender<FileTaskCommand>,
-    _guard: Arc<DropGuard>,
+    _handle: AbortableJoinHandle<()>,
 }
 
 impl FileStore {
@@ -55,6 +54,7 @@ impl FileStore {
         constellation_tx: EventSubscription<ConstellationEventKind>,
         span: &Span,
     ) -> Self {
+        let executor = LocalExecutor;
         let config = config.clone();
 
         let index = Directory::new("root");
@@ -92,24 +92,16 @@ impl FileStore {
         let signal = Some(task.signal_tx.clone());
         index.rebuild_paths(&signal);
 
-        let token = CancellationToken::new();
-        let _guard = Arc::new(token.clone().drop_guard());
-
         let span = span.clone();
 
-        LocalExecutor.dispatch(async move {
-            tokio::select! {
-                _ = task.run().instrument(span) => {}
-                _ = token.cancelled() => {}
-            }
-        });
+        let _handle = executor.spawn_abortable(async move { task.run().await }.instrument(span));
 
         FileStore {
             index,
             config,
             path,
             command_sender,
-            _guard,
+            _handle,
         }
     }
 }
