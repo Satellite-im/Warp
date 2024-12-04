@@ -535,7 +535,7 @@ impl WarpIpfs {
                 };
 
                 if let Err(_e) = ipfs.add_peer((peer_id, addr)).await {
-                    println!("{_e}");
+                    // TODO:
                     continue;
                 }
 
@@ -544,7 +544,7 @@ impl WarpIpfs {
 
             for node in nodes {
                 if let Err(_e) = ipfs.connect(node).await {
-                    println!("{_e}");
+                    // TODO
                 }
             }
         }

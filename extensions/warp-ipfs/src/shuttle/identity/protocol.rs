@@ -1,6 +1,6 @@
 use ipld_core::cid::Cid;
 use rust_ipfs::Keypair;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use warp::{crypto::DID, multipass::identity::ShortId};
 
 use crate::store::{
@@ -10,38 +10,17 @@ use crate::store::{
 
 use super::RequestPayload;
 
-pub fn payload_message_construct(
+pub fn payload_message_construct<T: Serialize + DeserializeOwned + Clone>(
     keypair: &Keypair,
     cosigner: Option<&Keypair>,
-    message: impl Into<Message>,
-) -> Result<PayloadMessage<Message>, anyhow::Error> {
-    let message = message.into();
+    message: T,
+) -> Result<PayloadMessage<T>, anyhow::Error> {
     let mut payload = PayloadBuilder::new(keypair, message);
     if let Some(cosigner) = cosigner {
         payload = payload.cosign(cosigner);
     }
     let payload = payload.build()?;
     Ok(payload)
-}
-
-#[allow(clippy::large_enum_variant)]
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "type")]
-pub enum Message {
-    Request(Request),
-    Response(Response),
-}
-
-impl From<Request> for Message {
-    fn from(req: Request) -> Self {
-        Message::Request(req)
-    }
-}
-
-impl From<Response> for Message {
-    fn from(res: Response) -> Self {
-        Message::Response(res)
-    }
 }
 
 #[allow(clippy::large_enum_variant)]
