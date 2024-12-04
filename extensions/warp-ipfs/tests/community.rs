@@ -4876,16 +4876,13 @@ mod test {
             )
             .await?;
 
-        let mut bytes = vec![];
-        loop {
-            match download_stream.next().await {
-                Some(b) => {
-                    let mut b = b.unwrap().to_vec();
-                    bytes.append(&mut b);
-                }
-                None => break,
-            }
+        let mut bytes = Vec::with_capacity(file.len());
+
+        while let Some(result) = download_stream.next().await {
+            let b = result.expect("valid");
+            bytes.extend(b.to_vec());
         }
+
         assert_eq!(bytes, file.to_vec());
 
         let msg = instance_a
