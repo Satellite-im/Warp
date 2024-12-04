@@ -7,10 +7,7 @@ use warp::crypto::DID;
 
 use crate::store::document::identity::IdentityDocument;
 
-pub mod client;
 pub mod protocol;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod server;
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct IdentityDag {

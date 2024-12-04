@@ -118,6 +118,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         opts.enable_relay_server,
         false,
         &opts.listen_addr,
+        &[],
         true,
     )
     .await?;

@@ -22,7 +22,6 @@ use tokio::sync::RwLock;
 use tracing::Span;
 use web_time::Instant;
 
-use crate::shuttle::identity::client::IdentityCommand;
 use crate::shuttle::identity::{RequestEvent, RequestPayload};
 use warp::multipass::identity::{FriendRequest, Identifier, ShortId};
 use warp::multipass::GetIdentity;
@@ -50,12 +49,17 @@ use super::{
     event_subscription::EventSubscription,
     payload::PayloadMessage,
     phonebook::PhoneBook,
+    protocols,
     queue::Queue,
     topics::IDENTITY_ANNOUNCEMENT,
     MAX_IMAGE_SIZE, MAX_METADATA_ENTRIES, MAX_METADATA_KEY_LENGTH, MAX_METADATA_VALUE_LENGTH,
     SHUTTLE_TIMEOUT,
 };
 use crate::rt::{Executor, LocalExecutor};
+use crate::shuttle::identity::protocol::Request::Synchronized;
+use crate::shuttle::identity::protocol::{
+    LookupResponse, MailboxResponse, RegisterResponse, Response, SynchronizedResponse,
+};
 use crate::{
     config::{self, Discovery as DiscoveryConfig},
     store::{discovery::Discovery, topics::PeerTopic, DidExt, PeerIdExt},
@@ -85,8 +89,6 @@ pub struct IdentityStore {
     discovery: Discovery,
 
     config: config::Config,
-
-    identity_command: futures::channel::mpsc::Sender<IdentityCommand>,
 
     span: Span,
 
@@ -375,7 +377,6 @@ impl IdentityStore {
         tx: EventSubscription<MultiPassEventKind>,
         phonebook: &PhoneBook,
         discovery: &Discovery,
-        identity_command: futures::channel::mpsc::Sender<IdentityCommand>,
         span: &Span,
     ) -> Result<Self, Error> {
         let config = config.clone();
@@ -402,7 +403,6 @@ impl IdentityStore {
             discovery: discovery.clone(),
             config,
             event,
-            identity_command,
             did_key,
             queue,
             phonebook: phonebook.clone(),
@@ -1775,31 +1775,55 @@ impl IdentityStore {
 
     pub async fn import_identity_remote(&mut self) -> Result<Cid, Error> {
         if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
-            for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                let (tx, rx) = futures::channel::oneshot::channel();
-                let _ = self
-                    .identity_command
-                    .clone()
-                    .send(IdentityCommand::Fetch {
-                        peer_id,
-                        response: tx,
-                    })
-                    .await;
+            if addresses.is_empty() {
+                return Err(Error::Other);
+            }
 
-                match rx.timeout(SHUTTLE_TIMEOUT).await {
-                    Ok(Ok(Ok(package))) => {
-                        return Ok(package);
-                    }
-                    Ok(Ok(Err(e))) => {
-                        tracing::error!("Error importing from {peer_id}: {e}");
-                        break;
-                    }
-                    Ok(Err(Canceled)) => {
-                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
+            let payload = PayloadBuilder::new(
+                self.root_document.keypair(),
+                crate::shuttle::identity::protocol::Request::from(
+                    crate::shuttle::identity::protocol::Synchronized::Fetch,
+                ),
+            )
+            .build()?;
+
+            let bytes = payload.to_bytes().expect("valid deserialization");
+
+            for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                let response = match self
+                    .ipfs
+                    .send_request(peer_id, (protocols::SHUTTLE_IDENTITY, bytes.clone()))
+                    .await
+                {
+                    Ok(response) => response,
+                    Err(e) => {
+                        tracing::warn!(error = %e, %peer_id, "unable to send request to shuttle node");
                         continue;
                     }
-                    Err(_) => {
-                        tracing::error!("Request timeout for {peer_id}");
+                };
+
+                let payload: PayloadMessage<crate::shuttle::identity::protocol::Response> =
+                    match PayloadMessage::from_bytes(&response) {
+                        Ok(payload) => payload,
+                        Err(e) => {
+                            tracing::error!(error = %e, %peer_id, "unable to process payload");
+                            continue;
+                        }
+                    };
+
+                match payload.message() {
+                    Response::SynchronizedResponse(SynchronizedResponse::Package(cid)) => {
+                        return Ok(*cid)
+                    }
+                    Response::InvalidPayload => {
+                        tracing::error!(%peer_id, "request was invalid");
+                        continue;
+                    }
+                    Response::Error(e) => {
+                        tracing::error!(error = %e, %peer_id, "error handling request");
+                    }
+                    _ => {
+                        tracing::error!(%peer_id, "response from shuttle node was invalid");
                         continue;
                     }
                 }
@@ -1810,14 +1834,57 @@ impl IdentityStore {
 
     pub async fn export_root_document(&self) -> Result<(), Error> {
         let package = self.root_document.export_root_cid().await?;
+        let ipfs = self.ipfs.clone();
 
         if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
+            if addresses.is_empty() {
+                return Err(Error::Other);
+            }
+
+            let payload = PayloadBuilder::new(
+                self.root_document.keypair(),
+                crate::shuttle::identity::protocol::Request::from(
+                    crate::shuttle::identity::protocol::Synchronized::Store { package },
+                ),
+            )
+            .build()?;
+
+            let bytes = payload.to_bytes().expect("valid deserialization");
+
             for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                let _ = self
-                    .identity_command
-                    .clone()
-                    .send(IdentityCommand::UpdateRootDocument { peer_id, package })
-                    .await;
+                let response = match ipfs
+                    .send_request(peer_id, (protocols::SHUTTLE_IDENTITY, bytes.clone()))
+                    .await
+                {
+                    Ok(response) => response,
+                    Err(e) => {
+                        tracing::warn!(error = %e, %peer_id, "unable to send request to shuttle node");
+                        continue;
+                    }
+                };
+
+                let payload: PayloadMessage<crate::shuttle::identity::protocol::Response> =
+                    match PayloadMessage::from_bytes(&response) {
+                        Ok(payload) => payload,
+                        Err(e) => {
+                            tracing::error!(error = %e, %peer_id, "unable to process payload");
+                            continue;
+                        }
+                    };
+
+                match payload.message() {
+                    Response::InvalidPayload => {
+                        tracing::error!(%peer_id, "request was invalid");
+                        continue;
+                    }
+                    Response::Error(e) => {
+                        tracing::error!(error = %e, %peer_id, "error handling request");
+                    }
+                    _ => {
+                        tracing::error!(%peer_id, "response from shuttle node was invalid");
+                        continue;
+                    }
+                }
             }
         }
         Ok(())
@@ -1825,29 +1892,53 @@ impl IdentityStore {
 
     async fn is_registered(&self) -> Result<(), Error> {
         if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
-            for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                let (tx, rx) = futures::channel::oneshot::channel();
-                let _ = self
-                    .identity_command
-                    .clone()
-                    .send(IdentityCommand::IsRegistered {
-                        peer_id,
-                        response: tx,
-                    })
-                    .await;
+            if addresses.is_empty() {
+                return Err(Error::Other);
+            }
 
-                match rx.timeout(SHUTTLE_TIMEOUT).await {
-                    Ok(Ok(Ok(_))) => return Ok(()),
-                    Ok(Ok(Err(e))) => {
-                        tracing::error!("Identity is not registered: {e}");
-                        return Err(e);
-                    }
-                    Ok(Err(Canceled)) => {
-                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
+            let payload = PayloadBuilder::new(
+                self.root_document.keypair(),
+                crate::shuttle::identity::protocol::Request::from(
+                    crate::shuttle::identity::protocol::Register::IsRegistered,
+                ),
+            )
+            .build()?;
+
+            let bytes = payload.to_bytes().expect("valid deserialization");
+
+            for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                let response = match self
+                    .ipfs
+                    .send_request(peer_id, (protocols::SHUTTLE_IDENTITY, bytes.clone()))
+                    .await
+                {
+                    Ok(response) => response,
+                    Err(e) => {
+                        tracing::warn!(error = %e, %peer_id, "unable to send request to shuttle node");
                         continue;
                     }
-                    Err(_) => {
-                        tracing::error!("Request timeout for {peer_id}");
+                };
+
+                let payload: PayloadMessage<crate::shuttle::identity::protocol::Response> =
+                    match PayloadMessage::from_bytes(&response) {
+                        Ok(payload) => payload,
+                        Err(e) => {
+                            tracing::error!(error = %e, %peer_id, "unable to process payload");
+                            continue;
+                        }
+                    };
+
+                match payload.message() {
+                    Response::RegisterResponse(RegisterResponse::Ok) => return Ok(()),
+                    Response::InvalidPayload => {
+                        tracing::error!(%peer_id, "request was invalid");
+                        continue;
+                    }
+                    Response::Error(e) => {
+                        tracing::error!(error = %e, %peer_id, "error handling request");
+                    }
+                    _ => {
+                        tracing::error!(%peer_id, "response from shuttle node was invalid");
                         continue;
                     }
                 }
@@ -1858,58 +1949,104 @@ impl IdentityStore {
     }
 
     async fn register(&self) -> Result<(), Error> {
-        let root_cid = self.root_document.export_root_cid().await?;
         if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
-            for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                let (tx, rx) = futures::channel::oneshot::channel();
-                let _ = self
-                    .identity_command
-                    .clone()
-                    .send(IdentityCommand::Register {
-                        peer_id,
-                        root_cid,
-                        response: tx,
-                    })
-                    .await;
+            if addresses.is_empty() {
+                return Err(Error::Other);
+            }
 
-                match rx.timeout(SHUTTLE_TIMEOUT).await {
-                    Ok(Ok(Ok(_))) => {
-                        break;
-                    }
-                    Ok(Ok(Err(e))) => {
-                        tracing::error!("Error registering identity to {peer_id}: {e}");
-                        break;
-                    }
-                    Ok(Err(Canceled)) => {
-                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
+            let root_cid = self.root_document.export_root_cid().await?;
+
+            let payload = PayloadBuilder::new(
+                self.root_document.keypair(),
+                crate::shuttle::identity::protocol::Request::from(
+                    crate::shuttle::identity::protocol::Register::RegisterIdentity { root_cid },
+                ),
+            )
+            .build()?;
+
+            let bytes = payload.to_bytes().expect("valid deserialization");
+
+            for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                let response = match self
+                    .ipfs
+                    .send_request(peer_id, (protocols::SHUTTLE_IDENTITY, bytes.clone()))
+                    .await
+                {
+                    Ok(response) => response,
+                    Err(e) => {
+                        tracing::warn!(error = %e, %peer_id, "unable to send request to shuttle node");
                         continue;
                     }
-                    Err(_) => {
-                        tracing::error!("Request timeout for {peer_id}");
+                };
+
+                let payload: PayloadMessage<crate::shuttle::identity::protocol::Response> =
+                    match PayloadMessage::from_bytes(&response) {
+                        Ok(payload) => payload,
+                        Err(e) => {
+                            tracing::error!(error = %e, %peer_id, "unable to process payload");
+                            continue;
+                        }
+                    };
+
+                match payload.message() {
+                    Response::RegisterResponse(RegisterResponse::Ok) => return Ok(()),
+                    Response::InvalidPayload => {
+                        tracing::error!(%peer_id, "request was invalid");
+                        continue;
+                    }
+                    Response::Error(e) => {
+                        tracing::error!(error = %e, %peer_id, "error handling request");
+                    }
+                    _ => {
+                        tracing::error!(%peer_id, "response from shuttle node was invalid");
                         continue;
                     }
                 }
             }
         }
-
         Ok(())
     }
 
     async fn fetch_mailbox(&mut self) -> Result<(), Error> {
         if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
-            for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                let (tx, rx) = futures::channel::oneshot::channel();
-                let _ = self
-                    .identity_command
-                    .clone()
-                    .send(IdentityCommand::FetchAllRequests {
-                        peer_id,
-                        response: tx,
-                    })
-                    .await;
+            if addresses.is_empty() {
+                return Err(Error::Other);
+            }
 
-                match rx.timeout(SHUTTLE_TIMEOUT).await {
-                    Ok(Ok(Ok(list))) => {
+            let payload = PayloadBuilder::new(
+                self.root_document.keypair(),
+                crate::shuttle::identity::protocol::Request::from(
+                    crate::shuttle::identity::protocol::Mailbox::FetchAll,
+                ),
+            )
+            .build()?;
+
+            let bytes = payload.to_bytes().expect("valid deserialization");
+
+            for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+                let response = match self
+                    .ipfs
+                    .send_request(peer_id, (protocols::SHUTTLE_IDENTITY, bytes.clone()))
+                    .await
+                {
+                    Ok(response) => response,
+                    Err(e) => {
+                        tracing::warn!(error = %e, %peer_id, "unable to send request to shuttle node");
+                        continue;
+                    }
+                };
+
+                let payload: PayloadMessage<crate::shuttle::identity::protocol::Response> =
+                    match PayloadMessage::from_bytes(&response) {
+                        Ok(payload) => payload,
+                        Err(e) => {
+                            tracing::error!(error = %e, %peer_id, "unable to process payload");
+                            continue;
+                        }
+                    };
+
+                match payload.message() {
+                    Response::MailboxResponse(MailboxResponse::Receive { list, .. }) => {
                         let list = list
                             .iter()
                             .cloned()
@@ -1925,16 +2062,17 @@ impl IdentityStore {
                                 continue;
                             }
                         }
-
                         return Ok(());
                     }
-                    Ok(Ok(Err(e))) => return Err(e),
-                    Ok(Err(Canceled)) => {
-                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
+                    Response::InvalidPayload => {
+                        tracing::error!(%peer_id, "request was invalid");
                         continue;
                     }
-                    Err(_) => {
-                        tracing::error!("Request timeout for {peer_id}");
+                    Response::Error(e) => {
+                        tracing::error!(error = %e, %peer_id, "error handling request");
+                    }
+                    _ => {
+                        tracing::error!(%peer_id, "response from shuttle node was invalid");
                         continue;
                     }
                 }
@@ -1955,16 +2093,44 @@ impl IdentityStore {
                 .sign(self.root_document().keypair())
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
 
+            if addresses.is_empty() {
+                return Err(Error::Other);
+            }
+
+            let payload = PayloadBuilder::new(
+                self.root_document.keypair(),
+                crate::shuttle::identity::protocol::Request::from(
+                    crate::shuttle::identity::protocol::Mailbox::Send {
+                        did: did.clone(),
+                        request,
+                    },
+                ),
+            )
+            .build()?;
+
+            let bytes = payload.to_bytes().expect("valid deserialization");
+
             for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                let _ = self
-                    .identity_command
-                    .clone()
-                    .send(IdentityCommand::SendRequest {
-                        peer_id,
-                        to: did.clone(),
-                        request: request.clone(),
-                    })
-                    .await;
+                let response = match self
+                    .ipfs
+                    .send_request(peer_id, (protocols::SHUTTLE_IDENTITY, bytes.clone()))
+                    .await
+                {
+                    Ok(response) => response,
+                    Err(e) => {
+                        tracing::warn!(error = %e, %peer_id, "unable to send request to shuttle node");
+                        continue;
+                    }
+                };
+
+                let payload: PayloadMessage<crate::shuttle::identity::protocol::Response> =
+                    match PayloadMessage::from_bytes(&response) {
+                        Ok(payload) => payload,
+                        Err(e) => {
+                            tracing::error!(error = %e, %peer_id, "unable to process payload");
+                            continue;
+                        }
+                    };
             }
         }
         Ok(())
@@ -2102,25 +2268,49 @@ impl IdentityStore {
                     }
                 };
                 if let DiscoveryConfig::Shuttle { addresses } = store.discovery.discovery_config() {
-                    for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                        let (tx, rx) = futures::channel::oneshot::channel();
-                        let _ = store
-                            .identity_command
-                            .clone()
-                            .send(IdentityCommand::Lookup {
-                                peer_id,
-                                kind: kind.clone(),
-                                response: tx,
-                            })
-                            .await;
+                    if addresses.is_empty() {
+                        return;
+                    }
 
-                        match rx.timeout(SHUTTLE_TIMEOUT).await {
-                            Ok(Ok(Ok(list))) => {
-                                for ident in &list {
+                    let payload = PayloadBuilder::new(
+                        store.root_document.keypair(),
+                        crate::shuttle::identity::protocol::Request::from(kind)
+                    )
+                    .build()
+                    .expect("valid payload construction");
+
+                    let bytes = payload.to_bytes().expect("valid deserialization");
+
+                    for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+
+                        let response = match store
+                            .ipfs
+                            .send_request(peer_id, (protocols::SHUTTLE_IDENTITY, bytes.clone()))
+                            .await
+                        {
+                            Ok(response) => response,
+                            Err(e) => {
+                                tracing::warn!(error = %e, %peer_id, "unable to send request to shuttle node");
+                                continue;
+                            }
+                        };
+
+                        let payload: PayloadMessage<crate::shuttle::identity::protocol::Response> =
+                            match PayloadMessage::from_bytes(&response) {
+                                Ok(payload) => payload,
+                                Err(e) => {
+                                    tracing::error!(error = %e, %peer_id, "unable to process payload");
+                                    continue;
+                                }
+                            };
+
+                        match payload.message() {
+                            Response::LookupResponse(LookupResponse::Ok { identity }) => {
+                                for ident in identity {
                                     let ident = ident.clone();
                                     let did = ident.did.clone();
 
-                                  let _ = store.identity_cache.insert(&ident).await;
+                                    let _ = store.identity_cache.insert(&ident).await;
 
                                     yield resolve_identity(&store, ident).await;
 
@@ -2131,17 +2321,16 @@ impl IdentityStore {
                                 }
 
                                 break;
-                            }
-                            Ok(Ok(Err(e))) => {
-                               tracing::error!("Error registering identity to {peer_id}: {e}");
-                                break;
-                            }
-                            Ok(Err(Canceled)) => {
-                               tracing::error!("Channel been unexpectedly closed for {peer_id}");
+                            },
+                            Response::InvalidPayload => {
+                                tracing::error!(%peer_id, "request was invalid");
                                 continue;
                             }
-                            Err(_) => {
-                               tracing::error!("Request timed out for {peer_id}");
+                            Response::Error(e) => {
+                                tracing::error!(error = %e, %peer_id, "error handling request");
+                            }
+                            _ => {
+                                tracing::error!(%peer_id, "response from shuttle node was invalid");
                                 continue;
                             }
                         }

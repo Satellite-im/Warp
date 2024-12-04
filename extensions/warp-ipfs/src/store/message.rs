@@ -33,22 +33,19 @@ use tokio_util::sync::{CancellationToken, DropGuard};
 use uuid::Uuid;
 
 use super::{document::root::RootDocumentMap, ds_key::DataStoreKey, PeerIdExt};
-use crate::{
-    shuttle::message::client::MessageCommand,
-    store::{
-        conversation::ConversationDocument,
-        discovery::Discovery,
-        ecdh_decrypt, ecdh_encrypt,
-        event_subscription::EventSubscription,
-        files::FileStore,
-        generate_shared_topic,
-        identity::IdentityStore,
-        keystore::Keystore,
-        payload::{PayloadBuilder, PayloadMessage},
-        sign_serde,
-        topics::PeerTopic,
-        ConversationEvents, ConversationRequestKind, ConversationRequestResponse, DidExt,
-    },
+use crate::store::{
+    conversation::ConversationDocument,
+    discovery::Discovery,
+    ecdh_decrypt, ecdh_encrypt,
+    event_subscription::EventSubscription,
+    files::FileStore,
+    generate_shared_topic,
+    identity::IdentityStore,
+    keystore::Keystore,
+    payload::{PayloadBuilder, PayloadMessage},
+    sign_serde,
+    topics::PeerTopic,
+    ConversationEvents, ConversationRequestKind, ConversationRequestResponse, DidExt,
 };
 
 use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
@@ -89,7 +86,6 @@ impl MessageStore {
         file: &FileStore,
         event: EventSubscription<RayGunEventKind>,
         identity: &IdentityStore,
-        message_command: mpsc::Sender<MessageCommand>,
     ) -> Self {
         let executor = LocalExecutor;
         tracing::info!("Initializing MessageStore");
@@ -108,7 +104,6 @@ impl MessageStore {
             discovery,
             file: file.clone(),
             event,
-            message_command,
             queue: Default::default(),
             executor,
         };
@@ -2140,7 +2135,6 @@ struct ConversationInner {
     identity: IdentityStore,
     discovery: Discovery,
 
-    message_command: mpsc::Sender<MessageCommand>,
     // Note: Temporary
     queue: HashMap<DID, Vec<Queue>>,
     executor: LocalExecutor,
@@ -2204,7 +2198,6 @@ impl ConversationInner {
             &self.file,
             &self.discovery,
             crx,
-            self.message_command.clone(),
             self.event.clone(),
         )
         .await?;
@@ -2895,7 +2888,6 @@ impl ConversationInner {
             &self.file,
             &self.discovery,
             crx,
-            self.message_command.clone(),
             self.event.clone(),
         )
         .await?;

@@ -86,6 +86,7 @@ pub enum Response {
     MailboxResponse(MailboxResponse),
     LookupResponse(LookupResponse),
     Ack,
+    InvalidPayload,
     Error(String),
 }
 

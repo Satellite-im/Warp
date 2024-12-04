@@ -1,29 +1,41 @@
-use std::{path::Path, time::Duration};
-
-use futures::{channel::mpsc, future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
+use bytes::Bytes;
+use futures::channel::oneshot;
+use futures::stream::BoxStream;
+use futures::{
+    channel::mpsc, future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt, TryStreamExt,
+};
+use pollable_map::futures::ordered::OrderedFutureSet;
+use pollable_map::futures::FutureMap;
+use pollable_map::stream::StreamMap;
 use rust_ipfs::{
     libp2p::{
         request_response::{InboundRequestId, ResponseChannel},
         swarm::behaviour::toggle::Toggle,
     },
     p2p::{IdentifyConfiguration, RelayConfig, TransportConfig},
-    FDLimit, Ipfs, IpfsPath, Keypair, Multiaddr, NetworkBehaviour, UninitializedIpfs,
+    FDLimit, Ipfs, IpfsPath, Keypair, Multiaddr, NetworkBehaviour, PeerId, UninitializedIpfs,
 };
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::{path::Path, time::Duration};
+use warp::error::{Error as WarpError, Error};
 
-use warp::error::Error as WarpError;
-
+use crate::shuttle::identity::protocol::RegisterError;
+use crate::store::{
+    document::identity::IdentityDocument,
+    payload::{PayloadBuilder, PayloadMessage},
+    protocols,
+    topics::PeerTopic,
+    PeerIdExt,
+};
+use rust_ipfs::libp2p::StreamProtocol;
+use rust_ipfs::p2p::RequestResponseConfig;
 use rust_ipfs::{
     libp2p::{self, core::PeerRecord},
     p2p::PubsubConfig,
 };
 use tokio::task::JoinHandle;
-
-use crate::store::{
-    document::identity::IdentityDocument,
-    payload::{PayloadBuilder, PayloadMessage},
-    topics::PeerTopic,
-    PeerIdExt,
-};
 
 use super::{
     identity::{
@@ -40,32 +52,16 @@ use super::{
     subscription_stream::Subscriptions,
 };
 
-type OntshotSender<T> = futures::channel::oneshot::Sender<T>;
-type IdentityMessage = identity::protocol::Message;
+type OneshotSender<T> = oneshot::Sender<T>;
+type IdentityMessage = identity::protocol::Request;
 type IdentityPayload = PayloadMessage<IdentityMessage>;
 
-type MessageProtocol = message::protocol::Message;
+type MessageProtocol = message::protocol::Request;
 type MessagePayload = PayloadMessage<MessageProtocol>;
-
-type IdentityReceiver = (
-    InboundRequestId,
-    Option<ResponseChannel<IdentityPayload>>,
-    IdentityPayload,
-    Option<OntshotSender<(ResponseChannel<IdentityPayload>, IdentityPayload)>>,
-);
-
-type MessageReceiver = (
-    InboundRequestId,
-    Option<ResponseChannel<MessagePayload>>,
-    PayloadMessage<MessageProtocol>,
-    Option<OntshotSender<(ResponseChannel<MessagePayload>, MessagePayload)>>,
-);
 
 #[derive(NetworkBehaviour)]
 #[behaviour(prelude = "libp2p::swarm::derive_prelude", to_swarm = "void::Void")]
 struct Behaviour {
-    identity: identity::server::Behaviour,
-    message: message::server::Behaviour,
     dummy: Toggle<ext_behaviour::Behaviour>,
 }
 
@@ -75,6 +71,23 @@ pub struct ShuttleServer {
     task: JoinHandle<()>,
 }
 
+type IdReqSt = BoxStream<
+    'static,
+    (
+        PeerId,
+        Result<IdentityPayload, Error>,
+        oneshot::Sender<Bytes>,
+    ),
+>;
+type MsgReqSt = BoxStream<
+    'static,
+    (
+        PeerId,
+        Result<MessagePayload, Error>,
+        oneshot::Sender<Bytes>,
+    ),
+>;
+
 #[allow(clippy::type_complexity)]
 #[allow(dead_code)]
 struct ShuttleTask {
@@ -83,10 +96,10 @@ struct ShuttleTask {
     identity_storage: super::store::identity::IdentityStorage,
     message_storage: super::store::messages::MessageStorage,
     subscriptions: super::subscription_stream::Subscriptions,
-    identity_rx: mpsc::Receiver<IdentityReceiver>,
-    message_rx: mpsc::Receiver<MessageReceiver>,
-    precord_tx: mpsc::Sender<PeerRecord>,
-    requests: FuturesUnordered<BoxFuture<'static, ()>>,
+    requests: StreamMap<PeerId, OrderedFutureSet<BoxFuture<'static, ()>>>,
+
+    identity_request_response: IdReqSt,
+    message_request_response: MsgReqSt,
 }
 
 impl ShuttleServer {
@@ -96,14 +109,12 @@ impl ShuttleServer {
         enable_relay_server: bool,
         memory_transport: bool,
         listen_addrs: &[Multiaddr],
+        external_addrs: &[Multiaddr],
         ext: bool,
     ) -> anyhow::Result<Self> {
         let path = path.map(|p| p.as_ref().to_path_buf());
 
         let local_peer_id = keypair.public().to_peer_id();
-        let (id_event_tx, id_event_rx) = futures::channel::mpsc::channel(1);
-        let (msg_event_tx, msg_event_rx) = futures::channel::mpsc::channel(1);
-        let (precord_tx, precord_rx) = futures::channel::mpsc::channel(256);
         let mut uninitialized = UninitializedIpfs::new()
             .with_identify(IdentifyConfiguration {
                 agent_version: format!("shuttle/{}", env!("CARGO_PKG_VERSION")),
@@ -117,15 +128,13 @@ impl ShuttleServer {
             })
             .with_relay(true)
             .with_custom_behaviour(Behaviour {
-                identity: identity::server::Behaviour::new(keypair, id_event_tx, precord_rx),
-                message: message::server::Behaviour::new(keypair, msg_event_tx),
                 dummy: ext
                     .then_some(ext_behaviour::Behaviour::new(local_peer_id))
                     .into(),
             })
             .set_keypair(keypair)
             .fd_limit(FDLimit::Max)
-            .set_idle_connection_timeout(60 * 30)
+            .set_idle_connection_timeout(30)
             .default_record_key_validator()
             .set_transport_configuration(TransportConfig {
                 enable_webrtc: true,
@@ -140,7 +149,20 @@ impl ShuttleServer {
             //     trigger: GCTrigger::None,
             // })
             .set_temp_pin_duration(Duration::from_secs(60 * 30))
-            .listen_as_external_addr();
+            .with_request_response(vec![
+                RequestResponseConfig {
+                    protocol: protocols::SHUTTLE_IDENTITY.as_ref().into(),
+                    max_request_size: 256 * 1024,
+                    max_response_size: 512 * 1024,
+                    ..Default::default()
+                },
+                RequestResponseConfig {
+                    protocol: protocols::SHUTTLE_MESSAGE.as_ref().into(),
+                    max_request_size: 256 * 1024,
+                    max_response_size: 512 * 1024,
+                    ..Default::default()
+                },
+            ]);
 
         if enable_relay_server {
             // Relay is unbound or with higher limits so we can avoid having the connection resetting
@@ -168,6 +190,10 @@ impl ShuttleServer {
             ipfs.add_listening_address(addr).await?;
         }
 
+        for addr in external_addrs.iter().cloned() {
+            ipfs.add_external_address(addr).await?;
+        }
+
         let root = super::store::root::RootStorage::new(&ipfs, path).await;
         let identity = super::store::identity::IdentityStorage::new(&ipfs, &root).await;
         let message =
@@ -177,6 +203,26 @@ impl ShuttleServer {
             "Identities Registered: {}",
             identity.list().await.count().await
         );
+
+        let identity_request_response = ipfs
+            .requests_subscribe(protocols::SHUTTLE_IDENTITY)
+            .await?
+            .map(|(peer_id, request, response)| {
+                let payload: Result<PayloadMessage<IdentityMessage>, _> =
+                    PayloadMessage::from_bytes(&request);
+                (peer_id, payload, response)
+            })
+            .boxed();
+
+        let message_request_response = ipfs
+            .requests_subscribe(protocols::SHUTTLE_MESSAGE)
+            .await?
+            .map(|(peer_id, request, response)| {
+                let payload: Result<PayloadMessage<MessageProtocol>, _> =
+                    PayloadMessage::from_bytes(&request);
+                (peer_id, payload, response)
+            })
+            .boxed();
 
         let mut subscriptions = Subscriptions::new(&ipfs, &identity, &message);
         _ = subscriptions
@@ -188,17 +234,13 @@ impl ShuttleServer {
             root_storage: root,
             identity_storage: identity,
             message_storage: message,
-            identity_rx: id_event_rx,
-            message_rx: msg_event_rx,
-            precord_tx,
             requests: Default::default(),
+            identity_request_response,
+            message_request_response,
         };
 
         let task = tokio::spawn(async move {
-            server_event
-                .requests
-                .push(futures::future::pending().boxed());
-            server_event.start().await;
+            server_event.run().await;
         });
 
         Ok(ShuttleServer { ipfs, task })
@@ -210,297 +252,314 @@ impl ShuttleServer {
     }
 }
 
+impl Future for ShuttleTask {
+    type Output = ();
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // We perform the polling in burst to yield to the executor
+        while let Poll::Ready(Some((peer_id, request, response))) =
+            self.identity_request_response.poll_next_unpin(cx)
+        {
+            self.process_identity_events(peer_id, request, response);
+        }
+
+        while let Poll::Ready(Some((peer_id, request, response))) =
+            self.message_request_response.poll_next_unpin(cx)
+        {
+            self.process_message_events(peer_id, request, response);
+        }
+
+        Poll::Pending
+    }
+}
+
 impl ShuttleTask {
-    async fn start(&mut self) {
+    async fn run(&mut self) {
         // TODO: Investigate in JoinSet vs FuturesUnordered. See https://github.com/tokio-rs/tokio/issues/5564
         // TODO: Track long running task (or futures) and abort/terminate them if they exceed a specific (TBD) duration
         //       (i.e if we are pinning a file from a user, the duration can be ignored while if the user is updating their profile, it shouldnt exceed maybe 5min (though other factors may have to be taken into account))
 
         loop {
             tokio::select! {
-                Some((id, ch, payload, resp)) = self.identity_rx.next() => {
-                    self.process_identity_events(id, ch, payload, resp).await
+                biased;
+                Some((peer_id, request, response)) = self.identity_request_response.next() => {
+                    self.process_identity_events(peer_id, request, response);
                 }
-                Some((id, ch, payload, resp)) = self.message_rx.next() => {
-                    self.process_message_events(id, ch, payload, resp).await
+                Some((peer_id, request, response)) = self.message_request_response.next() => {
+                    self.process_message_events(peer_id, request, response);
                 }
-                _ = self.requests.next() => {}
+                _ = self.requests.next() => {
+                    //
+                }
             }
         }
     }
 
-    async fn process_identity_events(
+    fn process_identity_events(
         &mut self,
-        id: InboundRequestId,
-        ch: Option<ResponseChannel<IdentityPayload>>,
-        payload: IdentityPayload,
-        resp: Option<OntshotSender<(ResponseChannel<IdentityPayload>, IdentityPayload)>>,
+        peer_id: PeerId,
+        payload: Result<IdentityPayload, Error>,
+        resp: OneshotSender<Bytes>,
     ) {
         let ipfs = self.ipfs.clone();
         let identity_storage = self.identity_storage.clone();
         let mut subscriptions = self.subscriptions.clone();
 
+        let payload = match payload {
+            Ok(payload) => payload,
+            Err(e) => {
+                let payload =
+                    payload_message_construct(ipfs.keypair(), None, Response::Error(e.to_string()))
+                        .expect("Valid payload construction");
+
+                let bytes = payload.to_bytes().expect("valid deserialization");
+                _ = resp.send(bytes);
+                return;
+            }
+        };
+
         let fut = async move {
             let keypair = ipfs.keypair();
-            tracing::info!(request_id = ?id, "Processing Incoming Request");
+            tracing::info!(%peer_id, "Processing Incoming Request");
             let sender = payload.sender();
             match payload.message() {
-                Message::Request(req) => match req {
-                    identity::protocol::Request::Register(Register::IsRegistered) => {
-                        let peer_id = payload.sender();
-                        let Ok(did) = peer_id.to_did() else {
-                            tracing::warn!(%peer_id, "Could not convert to did key");
-                            let payload = payload_message_construct(
-                                keypair,
-                                None,
-                                Response::RegisterResponse(RegisterResponse::Error(
-                                    identity::protocol::RegisterError::IdentityVerificationFailed,
-                                )),
-                            )
-                            .expect("Valid payload construction");
-
-                            if let (Some(ch), Some(resp)) = (ch, resp) {
-                                let _ = resp.send((ch, payload));
-                            }
-
-                            return;
-                        };
-
-                        if !identity_storage.contains(&did).await {
-                            tracing::warn!(%did, "Identity is not registered");
-                            let payload = payload_message_construct(
-                                keypair,
-                                None,
-                                Response::RegisterResponse(RegisterResponse::Error(
-                                    identity::protocol::RegisterError::NotRegistered,
-                                )),
-                            )
-                            .expect("Valid payload construction");
-
-                            if let (Some(ch), Some(resp)) = (ch, resp) {
-                                let _ = resp.send((ch, payload));
-                            }
-
-                            return;
-                        }
-
+                identity::protocol::Request::Register(Register::IsRegistered) => {
+                    let peer_id = payload.sender();
+                    let Ok(did) = peer_id.to_did() else {
+                        tracing::warn!(%peer_id, "Could not convert to did key");
                         let payload = payload_message_construct(
                             keypair,
                             None,
-                            Response::RegisterResponse(RegisterResponse::Ok),
+                            Response::RegisterResponse(RegisterResponse::Error(
+                                identity::protocol::RegisterError::IdentityVerificationFailed,
+                            )),
                         )
                         .expect("Valid payload construction");
 
-                        if let (Some(ch), Some(resp)) = (ch, resp) {
-                            let _ = resp.send((ch, payload));
-                        }
-                    }
-                    identity::protocol::Request::Register(Register::RegisterIdentity {
-                        root_cid,
-                    }) => {
-                        let root_cid = *root_cid;
+                        let bytes = payload.to_bytes().expect("valid deserialization");
+                        _ = resp.send(bytes);
+                        return;
+                    };
 
-                        tracing::debug!(%sender, %root_cid, "preloading root document");
-                        if let Err(e) = ipfs.fetch(&root_cid).recursive().await {
-                            tracing::warn!(%sender, %root_cid, error = %e, "unable to preload root document");
+                    if !identity_storage.contains(&did).await {
+                        tracing::warn!(%did, "Identity is not registered");
+                        let payload = payload_message_construct(
+                            keypair,
+                            None,
+                            Response::RegisterResponse(RegisterResponse::Error(
+                                identity::protocol::RegisterError::NotRegistered,
+                            )),
+                        )
+                        .expect("Valid payload construction");
+
+                        let bytes = payload.to_bytes().expect("valid deserialization");
+                        _ = resp.send(bytes);
+
+                        return;
+                    }
+
+                    let payload = payload_message_construct(
+                        keypair,
+                        None,
+                        Response::RegisterResponse(RegisterResponse::Ok),
+                    )
+                    .expect("Valid payload construction");
+
+                    let bytes = payload.to_bytes().expect("valid deserialization");
+                    _ = resp.send(bytes);
+                }
+                identity::protocol::Request::Register(Register::RegisterIdentity { root_cid }) => {
+                    let root_cid = *root_cid;
+
+                    tracing::debug!(%sender, %root_cid, "preloading root document");
+                    if let Err(e) = ipfs.fetch(&root_cid).recursive().await {
+                        tracing::warn!(%sender, %root_cid, error = %e, "unable to preload root document");
+                        return;
+                    }
+                    tracing::debug!(%sender, %root_cid, "root document preloaded");
+
+                    let keypair = ipfs.keypair();
+                    let path = IpfsPath::from(root_cid)
+                        .sub_path("identity")
+                        .expect("valid path");
+
+                    let document: IdentityDocument = match ipfs
+                        .get_dag(path)
+                        .timeout(Duration::from_secs(10))
+                        .deserialized()
+                        .await
+                    {
+                        Ok(id) => id,
+                        Err(e) => {
+                            tracing::info!(sender = %payload.sender(), error = %e, "unable to resolve identity path from root document");
                             return;
                         }
-                        tracing::debug!(%sender, %root_cid, "root document preloaded");
+                    };
 
-                        let keypair = ipfs.keypair();
-                        let path = IpfsPath::from(root_cid)
-                            .sub_path("identity")
-                            .expect("valid path");
+                    tracing::info!(%document.did, "Receive register request");
+                    if identity_storage.contains(&document.did).await {
+                        tracing::warn!(%document.did, "Identity is already registered");
+                        let payload = payload_message_construct(
+                            keypair,
+                            None,
+                            Response::RegisterResponse(RegisterResponse::Error(
+                                identity::protocol::RegisterError::IdentityExist,
+                            )),
+                        )
+                        .expect("Valid payload construction");
 
-                        let document: IdentityDocument = match ipfs
-                            .get_dag(path)
-                            .timeout(Duration::from_secs(10))
-                            .deserialized()
-                            .await
-                        {
-                            Ok(id) => id,
-                            Err(e) => {
-                                tracing::info!(sender = %payload.sender(), error = %e, "unable to resolve identity path from root document");
-                                return;
-                            }
-                        };
+                        let bytes = payload.to_bytes().expect("valid deserialization");
+                        _ = resp.send(bytes);
 
-                        tracing::info!(%document.did, "Receive register request");
-                        if identity_storage.contains(&document.did).await {
-                            tracing::warn!(%document.did, "Identity is already registered");
-                            let payload = payload_message_construct(
-                                keypair,
-                                None,
+                        return;
+                    }
+
+                    if document.verify().is_err() {
+                        tracing::warn!(%document.did, "Identity cannot be verified");
+                        let payload = payload_message_construct(
+                            keypair,
+                            None,
+                            Response::RegisterResponse(RegisterResponse::Error(
+                                identity::protocol::RegisterError::IdentityVerificationFailed,
+                            )),
+                        )
+                        .expect("Valid payload construction");
+
+                        let bytes = payload.to_bytes().expect("valid deserialization");
+                        _ = resp.send(bytes);
+
+                        return;
+                    }
+
+                    if let Err(e) = identity_storage.register(&document, root_cid).await {
+                        tracing::warn!(%document.did, error = %e, "Unable to register identity");
+                        let res_error = match e {
+                            WarpError::IdentityExist => {
                                 Response::RegisterResponse(RegisterResponse::Error(
                                     identity::protocol::RegisterError::IdentityExist,
-                                )),
-                            )
+                                ))
+                            }
+                            _ => Response::RegisterResponse(RegisterResponse::Error(
+                                identity::protocol::RegisterError::None,
+                            )),
+                        };
+
+                        let payload = payload_message_construct(keypair, None, res_error)
                             .expect("Valid payload construction");
 
-                            if let (Some(ch), Some(resp)) = (ch, resp) {
-                                let _ = resp.send((ch, payload));
-                            }
+                        let bytes = payload.to_bytes().expect("valid deserialization");
+                        _ = resp.send(bytes);
 
-                            return;
-                        }
+                        return;
+                    }
 
-                        if document.verify().is_err() {
-                            tracing::warn!(%document.did, "Identity cannot be verified");
-                            let payload = payload_message_construct(
-                                keypair,
-                                None,
-                                Response::RegisterResponse(RegisterResponse::Error(
-                                    identity::protocol::RegisterError::IdentityVerificationFailed,
-                                )),
-                            )
-                            .expect("Valid payload construction");
+                    if let Err(e) = subscriptions.subscribe(document.did.inbox()).await {
+                        tracing::warn!(%document.did, "Unable to subscribe to given topic: {e}. ignoring...");
+                        // Although we arent able to subscribe, we can still process the request while leaving this as a warning
+                    }
 
-                            if let (Some(ch), Some(resp)) = (ch, resp) {
-                                let _ = resp.send((ch, payload));
-                            }
+                    if let Err(e) = subscriptions.subscribe(document.did.messaging()).await {
+                        tracing::warn!(%document.did, "Unable to subscribe to given topic: {e}. ignoring...");
+                        // Although we arent able to subscribe, we can still process the request while leaving this as a warning
+                    }
 
-                            return;
-                        }
+                    let payload = PayloadBuilder::new(keypair, document.clone())
+                        .build()
+                        .expect("Valid payload construction");
 
-                        if let Err(e) = identity_storage.register(&document, root_cid).await {
-                            tracing::warn!(%document.did, error = %e, "Unable to register identity");
-                            let res_error = match e {
-                                WarpError::IdentityExist => {
-                                    Response::RegisterResponse(RegisterResponse::Error(
-                                        identity::protocol::RegisterError::IdentityExist,
-                                    ))
-                                }
-                                _ => Response::RegisterResponse(RegisterResponse::Error(
-                                    identity::protocol::RegisterError::None,
-                                )),
-                            };
+                    let bytes = serde_json::to_vec(&payload).expect("Valid serialization");
 
-                            let payload = payload_message_construct(keypair, None, res_error)
-                                .expect("Valid payload construction");
+                    _ = ipfs.pubsub_publish("/identity/announce/v0", bytes).await;
 
-                            if let (Some(ch), Some(resp)) = (ch, resp) {
-                                let _ = resp.send((ch, payload));
-                            }
-
-                            return;
-                        }
-
-                        if let Err(e) = subscriptions.subscribe(document.did.inbox()).await {
-                            tracing::warn!(%document.did, "Unable to subscribe to given topic: {e}. ignoring...");
-                            // Although we arent able to subscribe, we can still process the request while leaving this as a warning
-                        }
-
-                        if let Err(e) = subscriptions.subscribe(document.did.messaging()).await {
-                            tracing::warn!(%document.did, "Unable to subscribe to given topic: {e}. ignoring...");
-                            // Although we arent able to subscribe, we can still process the request while leaving this as a warning
-                        }
-
-                        let payload = PayloadBuilder::new(keypair, document.clone())
-                            .build()
-                            .expect("Valid payload construction");
-
-                        let bytes = serde_json::to_vec(&payload).expect("Valid serialization");
-
-                        _ = ipfs.pubsub_publish("/identity/announce/v0", bytes).await;
-
-                        tracing::info!(%document.did, "identity registered");
+                    tracing::info!(%document.did, "identity registered");
+                    let payload = payload_message_construct(
+                        keypair,
+                        None,
+                        Response::RegisterResponse(RegisterResponse::Ok),
+                    )
+                    .expect("Valid payload construction");
+                    let bytes = payload.to_bytes().expect("valid deserialization");
+                    _ = resp.send(bytes);
+                }
+                identity::protocol::Request::Mailbox(event) => {
+                    let peer_id = payload.sender();
+                    let Ok(did) = peer_id.to_did() else {
+                        tracing::warn!(%peer_id, "Could not convert to did key");
                         let payload = payload_message_construct(
                             keypair,
                             None,
-                            Response::RegisterResponse(RegisterResponse::Ok),
+                            Response::RegisterResponse(RegisterResponse::Error(
+                                identity::protocol::RegisterError::IdentityVerificationFailed,
+                            )),
                         )
                         .expect("Valid payload construction");
-                        if let (Some(ch), Some(resp)) = (ch, resp) {
-                            let _ = resp.send((ch, payload));
-                        }
+
+                        let bytes = payload.to_bytes().expect("valid deserialization");
+                        _ = resp.send(bytes);
+
+                        return;
+                    };
+
+                    if !identity_storage.contains(&did).await {
+                        tracing::warn!(%did, "Identity is not registered");
+                        let payload = payload_message_construct(
+                            keypair,
+                            None,
+                            Response::MailboxResponse(identity::protocol::MailboxResponse::Error(
+                                identity::protocol::MailboxError::IdentityNotRegistered,
+                            )),
+                        )
+                        .expect("Valid payload construction");
+
+                        let bytes = payload.to_bytes().expect("valid deserialization");
+                        _ = resp.send(bytes);
+                        return;
                     }
-                    identity::protocol::Request::Mailbox(event) => {
-                        let peer_id = payload.sender();
-                        let Ok(did) = peer_id.to_did() else {
-                            tracing::warn!(%peer_id, "Could not convert to did key");
+
+                    match event {
+                        identity::protocol::Mailbox::FetchAll => {
+                            let (reqs, remaining) = identity_storage
+                                .fetch_mailbox(did.clone())
+                                .await
+                                .unwrap_or_default();
+
+                            tracing::info!(%did, request = reqs.len(), remaining = remaining);
+
                             let payload = payload_message_construct(
                                 keypair,
                                 None,
-                                Response::RegisterResponse(RegisterResponse::Error(
-                                    identity::protocol::RegisterError::IdentityVerificationFailed,
-                                )),
+                                Response::MailboxResponse(
+                                    identity::protocol::MailboxResponse::Receive {
+                                        list: reqs,
+                                        remaining,
+                                    },
+                                ),
                             )
                             .expect("Valid payload construction");
 
-                            if let (Some(ch), Some(resp)) = (ch, resp) {
-                                let _ = resp.send((ch, payload));
-                            }
-
-                            return;
-                        };
-
-                        if !identity_storage.contains(&did).await {
-                            tracing::warn!(%did, "Identity is not registered");
+                            let bytes = payload.to_bytes().expect("valid deserialization");
+                            _ = resp.send(bytes);
+                        }
+                        identity::protocol::Mailbox::FetchFrom { .. } => {
+                            tracing::warn!(%did, "accessed to unimplemented request");
+                            //TODO
                             let payload = payload_message_construct(
                                 keypair,
                                 None,
                                 Response::MailboxResponse(
                                     identity::protocol::MailboxResponse::Error(
-                                        identity::protocol::MailboxError::IdentityNotRegistered,
+                                        identity::protocol::MailboxError::NoRequests,
                                     ),
                                 ),
                             )
                             .expect("Valid payload construction");
 
-                            if let (Some(ch), Some(resp)) = (ch, resp) {
-                                let _ = resp.send((ch, payload));
-                            }
-
-                            return;
+                            let bytes = payload.to_bytes().expect("valid deserialization");
+                            _ = resp.send(bytes);
                         }
-
-                        match event {
-                            identity::protocol::Mailbox::FetchAll => {
-                                let (reqs, remaining) = identity_storage
-                                    .fetch_mailbox(did.clone())
-                                    .await
-                                    .unwrap_or_default();
-
-                                tracing::info!(%did, request = reqs.len(), remaining = remaining);
-
+                        identity::protocol::Mailbox::Send { did: to, request } => {
+                            if !identity_storage.contains(to).await {
+                                tracing::warn!(%did, "Identity is not registered");
                                 let payload = payload_message_construct(
-                                    keypair,
-                                    None,
-                                    Response::MailboxResponse(
-                                        identity::protocol::MailboxResponse::Receive {
-                                            list: reqs,
-                                            remaining,
-                                        },
-                                    ),
-                                )
-                                .expect("Valid payload construction");
-
-                                if let (Some(ch), Some(resp)) = (ch, resp) {
-                                    let _ = resp.send((ch, payload));
-                                }
-                            }
-                            identity::protocol::Mailbox::FetchFrom { .. } => {
-                                tracing::warn!(%did, "accessed to unimplemented request");
-                                //TODO
-                                let payload = payload_message_construct(
-                                    keypair,
-                                    None,
-                                    Response::MailboxResponse(
-                                        identity::protocol::MailboxResponse::Error(
-                                            identity::protocol::MailboxError::NoRequests,
-                                        ),
-                                    ),
-                                )
-                                .expect("Valid payload construction");
-
-                                if let (Some(ch), Some(resp)) = (ch, resp) {
-                                    let _ = resp.send((ch, payload));
-                                }
-                            }
-                            identity::protocol::Mailbox::Send { did: to, request } => {
-                                if !identity_storage.contains(to).await {
-                                    tracing::warn!(%did, "Identity is not registered");
-                                    let payload = payload_message_construct(
                                     keypair,
                                     None,
                                     Response::MailboxResponse(
@@ -511,375 +570,380 @@ impl ShuttleTask {
                                 )
                                 .expect("Valid payload construction");
 
-                                    if let (Some(ch), Some(resp)) = (ch, resp) {
-                                        let _ = resp.send((ch, payload));
-                                    }
+                                let bytes = payload.to_bytes().expect("valid deserialization");
+                                _ = resp.send(bytes);
 
-                                    return;
-                                }
+                                return;
+                            }
 
-                                if request.verify().is_err() {
-                                    tracing::warn!(%did, to = %to, "request could not be vertified");
-                                    let payload = payload_message_construct(
-                                        keypair,
-                                        None,
-                                        Response::MailboxResponse(
-                                            identity::protocol::MailboxResponse::Error(
-                                                identity::protocol::MailboxError::InvalidRequest,
-                                            ),
+                            if request.verify().is_err() {
+                                tracing::warn!(%did, to = %to, "request could not be vertified");
+                                let payload = payload_message_construct(
+                                    keypair,
+                                    None,
+                                    Response::MailboxResponse(
+                                        identity::protocol::MailboxResponse::Error(
+                                            identity::protocol::MailboxError::InvalidRequest,
                                         ),
-                                    )
-                                    .expect("Valid payload construction");
+                                    ),
+                                )
+                                .expect("Valid payload construction");
 
-                                    if let (Some(ch), Some(resp)) = (ch, resp) {
-                                        let _ = resp.send((ch, payload));
-                                    }
+                                let bytes = payload.to_bytes().expect("valid deserialization");
+                                _ = resp.send(bytes);
 
-                                    return;
-                                }
+                                return;
+                            }
 
-                                if let Err(e) = identity_storage.deliver_request(to, request).await
-                                {
-                                    match e {
-                                        WarpError::InvalidSignature => {
-                                            tracing::warn!(%did, to = %to, "request could not be vertified");
-                                            let payload = payload_message_construct(
-                                        keypair,
-                                        None,
-                                        Response::MailboxResponse(
-                                            identity::protocol::MailboxResponse::Error(
-                                                identity::protocol::MailboxError::InvalidRequest,
-                                            ),
-                                        ),
-                                    )
-                                    .expect("Valid payload construction");
-
-                                            if let (Some(ch), Some(resp)) = (ch, resp) {
-                                                let _ = resp.send((ch, payload));
-                                            }
-                                        }
-                                        e => {
-                                            tracing::warn!(%did, to = %to, "could not deliver request");
-                                            let payload = payload_message_construct(
+                            if let Err(e) = identity_storage.deliver_request(to, request).await {
+                                match e {
+                                    WarpError::InvalidSignature => {
+                                        tracing::warn!(%did, to = %to, "request could not be vertified");
+                                        let payload = payload_message_construct(
                                                 keypair,
                                                 None,
                                                 Response::MailboxResponse(
                                                     identity::protocol::MailboxResponse::Error(
-                                                        identity::protocol::MailboxError::Other(
-                                                            e.to_string(),
-                                                        ),
+                                                        identity::protocol::MailboxError::InvalidRequest,
                                                     ),
                                                 ),
                                             )
                                             .expect("Valid payload construction");
 
-                                            if let (Some(ch), Some(resp)) = (ch, resp) {
-                                                let _ = resp.send((ch, payload));
-                                            }
-                                        }
+                                        let bytes =
+                                            payload.to_bytes().expect("valid deserialization");
+                                        _ = resp.send(bytes);
                                     }
-                                    return;
+                                    e => {
+                                        tracing::warn!(%did, to = %to, "could not deliver request");
+                                        let payload = payload_message_construct(
+                                            keypair,
+                                            None,
+                                            Response::MailboxResponse(
+                                                identity::protocol::MailboxResponse::Error(
+                                                    identity::protocol::MailboxError::Other(
+                                                        e.to_string(),
+                                                    ),
+                                                ),
+                                            ),
+                                        )
+                                        .expect("Valid payload construction");
+
+                                        let bytes =
+                                            payload.to_bytes().expect("valid deserialization");
+                                        _ = resp.send(bytes);
+                                    }
                                 }
-
-                                tracing::info!(%did, to = %to, "request has been stored");
-
-                                let payload = payload_message_construct(
-                                    keypair,
-                                    None,
-                                    Response::MailboxResponse(
-                                        identity::protocol::MailboxResponse::Sent,
-                                    ),
-                                )
-                                .expect("Valid payload construction");
-
-                                if let (Some(ch), Some(resp)) = (ch, resp) {
-                                    let _ = resp.send((ch, payload));
-                                }
-                            }
-                        }
-                    }
-                    identity::protocol::Request::Synchronized(Synchronized::Store { package }) => {
-                        let peer_id = payload.sender();
-                        let Ok(did) = peer_id.to_did() else {
-                            tracing::warn!(%peer_id, "Could not convert to did key");
-                            return;
-                        };
-
-                        if !identity_storage.contains(&did).await {
-                            tracing::warn!(%did, "Identity is not registered");
-                            return;
-                        }
-
-                        let keypair = ipfs.keypair();
-                        tracing::debug!(%did, %package, "preloading root document");
-                        if let Err(e) = ipfs.fetch(package).recursive().await {
-                            tracing::warn!(%did, %package, error = %e, "unable to preload root document");
-                            return;
-                        }
-
-                        let current_document = match identity_storage
-                            .lookup(Lookup::PublicKey { did: did.clone() })
-                            .await
-                            .map(|list| list.first().cloned())
-                        {
-                            Ok(Some(id)) => id,
-                            _ => {
-                                //
                                 return;
                             }
-                        };
 
-                        let path = IpfsPath::from(*package)
-                            .sub_path("identity")
-                            .expect("valid path");
+                            tracing::info!(%did, to = %to, "request has been stored");
 
-                        let document: IdentityDocument = match ipfs
-                            .get_dag(path)
-                            .timeout(Duration::from_secs(10))
-                            .deserialized()
-                            .await
-                        {
-                            Ok(id) => id,
-                            Err(e) => {
-                                tracing::info!(sender = %payload.sender(), error = %e, "unable to resolve identity path from root document");
-                                return;
-                            }
-                        };
+                            let payload = payload_message_construct(
+                                keypair,
+                                None,
+                                Response::MailboxResponse(
+                                    identity::protocol::MailboxResponse::Sent,
+                                ),
+                            )
+                            .expect("Valid payload construction");
 
-                        tracing::debug!(%did, %package, "root document preloaded");
-                        if let Err(e) = identity_storage.update_user_document(&did, *package).await
-                        {
-                            tracing::warn!(%did, %package, error = %e, "unable to store document");
+                            let bytes = payload.to_bytes().expect("valid deserialization");
+                            _ = resp.send(bytes);
+                        }
+                    }
+                }
+                identity::protocol::Request::Synchronized(Synchronized::Store { package }) => {
+                    //TODO: Ack
+                    let peer_id = payload.sender();
+                    let Ok(did) = peer_id.to_did() else {
+                        tracing::warn!(%peer_id, "Could not convert to did key");
+                        return;
+                    };
+
+                    if !identity_storage.contains(&did).await {
+                        tracing::warn!(%did, "Identity is not registered");
+                        return;
+                    }
+
+                    let keypair = ipfs.keypair();
+                    tracing::debug!(%did, %package, "preloading root document");
+                    if let Err(e) = ipfs.fetch(package).recursive().await {
+                        tracing::warn!(%did, %package, error = %e, "unable to preload root document");
+                        return;
+                    }
+
+                    let current_document = match identity_storage
+                        .lookup(Lookup::PublicKey { did: did.clone() })
+                        .await
+                        .map(|list| list.first().cloned())
+                    {
+                        Ok(Some(id)) => id,
+                        _ => {
+                            //
                             return;
                         }
+                    };
 
-                        tracing::info!(%did, %package, "root document is stored");
+                    let path = IpfsPath::from(*package)
+                        .sub_path("identity")
+                        .expect("valid path");
 
-                        if document.modified > current_document.modified {
-                            tracing::info!(%did, "Identity updated");
-
-                            tracing::info!(%did, "Announcing to mesh");
-
-                            let payload = PayloadBuilder::new(keypair, document.clone())
-                                .build()
-                                .expect("Valid payload construction");
-
-                            let bytes = serde_json::to_vec(&payload).expect("Valid serialization");
-
-                            _ = ipfs.pubsub_publish("/identity/announce/v0", bytes).await;
+                    let document: IdentityDocument = match ipfs
+                        .get_dag(path)
+                        .timeout(Duration::from_secs(10))
+                        .deserialized()
+                        .await
+                    {
+                        Ok(id) => id,
+                        Err(e) => {
+                            tracing::info!(sender = %payload.sender(), error = %e, "unable to resolve identity path from root document");
+                            return;
                         }
+                    };
+
+                    tracing::debug!(%did, %package, "root document preloaded");
+                    if let Err(e) = identity_storage.update_user_document(&did, *package).await {
+                        tracing::warn!(%did, %package, error = %e, "unable to store document");
+                        return;
                     }
-                    identity::protocol::Request::Synchronized(Synchronized::PeerRecord {
-                        ..
-                    }) => {
-                        // let signed_envelope = match SignedEnvelope::from_protobuf_encoding(record) {
-                        //     Ok(signed_envelope) => signed_envelope,
-                        //     Err(e) => {
-                        //         let payload = payload_message_construct(
-                        //             keypair,
-                        //             None,
-                        //             Response::SynchronizedResponse(
-                        //                 identity::protocol::SynchronizedResponse::Error(
-                        //                     SynchronizedError::InvalidPayload {
-                        //                         msg: e.to_string(),
-                        //                     },
-                        //                 ),
-                        //             ),
-                        //         )
-                        //         .expect("Valid payload construction");
-                        //         if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                        //             let _ = resp.send((ch, payload));
-                        //         }
 
-                        //         return;
-                        //     }
-                        // };
+                    tracing::info!(%did, %package, "root document is stored");
 
-                        // let record = match PeerRecord::from_signed_envelope(signed_envelope) {
-                        //     Ok(record) => record,
-                        //     Err(e) => {
-                        //         let payload = payload_message_construct(
-                        //             keypair,
-                        //             None,
-                        //             Response::SynchronizedResponse(
-                        //                 identity::protocol::SynchronizedResponse::Error(
-                        //                     SynchronizedError::InvalodRecord { msg: e.to_string() },
-                        //                 ),
-                        //             ),
-                        //         )
-                        //         .expect("Valid payload construction");
+                    if document.modified > current_document.modified {
+                        tracing::info!(%did, "Identity updated");
 
-                        //         if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                        //             let _ = resp.send((ch, payload));
-                        //         }
+                        tracing::info!(%did, "Announcing to mesh");
 
-                        //         return;
-                        //     }
-                        // };
+                        let payload = PayloadBuilder::new(keypair, document.clone())
+                            .build()
+                            .expect("Valid payload construction");
 
-                        // let peer_id = record.peer_id();
+                        let bytes = serde_json::to_vec(&payload).expect("Valid serialization");
 
-                        // let Ok(did) = peer_id.to_did() else {
-                        //     tracing::warn!(%peer_id, "Could not convert to did key");
-                        //     let payload = payload_message_construct(
-                        //         keypair,
-                        //         None,
-                        //         Response::SynchronizedResponse(
-                        //             identity::protocol::SynchronizedResponse::Error(
-                        //                 SynchronizedError::Invalid,
-                        //             ),
-                        //         ),
-                        //     )
-                        //     .expect("Valid payload construction");
-
-                        //     if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                        //         let _ = resp.send((ch, payload));
-                        //     }
-
-                        //     return;
-                        // };
-
-                        // if !identity_storage.contains(&did).await {
-                        //     let payload = payload_message_construct(
-                        //         keypair,
-                        //         None,
-                        //         Response::SynchronizedResponse(
-                        //             identity::protocol::SynchronizedResponse::Error(
-                        //                 SynchronizedError::NotRegistered,
-                        //             ),
-                        //         ),
-                        //     )
-                        //     .expect("Valid payload construction");
-
-                        //     if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                        //         let _ = resp.send((ch, payload));
-                        //     }
-
-                        //     return;
-                        // }
-
-                        // _ = self.precord_tx.send(record).await;
-
-                        // let payload = payload_message_construct(
-                        //     keypair,
-                        //     None,
-                        //     Response::SynchronizedResponse(SynchronizedResponse::RecordStored),
-                        // )
-                        // .expect("Valid payload construction");
-
-                        // if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
-                        //     let _ = resp.send((ch, payload));
-                        // }
+                        _ = ipfs.pubsub_publish("/identity/announce/v0", bytes).await;
                     }
-                    identity::protocol::Request::Synchronized(Synchronized::Fetch) => {
-                        let did = match payload.sender().to_did() {
-                            Ok(did) => did,
-                            Err(e) => {
-                                tracing::warn!(sender = %payload.sender(), error = %e, "could not convert to did key");
-                                let payload = payload_message_construct(
-                                    keypair,
-                                    None,
-                                    Response::SynchronizedResponse(
-                                        identity::protocol::SynchronizedResponse::Error(
-                                            SynchronizedError::Invalid,
-                                        ),
-                                    ),
-                                )
-                                .expect("Valid payload construction");
+                }
+                identity::protocol::Request::Synchronized(Synchronized::PeerRecord { .. }) => {
+                    // let signed_envelope = match SignedEnvelope::from_protobuf_encoding(record) {
+                    //     Ok(signed_envelope) => signed_envelope,
+                    //     Err(e) => {
+                    //         let payload = payload_message_construct(
+                    //             keypair,
+                    //             None,
+                    //             Response::SynchronizedResponse(
+                    //                 identity::protocol::SynchronizedResponse::Error(
+                    //                     SynchronizedError::InvalidPayload {
+                    //                         msg: e.to_string(),
+                    //                     },
+                    //                 ),
+                    //             ),
+                    //         )
+                    //         .expect("Valid payload construction");
+                    //         if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                    //             let _ = resp.send((ch, payload));
+                    //         }
 
-                                if let (Some(ch), Some(resp)) = (ch, resp) {
-                                    let _ = resp.send((ch, payload));
-                                }
+                    //         return;
+                    //     }
+                    // };
 
-                                return;
-                            }
-                        };
+                    // let record = match PeerRecord::from_signed_envelope(signed_envelope) {
+                    //     Ok(record) => record,
+                    //     Err(e) => {
+                    //         let payload = payload_message_construct(
+                    //             keypair,
+                    //             None,
+                    //             Response::SynchronizedResponse(
+                    //                 identity::protocol::SynchronizedResponse::Error(
+                    //                     SynchronizedError::InvalodRecord { msg: e.to_string() },
+                    //                 ),
+                    //             ),
+                    //         )
+                    //         .expect("Valid payload construction");
 
-                        tracing::info!(%did, "Fetching document");
-                        if !identity_storage.contains(&did).await {
-                            tracing::warn!(%did, "Identity is not registered");
+                    //         if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                    //             let _ = resp.send((ch, payload));
+                    //         }
+
+                    //         return;
+                    //     }
+                    // };
+
+                    // let peer_id = record.peer_id();
+
+                    // let Ok(did) = peer_id.to_did() else {
+                    //     tracing::warn!(%peer_id, "Could not convert to did key");
+                    //     let payload = payload_message_construct(
+                    //         keypair,
+                    //         None,
+                    //         Response::SynchronizedResponse(
+                    //             identity::protocol::SynchronizedResponse::Error(
+                    //                 SynchronizedError::Invalid,
+                    //             ),
+                    //         ),
+                    //     )
+                    //     .expect("Valid payload construction");
+
+                    //     if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                    //         let _ = resp.send((ch, payload));
+                    //     }
+
+                    //     return;
+                    // };
+
+                    // if !identity_storage.contains(&did).await {
+                    //     let payload = payload_message_construct(
+                    //         keypair,
+                    //         None,
+                    //         Response::SynchronizedResponse(
+                    //             identity::protocol::SynchronizedResponse::Error(
+                    //                 SynchronizedError::NotRegistered,
+                    //             ),
+                    //         ),
+                    //     )
+                    //     .expect("Valid payload construction");
+
+                    //     if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                    //         let _ = resp.send((ch, payload));
+                    //     }
+
+                    //     return;
+                    // }
+
+                    // _ = self.precord_tx.send(record).await;
+
+                    // let payload = payload_message_construct(
+                    //     keypair,
+                    //     None,
+                    //     Response::SynchronizedResponse(SynchronizedResponse::RecordStored),
+                    // )
+                    // .expect("Valid payload construction");
+
+                    // if let (Some(ch), Some(resp)) = (ch.take(), resp.take()) {
+                    //     let _ = resp.send((ch, payload));
+                    // }
+                }
+                identity::protocol::Request::Synchronized(Synchronized::Fetch) => {
+                    let did = match payload.sender().to_did() {
+                        Ok(did) => did,
+                        Err(e) => {
+                            tracing::warn!(sender = %payload.sender(), error = %e, "could not convert to did key");
                             let payload = payload_message_construct(
                                 keypair,
                                 None,
                                 Response::SynchronizedResponse(
                                     identity::protocol::SynchronizedResponse::Error(
-                                        SynchronizedError::NotRegistered,
+                                        SynchronizedError::Invalid,
                                     ),
                                 ),
                             )
                             .expect("Valid payload construction");
 
-                            if let (Some(ch), Some(resp)) = (ch, resp) {
-                                let _ = resp.send((ch, payload));
-                            }
+                            let bytes = payload.to_bytes().expect("valid deserialization");
+                            _ = resp.send(bytes);
 
                             return;
                         }
+                    };
 
-                        tracing::info!(%did, "looking for package");
-                        let event = match identity_storage.get_user_document(&did).await {
-                            Ok(package) => {
-                                tracing::info!(%did, package = %package, "package found");
-                                Response::SynchronizedResponse(SynchronizedResponse::Package(
-                                    package,
-                                ))
-                            }
-                            Err(_) => {
-                                tracing::warn!(%did, "package not found");
-                                Response::SynchronizedResponse(
-                                    identity::protocol::SynchronizedResponse::Error(
-                                        SynchronizedError::DoesntExist,
-                                    ),
-                                )
-                            }
-                        };
+                    tracing::info!(%did, "Fetching document");
+                    if !identity_storage.contains(&did).await {
+                        tracing::warn!(%did, "Identity is not registered");
+                        let payload = payload_message_construct(
+                            keypair,
+                            None,
+                            Response::SynchronizedResponse(
+                                identity::protocol::SynchronizedResponse::Error(
+                                    SynchronizedError::NotRegistered,
+                                ),
+                            ),
+                        )
+                        .expect("Valid payload construction");
 
-                        let payload = payload_message_construct(keypair, None, event)
-                            .expect("Valid payload construction");
+                        let bytes = payload.to_bytes().expect("valid deserialization");
+                        _ = resp.send(bytes);
 
-                        if let (Some(ch), Some(resp)) = (ch, resp) {
-                            let _ = resp.send((ch, payload));
-                        }
+                        return;
                     }
-                    identity::protocol::Request::Lookup(kind) => {
-                        let peer_id = payload.sender();
-                        tracing::info!(peer_id = %peer_id, lookup = ?kind);
 
-                        let identity = identity_storage
-                            .lookup(kind.clone())
-                            .await
-                            .unwrap_or_default();
-
-                        let event = Response::LookupResponse(LookupResponse::Ok { identity });
-
-                        let payload = payload_message_construct(keypair, None, event)
-                            .expect("Valid payload construction");
-
-                        if let (Some(ch), Some(resp)) = (ch, resp) {
-                            let _ = resp.send((ch, payload));
+                    tracing::info!(%did, "looking for package");
+                    let event = match identity_storage.get_user_document(&did).await {
+                        Ok(package) => {
+                            tracing::info!(%did, package = %package, "package found");
+                            Response::SynchronizedResponse(SynchronizedResponse::Package(package))
                         }
-                    }
-                },
-                Message::Response(_) => {}
+                        Err(_) => {
+                            tracing::warn!(%did, "package not found");
+                            Response::SynchronizedResponse(
+                                identity::protocol::SynchronizedResponse::Error(
+                                    SynchronizedError::DoesntExist,
+                                ),
+                            )
+                        }
+                    };
+
+                    let payload = payload_message_construct(keypair, None, event)
+                        .expect("Valid payload construction");
+
+                    let bytes = payload.to_bytes().expect("valid deserialization");
+                    _ = resp.send(bytes);
+                }
+                identity::protocol::Request::Lookup(kind) => {
+                    let peer_id = payload.sender();
+                    tracing::info!(peer_id = %peer_id, lookup = ?kind);
+
+                    let identity = identity_storage
+                        .lookup(kind.clone())
+                        .await
+                        .unwrap_or_default();
+
+                    let event = Response::LookupResponse(LookupResponse::Ok { identity });
+
+                    let payload = payload_message_construct(keypair, None, event)
+                        .expect("Valid payload construction");
+
+                    let bytes = payload.to_bytes().expect("valid deserialization");
+                    _ = resp.send(bytes);
+                }
             }
         };
 
-        self.requests.push(fut.boxed());
+        let tasks = match self.requests.get_mut(&peer_id) {
+            Some(task) => task,
+            None => {
+                self.requests.insert(peer_id, OrderedFutureSet::new());
+                self.requests.get_mut(&peer_id).expect("valid entry")
+            }
+        };
+        tasks.push(fut.boxed());
     }
 
-    async fn process_message_events(
+    fn process_message_events(
         &mut self,
-        id: InboundRequestId,
-        ch: Option<ResponseChannel<MessagePayload>>,
-        payload: MessagePayload,
-        resp: Option<OntshotSender<(ResponseChannel<MessagePayload>, MessagePayload)>>,
+        peer_id: PeerId,
+        payload: Result<MessagePayload, Error>,
+        resp: OneshotSender<Bytes>,
     ) {
         let ipfs = self.ipfs.clone();
         let message_storage = self.message_storage.clone();
 
+        let payload = match payload {
+            Ok(payload) => payload,
+            Err(e) => {
+                let payload =
+                    payload_message_construct(ipfs.keypair(), None, Response::Error(e.to_string()))
+                        .expect("Valid payload construction");
+
+                let bytes = payload.to_bytes().expect("valid deserialization");
+                _ = resp.send(bytes);
+                return;
+            }
+        };
+
         let fut = async move {
             let keypair = ipfs.keypair();
-            tracing::info!(request_id = ?id, "Processing Incoming Request");
+            tracing::info!(%peer_id, "Processing Incoming Request");
 
             let peer_id = payload.sender();
             let Ok(did) = peer_id.to_did() else {
@@ -891,108 +955,110 @@ impl ShuttleTask {
                 )
                 .expect("Valid payload construction");
 
-                if let (Some(ch), Some(resp)) = (ch, resp) {
-                    let _ = resp.send((ch, payload));
-                }
+                let bytes = payload.to_bytes().expect("valid deserialization");
+                _ = resp.send(bytes);
 
                 return;
             };
 
-            tracing::info!(request_id = ?id, %peer_id, %did, "Processing Incoming Message Request");
+            tracing::info!(%peer_id, %did, "Processing Incoming Message Request");
             match payload.message() {
-                message::protocol::Message::Request(request) => match request {
-                    message::protocol::Request::RegisterConversation(RegisterConversation {
-                        ..
-                    }) => todo!(),
-                    message::protocol::Request::MessageUpdate(update) => match update {
-                        message::protocol::MessageUpdate::Insert {
-                            conversation_id,
-                            message_id,
-                            recipients,
-                            message_cid,
-                        } => {
-                            let conversation_id = *conversation_id;
-                            let message_id = *message_id;
-                            let recipients = recipients.to_owned();
-                            let message_cid = *message_cid;
+                message::protocol::Request::RegisterConversation(RegisterConversation {
+                    ..
+                }) => todo!(),
+                message::protocol::Request::MessageUpdate(update) => match update {
+                    message::protocol::MessageUpdate::Insert {
+                        conversation_id,
+                        message_id,
+                        recipients,
+                        message_cid,
+                    } => {
+                        let conversation_id = *conversation_id;
+                        let message_id = *message_id;
+                        let recipients = recipients.to_owned();
+                        let message_cid = *message_cid;
 
-                            tracing::info!(%conversation_id, %message_id, %did, "inserting message into mailbox");
-                            if let Err(e) = message_storage
-                                .insert_or_update(
-                                    &did,
-                                    recipients,
-                                    conversation_id,
-                                    message_id,
-                                    message_cid,
-                                )
-                                .await
-                            {
-                                tracing::error!(%conversation_id, %message_id, %did, error = %e, "unable to insert message into mailbox");
-                                return;
-                            };
-                            tracing::info!(%conversation_id, %message_id, %did, "message inserted into mailbox");
-                        }
-                        message::protocol::MessageUpdate::Delivered {
-                            conversation_id,
-                            message_id,
-                        } => {
-                            let conversation_id = *conversation_id;
-                            let message_id = *message_id;
-
-                            tracing::info!(%conversation_id, %message_id, %did, "marking message as delivered");
-                            if let Err(e) = message_storage
-                                .message_delivered(&did, conversation_id, message_id)
-                                .await
-                            {
-                                tracing::error!(%conversation_id, %message_id, %did, error = %e, "unable to mark message as delivered");
-                                return;
-                            };
-                            tracing::info!(%conversation_id, %message_id, %did, "message delivered");
-                        }
-                        message::protocol::MessageUpdate::Remove {
-                            conversation_id,
-                            message_id,
-                        } => {
-                            let conversation_id = *conversation_id;
-                            let message_id = *message_id;
-
-                            tracing::info!(%conversation_id, %message_id, %did, "removing message from mailbox");
-                            if let Err(e) = message_storage
-                                .remove_message(&did, conversation_id, message_id)
-                                .await
-                            {
-                                tracing::error!(%conversation_id, %message_id, %did, error = %e, "unable to remove message from mailbox");
-                                return;
-                            };
-                            tracing::info!(%conversation_id, %message_id, %did, "message removed");
-                        }
-                    },
-                    message::protocol::Request::FetchMailBox { conversation_id } => {
-                        let message = match message_storage
-                            .get_unsent_messages(did, *conversation_id)
+                        tracing::info!(%conversation_id, %message_id, %did, "inserting message into mailbox");
+                        if let Err(e) = message_storage
+                            .insert_or_update(
+                                &did,
+                                recipients,
+                                conversation_id,
+                                message_id,
+                                message_cid,
+                            )
                             .await
                         {
-                            Ok(content) => message::protocol::Response::Mailbox {
-                                conversation_id: *conversation_id,
-                                content,
-                            },
-                            Err(e) => message::protocol::Response::Error(e.to_string()),
+                            tracing::error!(%conversation_id, %message_id, %did, error = %e, "unable to insert message into mailbox");
+                            return;
                         };
+                        tracing::info!(%conversation_id, %message_id, %did, "message inserted into mailbox");
+                    }
+                    message::protocol::MessageUpdate::Delivered {
+                        conversation_id,
+                        message_id,
+                    } => {
+                        let conversation_id = *conversation_id;
+                        let message_id = *message_id;
 
-                        let payload =
-                            message::protocol::payload_message_construct(keypair, None, message)
-                                .expect("Valid payload construction");
+                        tracing::info!(%conversation_id, %message_id, %did, "marking message as delivered");
+                        if let Err(e) = message_storage
+                            .message_delivered(&did, conversation_id, message_id)
+                            .await
+                        {
+                            tracing::error!(%conversation_id, %message_id, %did, error = %e, "unable to mark message as delivered");
+                            return;
+                        };
+                        tracing::info!(%conversation_id, %message_id, %did, "message delivered");
+                    }
+                    message::protocol::MessageUpdate::Remove {
+                        conversation_id,
+                        message_id,
+                    } => {
+                        let conversation_id = *conversation_id;
+                        let message_id = *message_id;
 
-                        if let (Some(ch), Some(resp)) = (ch, resp) {
-                            let _ = resp.send((ch, payload));
-                        }
+                        tracing::info!(%conversation_id, %message_id, %did, "removing message from mailbox");
+                        if let Err(e) = message_storage
+                            .remove_message(&did, conversation_id, message_id)
+                            .await
+                        {
+                            tracing::error!(%conversation_id, %message_id, %did, error = %e, "unable to remove message from mailbox");
+                            return;
+                        };
+                        tracing::info!(%conversation_id, %message_id, %did, "message removed");
                     }
                 },
-                message::protocol::Message::Response(_) => {}
+                message::protocol::Request::FetchMailBox { conversation_id } => {
+                    let message = match message_storage
+                        .get_unsent_messages(did, *conversation_id)
+                        .await
+                    {
+                        Ok(content) => message::protocol::Response::Mailbox {
+                            conversation_id: *conversation_id,
+                            content,
+                        },
+                        Err(e) => message::protocol::Response::Error(e.to_string()),
+                    };
+
+                    let payload =
+                        message::protocol::payload_message_construct(keypair, None, message)
+                            .expect("Valid payload construction");
+
+                    let bytes = payload.to_bytes().expect("valid deserialization");
+                    _ = resp.send(bytes);
+                }
             }
         };
 
-        self.requests.push(fut.boxed());
+        let tasks = match self.requests.get_mut(&peer_id) {
+            Some(task) => task,
+            None => {
+                self.requests.insert(peer_id, OrderedFutureSet::new());
+                self.requests.get_mut(&peer_id).expect("valid entry")
+            }
+        };
+        tasks.push(fut.boxed());
     }
 }
 
