@@ -1,6 +1,6 @@
 use futures::{channel::mpsc, StreamExt, TryFutureExt};
 
-use crate::rt::{Executor, LocalExecutor};
+use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
 use crate::store::{
     ds_key::DataStoreKey, ecdh_encrypt, payload::PayloadBuilder, topics::PeerTopic, PeerIdExt,
 };
@@ -8,7 +8,6 @@ use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, Keypair};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::RwLock;
-use tokio_util::sync::{CancellationToken, DropGuard};
 use warp::{crypto::DID, error::Error};
 use web_time::Instant;
 
@@ -228,7 +227,7 @@ pub struct QueueEntry {
     recipient: DID,
     keypair: Keypair,
     item: RequestResponsePayload,
-    drop_guard: Arc<RwLock<Option<DropGuard>>>,
+    drop_guard: Arc<RwLock<Option<AbortableJoinHandle<()>>>>,
     executor: LocalExecutor,
 }
 
@@ -248,9 +247,6 @@ impl QueueEntry {
             drop_guard: Default::default(),
             executor: LocalExecutor,
         };
-
-        let token = CancellationToken::new();
-        let drop_guard = token.clone().drop_guard();
 
         let fut = {
             let entry = entry.clone();
@@ -332,16 +328,9 @@ impl QueueEntry {
             }
         };
 
-        entry.executor.dispatch(async move {
-            futures::pin_mut!(fut);
+        let _handle = entry.executor.spawn_abortable(fut);
 
-            tokio::select! {
-                _ = token.cancelled() => {}
-                _ = &mut fut => {}
-            }
-        });
-
-        *entry.drop_guard.write().await = Some(drop_guard);
+        *entry.drop_guard.write().await = Some(_handle);
 
         entry
     }
