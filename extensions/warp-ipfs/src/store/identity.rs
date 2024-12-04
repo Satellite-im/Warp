@@ -1868,7 +1868,7 @@ impl IdentityStore {
                     };
 
                 match payload.message() {
-                    Response::Ack => {},
+                    Response::Ack => {}
                     Response::InvalidPayload => {
                         tracing::error!(%peer_id, "request was invalid");
                         continue;

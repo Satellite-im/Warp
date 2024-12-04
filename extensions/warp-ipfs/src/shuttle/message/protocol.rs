@@ -21,7 +21,6 @@ pub fn payload_message_construct<T: Serialize + DeserializeOwned + Clone>(
     Ok(payload)
 }
 
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ConversationType {
     Direct,
