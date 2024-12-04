@@ -37,6 +37,11 @@ struct Opt {
     #[clap(long)]
     listen_addr: Vec<Multiaddr>,
 
+    /// External address in multiaddr format that would indicate how the node can be reached.
+    /// If empty, all listening addresses will be used as an external address
+    #[clap(long)]
+    external_addr: Vec<Multiaddr>,
+
     /// Primary node in multiaddr format for bootstrap, discovery and building out mesh network
     #[clap(long)]
     primary_nodes: Vec<Multiaddr>,
@@ -118,7 +123,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         opts.enable_relay_server,
         false,
         &opts.listen_addr,
-        &[],
+        &opts.external_addr,
         true,
     )
     .await?;

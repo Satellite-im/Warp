@@ -177,6 +177,10 @@ impl ShuttleServer {
             uninitialized = uninitialized.set_path(path);
         }
 
+        if external_addrs.is_empty() {
+            uninitialized = uninitialized.listen_as_external_addr();
+        }
+
         let ipfs = uninitialized.start().await?;
 
         for addr in addrs {
@@ -267,10 +271,6 @@ impl Future for ShuttleTask {
 
 impl ShuttleTask {
     async fn run(&mut self) {
-        // TODO: Investigate in JoinSet vs FuturesUnordered. See https://github.com/tokio-rs/tokio/issues/5564
-        // TODO: Track long running task (or futures) and abort/terminate them if they exceed a specific (TBD) duration
-        //       (i.e if we are pinning a file from a user, the duration can be ignored while if the user is updating their profile, it shouldnt exceed maybe 5min (though other factors may have to be taken into account))
-
         loop {
             tokio::select! {
                 biased;
