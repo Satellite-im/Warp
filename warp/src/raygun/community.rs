@@ -274,6 +274,7 @@ pub enum CommunityPermission {
 pub enum CommunityChannelPermission {
     ViewChannel,
     SendMessages,
+    SendAttachments,
 }
 
 #[async_trait::async_trait]
