@@ -647,7 +647,12 @@ impl ShuttleTask {
                     }
                 }
                 identity::protocol::Request::Synchronized(Synchronized::Store { package }) => {
-                    //TODO: Ack
+                    let payload = payload_message_construct(keypair, None, Response::Ack)
+                        .expect("Valid payload construction");
+
+                    let bytes = payload.to_bytes().expect("valid deserialization");
+                    _ = resp.send(bytes);
+
                     let peer_id = payload.sender();
                     let Ok(did) = peer_id.to_did() else {
                         tracing::warn!(%peer_id, "Could not convert to did key");
