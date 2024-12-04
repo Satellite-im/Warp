@@ -338,6 +338,7 @@ pub enum CommunityChannelPermission {
     ViewChannel,
     #[serde(rename = "community_channel.messages.send_messages")]
     SendMessages,
+    SendAttachments,
 }
 
 impl Display for CommunityChannelPermission {
