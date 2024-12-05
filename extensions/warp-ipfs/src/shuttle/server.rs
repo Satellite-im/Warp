@@ -15,6 +15,7 @@ use std::task::{Context, Poll};
 use std::{path::Path, time::Duration};
 use warp::error::{Error as WarpError, Error};
 
+use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
 // use crate::shuttle::identity::protocol::RegisterError;
 use crate::store::{
     document::identity::IdentityDocument,
@@ -28,7 +29,6 @@ use rust_ipfs::{
     libp2p::{self},
     p2p::PubsubConfig,
 };
-use tokio::task::JoinHandle;
 
 use super::{
     identity::{
@@ -61,7 +61,7 @@ struct Behaviour {
 #[allow(dead_code)]
 pub struct ShuttleServer {
     ipfs: Ipfs,
-    task: JoinHandle<()>,
+    _handle: AbortableJoinHandle<()>,
 }
 
 type IdReqSt = BoxStream<
@@ -105,6 +105,7 @@ impl ShuttleServer {
         external_addrs: &[Multiaddr],
         ext: bool,
     ) -> anyhow::Result<Self> {
+        let executor = LocalExecutor;
         let path = path.map(|p| p.as_ref().to_path_buf());
 
         let local_peer_id = keypair.public().to_peer_id();
@@ -236,11 +237,11 @@ impl ShuttleServer {
             message_request_response,
         };
 
-        let task = tokio::spawn(async move {
+        let _handle = executor.spawn_abortable(async move {
             server_event.run().await;
         });
 
-        Ok(ShuttleServer { ipfs, task })
+        Ok(ShuttleServer { ipfs, _handle })
     }
 
     pub async fn addresses(&self) -> impl Iterator<Item = Multiaddr> {
