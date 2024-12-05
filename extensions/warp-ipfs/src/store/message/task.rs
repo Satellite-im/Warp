@@ -3,7 +3,7 @@ use chrono::Utc;
 use either::Either;
 use futures::channel::oneshot;
 use futures::stream::BoxStream;
-use futures::{pin_mut, StreamExt, TryFutureExt};
+use futures::{StreamExt, TryFutureExt};
 use futures_timer::Delay;
 use indexmap::{IndexMap, IndexSet};
 use ipld_core::cid::Cid;
@@ -455,6 +455,11 @@ impl ConversationTask {
             return Err(Error::Other);
         }
 
+        let ipfs = self.ipfs.clone();
+        let addresses = addresses.clone();
+        let keypair = self.identity.root_document().keypair().clone();
+        let conversation_id = self.conversation_id;
+
         let payload = PayloadBuilder::new(
             self.identity.root_document().keypair(),
             crate::shuttle::message::protocol::Request::FetchMailBox {
@@ -464,11 +469,6 @@ impl ConversationTask {
         .build()?;
 
         let bytes = payload.to_bytes().expect("valid deserialization");
-
-        let ipfs = self.ipfs.clone();
-
-        let addresses = addresses.clone();
-        let conversation_id = self.conversation_id;
 
         let mut mailbox = BTreeMap::new();
         let mut providers = vec![];
@@ -520,7 +520,7 @@ impl ConversationTask {
         for (id, cid) in conversation_mailbox {
             let ipfs = ipfs.clone();
             let providers = providers.clone();
-            let root = self.identity.root_document().clone();
+            let keypair = keypair.clone();
             let fut = async move {
                 ipfs.fetch(&cid).recursive().await?;
                 let message_document = ipfs
@@ -534,7 +534,7 @@ impl ConversationTask {
                 }
 
                 let payload = PayloadBuilder::new(
-                    root.keypair(),
+                    &keypair,
                     crate::shuttle::message::protocol::Request::FetchMailBox { conversation_id },
                 )
                 .build()?;
@@ -550,8 +550,6 @@ impl ConversationTask {
             };
             messages.insert(id, Box::pin(fut));
         }
-
-        pin_mut!(messages);
 
         let mut messages = messages
             .filter_map(|(_, result)| async move { result.ok() })
