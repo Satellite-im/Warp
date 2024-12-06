@@ -98,6 +98,10 @@ pub struct CommunityDocument {
     #[serde(default)]
     pub deleted: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<Cid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub banner: Option<Cid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
 }
 
@@ -201,6 +205,8 @@ impl CommunityDocument {
             permissions,
             invites: IndexMap::new(),
             deleted: false,
+            icon: None,
+            banner: None,
             signature: None,
         };
         document.sign(keypair)?;

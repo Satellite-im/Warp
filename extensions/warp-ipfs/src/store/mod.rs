@@ -516,6 +516,8 @@ pub enum CommunityUpdateKind {
     EditCommunityDescription {
         description: Option<String>,
     },
+    EditIcon,
+    EditBanner,
     GrantCommunityPermission {
         permissions: Vec<String>,
         role_id: RoleId,

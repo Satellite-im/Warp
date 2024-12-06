@@ -185,6 +185,12 @@ pub enum MessageEventKind {
         community_id: Uuid,
         description: Option<String>,
     },
+    EditedCommunityIcon {
+        community_id: Uuid,
+    },
+    EditedCommunityBanner {
+        community_id: Uuid,
+    },
     GrantedCommunityPermission {
         community_id: Uuid,
         permissions: Vec<String>,
