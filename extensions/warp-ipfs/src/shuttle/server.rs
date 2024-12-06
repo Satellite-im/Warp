@@ -250,26 +250,6 @@ impl ShuttleServer {
     }
 }
 
-impl Future for ShuttleTask {
-    type Output = ();
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // We perform the polling in burst to yield to the executor
-        while let Poll::Ready(Some((peer_id, request, response))) =
-            self.identity_request_response.poll_next_unpin(cx)
-        {
-            self.process_identity_events(peer_id, request, response);
-        }
-
-        while let Poll::Ready(Some((peer_id, request, response))) =
-            self.message_request_response.poll_next_unpin(cx)
-        {
-            self.process_message_events(peer_id, request, response);
-        }
-
-        Poll::Pending
-    }
-}
-
 impl ShuttleTask {
     async fn run(&mut self) {
         loop {
