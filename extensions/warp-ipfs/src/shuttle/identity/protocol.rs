@@ -185,7 +185,6 @@ pub enum RegisterError {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Synchronized {
-    PeerRecord { record: Vec<u8> },
     Store { package: Cid },
     Fetch,
 }
