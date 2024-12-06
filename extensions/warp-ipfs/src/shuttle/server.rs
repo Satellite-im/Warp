@@ -315,6 +315,7 @@ impl ShuttleTask {
             let keypair = ipfs.keypair();
             tracing::info!(%peer_id, "Processing Incoming Request");
             let sender = payload.sender();
+            let resp = resp;
             match payload.message() {
                 identity::protocol::Request::Register(Register::IsRegistered) => {
                     let peer_id = payload.sender();
