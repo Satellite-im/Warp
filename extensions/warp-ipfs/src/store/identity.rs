@@ -1970,7 +1970,7 @@ impl IdentityStore {
                 {
                     Ok(response) => response,
                     Err(e) => {
-                        tracing::warn!(error = %e, %peer_id, "unable to send request to shuttle node");
+                        tracing::warn!(error = %e, %peer_id, "unable to send registration request to shuttle node");
                         continue;
                     }
                 };
