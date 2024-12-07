@@ -174,10 +174,9 @@ impl ShuttleServer {
             ipfs.add_external_address(addr).await?;
         }
 
-        let root = super::store::root::RootStorage::new(&ipfs, path).await;
+        let root = super::store::root::RootStorage::new(&ipfs).await;
         let identity = super::store::identity::IdentityStorage::new(&ipfs, &root).await;
-        let message =
-            super::store::messages::MessageStorage::new(&ipfs, &root, &identity, None).await;
+        let message = super::store::messages::MessageStorage::new(&ipfs, &root, &identity).await;
 
         println!(
             "Identities Registered: {}",

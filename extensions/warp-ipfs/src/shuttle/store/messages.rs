@@ -5,7 +5,6 @@ use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 use futures::{stream, Stream, StreamExt};
 use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
-use std::path::PathBuf;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 use warp::{crypto::DID, error::Error};
@@ -21,19 +20,13 @@ pub struct MessageStorage {
 
 struct MessageStorageInner {
     ipfs: Ipfs,
-    _path: Option<PathBuf>,
     list: Option<Cid>,
     identity: IdentityStorage,
     root: RootStorage,
 }
 
 impl MessageStorage {
-    pub async fn new(
-        ipfs: &Ipfs,
-        root: &RootStorage,
-        identity: &IdentityStorage,
-        _path: Option<PathBuf>,
-    ) -> Self {
+    pub async fn new(ipfs: &Ipfs, root: &RootStorage, identity: &IdentityStorage) -> Self {
         let root_dag = root.get_root().await;
 
         let list = root_dag.conversation_mailbox;
@@ -43,7 +36,6 @@ impl MessageStorage {
             root: root.clone(),
             identity: identity.clone(),
             list,
-            _path,
         }));
 
         Self { inner }

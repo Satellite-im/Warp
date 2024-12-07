@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 use futures::TryFutureExt;
 use ipld_core::cid::Cid;
@@ -6,6 +6,8 @@ use rust_ipfs::Ipfs;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use warp::error::Error;
+
+const ROOT_KEY: &str = "root";
 
 #[derive(Default, Serialize, Deserialize, Clone, Copy, Debug)]
 pub struct Root {
@@ -21,7 +23,6 @@ pub struct Root {
 struct RootInner {
     root: Root,
     cid: Option<Cid>,
-    path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -31,15 +32,15 @@ pub struct RootStorage {
 }
 
 impl RootStorage {
-    pub async fn new(ipfs: &Ipfs, path: Option<PathBuf>) -> Self {
-        let root_cid = match path.as_ref() {
-            Some(path) => tokio::fs::read(path.join(".root_v0"))
-                .await
-                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-                .ok()
-                .and_then(|cid_str| cid_str.parse().ok()),
-            None => None,
-        };
+    pub async fn new(ipfs: &Ipfs) -> Self {
+        let root_cid = ipfs
+            .repo()
+            .data_store()
+            .get(ROOT_KEY.as_bytes())
+            .await
+            .unwrap_or_default()
+            .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+            .and_then(|cid_str| cid_str.parse().ok());
 
         // let root_cid = ipfs
         //     .ipns()
@@ -57,7 +58,6 @@ impl RootStorage {
         let inner = RootInner {
             root,
             cid: root_cid,
-            path,
         };
 
         Self {
@@ -135,11 +135,15 @@ impl RootInner {
             }
         }
 
-        if let Some(path) = self.path.as_ref() {
-            let cid = cid.to_string();
-            if let Err(e) = tokio::fs::write(path.join(".root_v0"), cid).await {
-                tracing::error!("Error writing cid to file: {e}");
-            }
+        let cid_str = cid.to_string();
+
+        if let Err(e) = ipfs
+            .repo()
+            .data_store()
+            .put(ROOT_KEY.as_bytes(), cid_str.as_bytes())
+            .await
+        {
+            tracing::error!(error = %e, "unable to store root cid");
         }
 
         tracing::info!(cid = %cid, "root is stored");
