@@ -506,7 +506,8 @@ struct DiscoveryTask {
 
     discovery_request_st: BoxStream<'static, (PeerId, InboundRequestId, Bytes)>,
 
-    responsing_fut: FutureMap<(PeerId, InboundRequestId), BoxFuture<'static, Result<(), anyhow::Error>>>,
+    responsing_fut:
+        FutureMap<(PeerId, InboundRequestId), BoxFuture<'static, Result<(), anyhow::Error>>>,
 
     discovery_fut: Option<BoxFuture<'static, Result<Vec<PeerId>, Error>>>,
 
@@ -794,9 +795,10 @@ impl Future for DiscoveryTask {
                     .build()
                     .expect("valid payload");
                 let bytes = pl.to_bytes().expect("valid payload");
-                self.responsing_fut.insert((peer_id, id), async move {
-                    ipfs.send_response(peer_id, id, bytes).await
-                }.boxed());
+                self.responsing_fut.insert(
+                    (peer_id, id),
+                    async move { ipfs.send_response(peer_id, id, bytes).await }.boxed(),
+                );
                 continue;
             };
 
@@ -806,9 +808,10 @@ impl Future for DiscoveryTask {
                     .build()
                     .expect("valid payload");
                 let bytes = pl.to_bytes().expect("valid payload");
-                self.responsing_fut.insert((peer_id, id), async move {
-                    ipfs.send_response(peer_id, id, bytes).await
-                }.boxed());
+                self.responsing_fut.insert(
+                    (peer_id, id),
+                    async move { ipfs.send_response(peer_id, id, bytes).await }.boxed(),
+                );
                 continue;
             }
 
@@ -821,12 +824,15 @@ impl Future for DiscoveryTask {
                 }
             };
 
-            self.responsing_fut.insert((peer_id, id), async move {
-                ipfs.send_response(peer_id, id, bytes).await
-            }.boxed());
+            self.responsing_fut.insert(
+                (peer_id, id),
+                async move { ipfs.send_response(peer_id, id, bytes).await }.boxed(),
+            );
         }
 
-        while let Poll::Ready(Some(((peer_id, id), result))) = self.responsing_fut.poll_next_unpin(cx) {
+        while let Poll::Ready(Some(((peer_id, id), result))) =
+            self.responsing_fut.poll_next_unpin(cx)
+        {
             if let Err(e) = result {
                 tracing::error!(%peer_id, error = %e, %id, "unable to respond to peer request");
             }
