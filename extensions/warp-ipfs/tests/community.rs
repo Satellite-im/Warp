@@ -29,6 +29,11 @@ mod test {
 
     use crate::common::create_accounts;
 
+    const RED_PNG: [u8; 30] = [
+        66, 77, 30, 0, 0, 0, 0, 0, 0, 0, 26, 0, 0, 0, 12, 0, 0, 0, 1, 0, 1, 0, 1, 0, 24, 0, 0, 0,
+        255, 0,
+    ];
+
     async fn assert_next_msg_event(
         streams: Vec<&mut MessageEventStream>,
         timeout: Duration,
@@ -427,27 +432,227 @@ mod test {
     //     assert!(false);
     //     Ok(())
     // }
-    // #[async_test]
-    // async fn unauthorized_edit_community_icon() -> anyhow::Result<()> {
-    //     assert!(false);
-    //     Ok(())
-    // }
-    // #[async_test]
-    // async fn authorized_edit_community_icon() -> anyhow::Result<()> {
-    //     assert!(false);
-    //     Ok(())
-    // }
-    // #[async_test]
-    // async fn unauthorized_edit_community_banner() -> anyhow::Result<()> {
-    //     assert!(false);
-    //     Ok(())
-    // }
-    // #[async_test]
-    // async fn authorized_edit_community_banner() -> anyhow::Result<()> {
-    //     assert!(false);
-    //     Ok(())
-    // }
 
+    #[async_test]
+    async fn unauthorized_edit_community_icon() -> anyhow::Result<()> {
+        let context = Some("test::unauthorized_edit_community_icon".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, _, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvited {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+        instance_b
+            .accept_community_invite(community.id(), invite.id())
+            .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id(),
+                user: did_b.clone()
+            }
+        );
+
+        let file_name = "red.png";
+        instance_b.put_buffer(file_name, &RED_PNG).await?;
+        let location = Location::Constellation {
+            path: file_name.to_string(),
+        };
+        let result = instance_b
+            .edit_community_icon(community.id(), location)
+            .await;
+        assert_eq!(
+            format!("{:?}", result),
+            format!("{:?}", Err::<(), Error>(Error::Unauthorized)),
+        );
+        Ok(())
+    }
+    #[async_test]
+    async fn authorized_edit_community_icon() -> anyhow::Result<()> {
+        let context = Some("test::authorized_edit_community_icon".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, _, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+        instance_a
+            .grant_community_permission_for_all(community.id(), CommunityPermission::EditIcon)
+            .await?;
+
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvited {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+        instance_b
+            .accept_community_invite(community.id(), invite.id())
+            .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id(),
+                user: did_b.clone()
+            }
+        );
+
+        let file_name = "red.png";
+        instance_b.put_buffer(file_name, &RED_PNG).await?;
+        let location = Location::Constellation {
+            path: file_name.to_string(),
+        };
+
+        let mut stream_b = instance_b.get_community_stream(community.id()).await?;
+        instance_b
+            .edit_community_icon(community.id(), location)
+            .await?;
+        assert_next_msg_event(
+            vec![&mut stream_a, &mut stream_b],
+            Duration::from_secs(60),
+            MessageEventKind::EditedCommunityIcon {
+                community_id: community.id(),
+            },
+        )
+        .await?;
+
+        let image = instance_a.get_community_icon(community.id()).await?;
+        assert_eq!(image.data(), &RED_PNG);
+        Ok(())
+    }
+    #[async_test]
+    async fn unauthorized_edit_community_banner() -> anyhow::Result<()> {
+        let context = Some("test::unauthorized_edit_community_banner".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, _, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvited {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+        instance_b
+            .accept_community_invite(community.id(), invite.id())
+            .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id(),
+                user: did_b.clone()
+            }
+        );
+
+        let file_name = "red.png";
+        instance_b.put_buffer(file_name, &RED_PNG).await?;
+        let location = Location::Constellation {
+            path: file_name.to_string(),
+        };
+        let result = instance_b
+            .edit_community_banner(community.id(), location)
+            .await;
+        assert_eq!(
+            format!("{:?}", result),
+            format!("{:?}", Err::<(), Error>(Error::Unauthorized)),
+        );
+        Ok(())
+    }
+    #[async_test]
+    async fn authorized_edit_community_banner() -> anyhow::Result<()> {
+        let context = Some("test::authorized_edit_community_icon".into());
+        let acc = (None, None, context);
+        let accounts = create_accounts(vec![acc.clone(), acc]).await?;
+        let (instance_a, _, _) = &mut accounts[0].clone();
+        let (instance_b, did_b, _) = &mut accounts[1].clone();
+
+        let community = instance_a.create_community("Community0").await?;
+        instance_a
+            .grant_community_permission_for_all(community.id(), CommunityPermission::EditBanner)
+            .await?;
+
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
+        let invite = instance_a
+            .create_community_invite(community.id(), Some(did_b.clone()), None)
+            .await?;
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityInvited {
+                community_id: community.id(),
+                invite_id: invite.id()
+            }
+        );
+
+        let mut stream_a = instance_a.get_community_stream(community.id()).await?;
+        instance_b
+            .accept_community_invite(community.id(), invite.id())
+            .await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::AcceptedCommunityInvite {
+                community_id: community.id(),
+                invite_id: invite.id(),
+                user: did_b.clone()
+            }
+        );
+
+        let file_name = "red.png";
+        instance_b.put_buffer(file_name, &RED_PNG).await?;
+        let location = Location::Constellation {
+            path: file_name.to_string(),
+        };
+
+        let mut stream_b = instance_b.get_community_stream(community.id()).await?;
+        instance_b
+            .edit_community_banner(community.id(), location)
+            .await?;
+        assert_next_msg_event(
+            vec![&mut stream_a, &mut stream_b],
+            Duration::from_secs(60),
+            MessageEventKind::EditedCommunityBanner {
+                community_id: community.id(),
+            },
+        )
+        .await?;
+
+        let image = instance_a.get_community_banner(community.id()).await?;
+        assert_eq!(image.data(), &RED_PNG);
+        Ok(())
+    }
     #[async_test]
     async fn unauthorized_create_community_invite() -> anyhow::Result<()> {
         let context = Some("test::unauthorized_create_community_invite".into());
@@ -4371,8 +4576,7 @@ mod test {
         .await?;
 
         let file_name = "my_file.txt";
-        let file = b"Thanks for reading my file";
-        instance_b.put_buffer(file_name, file).await?;
+        instance_b.put_buffer(file_name, &RED_PNG).await?;
         let locations = vec![Location::Constellation {
             path: file_name.to_string(),
         }];
@@ -4434,8 +4638,7 @@ mod test {
         );
 
         let file_name = "my_file.txt";
-        let file = b"Thanks for reading my file";
-        instance_b.put_buffer(file_name, file).await?;
+        instance_b.put_buffer(file_name, &RED_PNG).await?;
         let locations = vec![Location::Constellation {
             path: file_name.to_string(),
         }];
@@ -4491,8 +4694,7 @@ mod test {
 
         let mut stream_b = instance_b.get_community_stream(community.id()).await?;
         let file_name = "my_file.txt";
-        let file = b"Thanks for reading my file";
-        instance_b.put_buffer(file_name, file).await?;
+        instance_b.put_buffer(file_name, &RED_PNG).await?;
         let locations = vec![Location::Constellation {
             path: file_name.to_string(),
         }];
@@ -4601,8 +4803,7 @@ mod test {
 
         let mut stream_b = instance_b.get_community_stream(community.id()).await?;
         let file_name = "my_file.txt";
-        let file = b"Thanks for reading my file";
-        instance_b.put_buffer(file_name, file).await?;
+        instance_b.put_buffer(file_name, &RED_PNG).await?;
         let locations = vec![Location::Constellation {
             path: file_name.to_string(),
         }];
@@ -4651,7 +4852,7 @@ mod test {
             if let Some(progress) = constellation_progress_stream.next().await {
                 match progress {
                     Progression::ProgressComplete { name: _, total } => {
-                        assert_eq!(total, Some(file.len()));
+                        assert_eq!(total, Some(RED_PNG.len()));
                         break;
                     }
                     Progression::ProgressFailed {
@@ -4670,7 +4871,7 @@ mod test {
             }
         }
         let contents = fs::read(path.clone()).await?;
-        assert_eq!(contents, file.to_vec());
+        assert_eq!(contents, RED_PNG.clone());
         fs::remove_file(path).await?;
 
         let msg = instance_a
@@ -4721,8 +4922,7 @@ mod test {
 
         let mut stream_b = instance_b.get_community_stream(community.id()).await?;
         let file_name = "my_file.txt";
-        let file = b"Thanks for reading my file";
-        instance_b.put_buffer(file_name, file).await?;
+        instance_b.put_buffer(file_name, &RED_PNG).await?;
         let locations = vec![Location::Constellation {
             path: file_name.to_string(),
         }];
@@ -4831,8 +5031,7 @@ mod test {
 
         let mut stream_b = instance_b.get_community_stream(community.id()).await?;
         let file_name = "my_file.txt";
-        let file = b"Thanks for reading my file";
-        instance_b.put_buffer(file_name, file).await?;
+        instance_b.put_buffer(file_name, &RED_PNG).await?;
         let locations = vec![Location::Constellation {
             path: file_name.to_string(),
         }];
@@ -4876,14 +5075,14 @@ mod test {
             )
             .await?;
 
-        let mut bytes = Vec::with_capacity(file.len());
+        let mut bytes = Vec::with_capacity(RED_PNG.len());
 
         while let Some(result) = download_stream.next().await {
             let b = result.expect("valid");
             bytes.extend(b.to_vec());
         }
 
-        assert_eq!(bytes, file.to_vec());
+        assert_eq!(bytes, RED_PNG);
 
         let msg = instance_a
             .get_community_channel_message(community.id(), channel.id(), message_id)
