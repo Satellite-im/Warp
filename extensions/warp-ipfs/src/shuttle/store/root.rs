@@ -112,12 +112,6 @@ impl RootInner {
     }
 
     async fn save(&mut self, ipfs: &Ipfs) -> std::io::Result<()> {
-        //TODO: Reenable ipns
-        // self.ipfs
-        // .ipns()
-        // .publish(None, &IpfsPath::from(cid), Some(IpnsOption::Local))
-        // .await?;
-
         let cid = ipfs
             .put_dag(self.root)
             .pin(false)
