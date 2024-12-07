@@ -117,7 +117,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let local_peer_id = keypair.public().to_peer_id();
     println!("Local PeerID: {local_peer_id}");
 
-    let _ = shuttle::server::ShuttleServer::new(
+    let _handle = shuttle::server::ShuttleServer::new(
         &keypair,
         path,
         opts.enable_relay_server,
