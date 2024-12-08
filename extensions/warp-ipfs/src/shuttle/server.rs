@@ -122,6 +122,7 @@ impl ShuttleServer {
                 enable_websocket: true,
                 enable_secure_websocket: true,
                 websocket_pem: wss_certs_and_key,
+                version: UpgradeVersion::Standard,
                 ..Default::default()
             })
             // TODO: Either enable GC or do manual GC during little to no activity unless we reach a specific threshold
