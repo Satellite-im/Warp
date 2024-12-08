@@ -81,6 +81,7 @@ struct ShuttleTask {
 }
 
 impl ShuttleServer {
+    #[allow(clippy::too_many_arguments)]
     pub async fn new<P: AsRef<Path>>(
         keypair: &Keypair,
         wss_certs_and_key: Option<(Vec<String>, String)>,
