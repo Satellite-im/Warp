@@ -15,7 +15,6 @@ use chrono::{DateTime, Utc};
 use community::{CommunityChannelDocument, CommunityDocument, CommunityRoleDocument};
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
 use uuid::Uuid;
 
 use crate::store::community::CommunityInviteDocument;
@@ -179,7 +178,6 @@ pub(super) mod ds_key {
         }
     }
 }
-const SHUTTLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub trait PeerIdExt {
     fn to_public_key(&self) -> Result<PublicKey, anyhow::Error>;
