@@ -16,19 +16,6 @@ use warp::error::{Error as WarpError, Error};
 use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
 use crate::store::topics::IDENTITY_ANNOUNCEMENT;
 // use crate::shuttle::identity::protocol::RegisterError;
-use crate::store::{
-    document::identity::IdentityDocument,
-    payload::{PayloadBuilder, PayloadMessage},
-    protocols,
-    topics::PeerTopic,
-    PeerIdExt,
-};
-use rust_ipfs::p2p::RequestResponseConfig;
-use rust_ipfs::{
-    libp2p::{self},
-    p2p::PubsubConfig,
-};
-
 use super::{
     identity::{
         self,
@@ -42,6 +29,19 @@ use super::{
         protocol::{RegisterConversation, Response as MessageResponse},
     },
     subscription_stream::Subscriptions,
+};
+use crate::store::{
+    document::identity::IdentityDocument,
+    payload::{PayloadBuilder, PayloadMessage},
+    protocols,
+    topics::PeerTopic,
+    PeerIdExt,
+};
+use rust_ipfs::p2p::RequestResponseConfig;
+use rust_ipfs::repo::{GCConfig, GCTrigger};
+use rust_ipfs::{
+    libp2p::{self},
+    p2p::PubsubConfig,
 };
 
 // type OneshotSender<T> = oneshot::Sender<T>;
@@ -126,10 +126,10 @@ impl ShuttleServer {
                 ..Default::default()
             })
             // TODO: Either enable GC or do manual GC during little to no activity unless we reach a specific threshold
-            // .with_gc(GCConfig {
-            //     duration: Duration::from_secs(60 * 60),
-            //     trigger: GCTrigger::None,
-            // })
+            .with_gc(GCConfig {
+                duration: Duration::from_secs(60),
+                trigger: GCTrigger::None,
+            })
             .set_temp_pin_duration(Duration::from_secs(60 * 30))
             .with_request_response(vec![
                 RequestResponseConfig {
