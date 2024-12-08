@@ -19,7 +19,6 @@ use tokio::sync::RwLock;
 use tracing::Span;
 use web_time::Instant;
 
-use crate::shuttle::identity::{RequestEvent, RequestPayload};
 use warp::multipass::identity::{FriendRequest, Identifier, ShortId};
 use warp::multipass::GetIdentity;
 use warp::{
@@ -188,56 +187,15 @@ pub struct RequestResponsePayload {
     pub signature: Option<Vec<u8>>,
 }
 
-impl TryFrom<RequestResponsePayload> for RequestPayload {
-    type Error = Error;
-    fn try_from(req: RequestResponsePayload) -> Result<Self, Self::Error> {
-        req.verify()?;
-        let event = match req.event {
-            Event::Request => RequestEvent::Request,
-            Event::Accept => RequestEvent::Accept,
-            Event::Remove => RequestEvent::Remove,
-            Event::Reject => RequestEvent::Reject,
-            Event::Retract => RequestEvent::Retract,
-            Event::Block => RequestEvent::Block,
-            Event::Unblock => RequestEvent::Unblock,
-            Event::Response => return Err(Error::OtherWithContext("Invalid event type".into())),
-        };
-
-        let payload = RequestPayload {
-            sender: req.sender,
-            event,
-            created: req.created.ok_or(Error::InvalidConversion)?,
-            original_signature: req.signature.ok_or(Error::InvalidSignature)?,
-            signature: vec![],
-        };
-
-        Ok(payload)
+impl PartialOrd for RequestResponsePayload {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }
 
-impl TryFrom<RequestPayload> for RequestResponsePayload {
-    type Error = Box<dyn std::error::Error>;
-    fn try_from(req: RequestPayload) -> Result<Self, Self::Error> {
-        req.verify()?;
-        let event = match req.event {
-            RequestEvent::Request => Event::Request,
-            RequestEvent::Accept => Event::Accept,
-            RequestEvent::Remove => Event::Remove,
-            RequestEvent::Reject => Event::Reject,
-            RequestEvent::Retract => Event::Retract,
-            RequestEvent::Block => Event::Block,
-            RequestEvent::Unblock => Event::Unblock,
-        };
-
-        let payload = RequestResponsePayload {
-            version: RequestResponsePayloadVersion::V1,
-            sender: req.sender,
-            event,
-            created: Some(req.created),
-            signature: Some(req.original_signature),
-        };
-
-        Ok(payload)
+impl Ord for RequestResponsePayload {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.created.cmp(&other.created)
     }
 }
 
@@ -2083,8 +2041,6 @@ impl IdentityStore {
         request: RequestResponsePayload,
     ) -> Result<(), Error> {
         if let DiscoveryConfig::Shuttle { addresses } = self.discovery.discovery_config() {
-            let request: RequestPayload = request.try_into()?;
-
             let request = request
                 .sign(self.root_document().keypair())
                 .map_err(|e| anyhow::anyhow!("{e}"))?;

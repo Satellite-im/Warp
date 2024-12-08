@@ -3,12 +3,11 @@ use rust_ipfs::Keypair;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use warp::{crypto::DID, multipass::identity::ShortId};
 
+use crate::store::identity::RequestResponsePayload;
 use crate::store::{
     document::identity::IdentityDocument,
     payload::{PayloadBuilder, PayloadMessage},
 };
-
-use super::RequestPayload;
 
 pub fn payload_message_construct<T: Serialize + DeserializeOwned + Clone>(
     keypair: &Keypair,
@@ -98,15 +97,20 @@ impl From<LookupResponse> for Response {
 #[serde(rename_all = "snake_case")]
 pub enum Mailbox {
     FetchAll,
-    FetchFrom { did: DID },
-    Send { did: DID, request: RequestPayload },
+    FetchFrom {
+        did: DID,
+    },
+    Send {
+        did: DID,
+        request: RequestResponsePayload,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MailboxResponse {
     Receive {
-        list: Vec<RequestPayload>,
+        list: Vec<RequestResponsePayload>,
         remaining: usize,
     },
     Removed,
