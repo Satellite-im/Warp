@@ -2001,11 +2001,7 @@ impl IdentityStore {
 
                 match payload.message() {
                     Response::MailboxResponse(MailboxResponse::Receive { list, .. }) => {
-                        let list = list
-                            .iter()
-                            .cloned()
-                            .filter_map(|r| RequestResponsePayload::try_from(r).ok())
-                            .collect::<Vec<_>>();
+                        let list = list.iter().cloned().collect::<Vec<_>>();
 
                         for req in list {
                             let from = req.sender.clone();
