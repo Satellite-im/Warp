@@ -2001,7 +2001,7 @@ impl IdentityStore {
 
                 match payload.message() {
                     Response::MailboxResponse(MailboxResponse::Receive { list, .. }) => {
-                        let list = list.iter().cloned().collect::<Vec<_>>();
+                        let list = list.clone();
 
                         for req in list {
                             let from = req.sender.clone();
