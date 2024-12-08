@@ -83,6 +83,7 @@ struct ShuttleTask {
 impl ShuttleServer {
     pub async fn new<P: AsRef<Path>>(
         keypair: &Keypair,
+        wss_certs_and_key: Option<(Vec<String>, String)>,
         path: Option<P>,
         enable_relay_server: bool,
         memory_transport: bool,
@@ -120,6 +121,7 @@ impl ShuttleServer {
                 enable_memory_transport: memory_transport,
                 enable_websocket: true,
                 enable_secure_websocket: true,
+                websocket_pem: wss_certs_and_key,
                 ..Default::default()
             })
             // TODO: Either enable GC or do manual GC during little to no activity unless we reach a specific threshold

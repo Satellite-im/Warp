@@ -50,6 +50,7 @@ struct Opt {
     #[clap(long)]
     trusted_nodes: Vec<Multiaddr>,
 
+    /// Path to keyfile
     #[clap(long)]
     keyfile: Option<PathBuf>,
 
@@ -57,8 +58,18 @@ struct Opt {
     #[clap(long)]
     path: Option<PathBuf>,
 
+    /// Enable relay server
     #[clap(long)]
     enable_relay_server: bool,
+
+    /// TLS Certificate when websocket is used
+    /// Note: websocket required a signed certificate.
+    #[clap(long)]
+    ws_tls_certificate: Option<Vec<PathBuf>>,
+
+    /// TLS Private Key when websocket is used
+    #[clap(long)]
+    ws_tls_private_key: Option<PathBuf>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -114,11 +125,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
+    let (ws_cert, ws_pk) = match (
+        opts.ws_tls_certificate.map(|list| {
+            list.into_iter()
+                .map(|conf| path.as_ref().map(|p| p.join(conf.clone())).unwrap_or(conf))
+                .collect::<Vec<_>>()
+        }),
+        opts.ws_tls_private_key
+            .map(|conf| path.as_ref().map(|p| p.join(conf.clone())).unwrap_or(conf)),
+    ) {
+        (Some(cert), Some(prv)) => {
+            let mut certs = Vec::with_capacity(cert.len());
+            for c in cert {
+                let Ok(cert) = tokio::fs::read_to_string(c).await else {
+                    continue;
+                };
+                certs.push(cert);
+            }
+
+            let prv = tokio::fs::read_to_string(prv).await.ok();
+            ((!certs.is_empty()).then_some(certs), prv)
+        }
+        _ => (None, None),
+    };
+
+    let wss_opt = ws_cert.and_then(|list| ws_pk.map(|k| (list, k)));
+
     let local_peer_id = keypair.public().to_peer_id();
     println!("Local PeerID: {local_peer_id}");
 
     let _handle = shuttle::server::ShuttleServer::new(
         &keypair,
+        wss_opt,
         path,
         opts.enable_relay_server,
         false,
