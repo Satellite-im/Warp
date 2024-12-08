@@ -23,7 +23,7 @@ use crate::store::{
     topics::PeerTopic,
     PeerIdExt,
 };
-use rust_ipfs::p2p::RequestResponseConfig;
+use rust_ipfs::p2p::{RequestResponseConfig, UpgradeVersion};
 use rust_ipfs::{
     libp2p::{self},
     p2p::PubsubConfig,
