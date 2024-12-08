@@ -23,7 +23,7 @@ use crate::store::{
     topics::PeerTopic,
     PeerIdExt,
 };
-use rust_ipfs::p2p::{RequestResponseConfig, UpgradeVersion};
+use rust_ipfs::p2p::RequestResponseConfig;
 use rust_ipfs::{
     libp2p::{self},
     p2p::PubsubConfig,
@@ -123,7 +123,6 @@ impl ShuttleServer {
                 enable_websocket: true,
                 enable_secure_websocket: true,
                 websocket_pem: wss_certs_and_key,
-                version: UpgradeVersion::Standard,
                 ..Default::default()
             })
             // TODO: Either enable GC or do manual GC during little to no activity unless we reach a specific threshold
