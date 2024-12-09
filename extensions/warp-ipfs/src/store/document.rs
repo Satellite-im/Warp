@@ -6,11 +6,14 @@ use futures::{
 };
 use ipfs::{Ipfs, Keypair, PeerId};
 use ipld_core::cid::Cid;
+use pollable_map::futures::FutureMap;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
+use std::future::IntoFuture;
 use std::{collections::BTreeMap, path::Path, str::FromStr, time::Duration};
 use uuid::Uuid;
 
+use super::{keystore::Keystore, DidExt, MAX_IMAGE_SIZE};
 use warp::{
     constellation::{
         directory::Directory,
@@ -20,8 +23,6 @@ use warp::{
     error::Error,
     multipass::identity::{Identity, IdentityStatus},
 };
-
-use super::{keystore::Keystore, DidExt};
 
 use self::{
     files::{DirectoryDocument, FileDocument},
@@ -260,6 +261,7 @@ impl RootDocument {
 
     #[tracing::instrument(skip(self, ipfs))]
     pub async fn resolve2(&self, ipfs: &Ipfs) -> Result<(), Error> {
+        let ipfs = ipfs.clone();
         let document: IdentityDocument = ipfs
             .get_dag(self.identity)
             .deserialized()
@@ -268,59 +270,91 @@ impl RootDocument {
 
         document.resolve()?;
 
-        let _ = futures::future::ready(self.friends.ok_or(Error::Other))
-            .and_then(|document| async move {
-                ipfs.get_dag(document)
-                    .await
-                    .map_err(anyhow::Error::from)
-                    .map_err(Error::from)
-            })
-            .await;
+        resolve_verify_image(&ipfs, &document).await;
 
-        let _ = futures::future::ready(self.blocks.ok_or(Error::Other))
-            .and_then(|document| async move {
-                ipfs.get_dag(document)
-                    .await
-                    .map_err(anyhow::Error::from)
-                    .map_err(Error::from)
-            })
-            .await;
-
-        let _ = futures::future::ready(self.block_by.ok_or(Error::Other))
-            .and_then(|document| async move {
-                ipfs.get_dag(document)
-                    .await
-                    .map_err(anyhow::Error::from)
-                    .map_err(Error::from)
-            })
-            .await;
-
-        let _ = futures::future::ready(self.request.ok_or(Error::Other))
-            .and_then(|document| async move {
-                ipfs.get_dag(document)
-                    .await
-                    .map_err(anyhow::Error::from)
-                    .map_err(Error::from)
-            })
-            .await;
-
-        let _ = futures::future::ready(self.keystore.ok_or(Error::Other))
-            .and_then(|document| async move {
-                let map: BTreeMap<String, Cid> = ipfs.get_dag(document).deserialized().await?;
-                let mut resolved_map: BTreeMap<Uuid, _> = BTreeMap::new();
-                for (k, v) in map
-                    .iter()
-                    .filter_map(|(k, v)| Uuid::from_str(k).map(|k| (k, *v)).ok())
-                {
-                    if let Ok(store) = ipfs.get_dag(v).await {
-                        resolved_map.insert(k, store);
-                    }
+        let fut_friends =
+            futures::future::ready(self.friends.ok_or(Error::Other)).and_then(|document| {
+                let ipfs = ipfs.clone();
+                async move {
+                    ipfs.get_dag(document)
+                        .await
+                        .map_err(anyhow::Error::from)
+                        .map_err(Error::from)
                 }
-                Ok(resolved_map)
-            })
-            .await;
+            });
 
-        self.verify(ipfs).await
+        let fut_block_list =
+            futures::future::ready(self.blocks.ok_or(Error::Other)).and_then(|document| {
+                let ipfs = ipfs.clone();
+                async move {
+                    ipfs.get_dag(document)
+                        .await
+                        .map_err(anyhow::Error::from)
+                        .map_err(Error::from)
+                }
+            });
+
+        let fut_blocked_by_list = futures::future::ready(self.block_by.ok_or(Error::Other))
+            .and_then(|document| {
+                let ipfs = ipfs.clone();
+                async move {
+                    ipfs.get_dag(document)
+                        .await
+                        .map_err(anyhow::Error::from)
+                        .map_err(Error::from)
+                }
+            });
+
+        let fut_requests_list =
+            futures::future::ready(self.request.ok_or(Error::Other)).and_then(|document| {
+                let ipfs = ipfs.clone();
+                async move {
+                    ipfs.get_dag(document)
+                        .await
+                        .map_err(anyhow::Error::from)
+                        .map_err(Error::from)
+                }
+            });
+
+        let fut_keystore = futures::future::ready(self.keystore.ok_or(Error::Other)).and_then(
+            |document| {
+                let ipfs = ipfs.clone();
+                async move {
+                    let map: BTreeMap<String, Cid> = ipfs.get_dag(document).deserialized().await?;
+                    let mut resolved_map: BTreeMap<Uuid, _> = BTreeMap::new();
+                    let mut fut_kstore = FutureMap::new();
+                    for (k, v) in map
+                        .iter()
+                        .filter_map(|(k, v)| Uuid::from_str(k).map(|k| (k, *v)).ok())
+                    {
+                        let fut = ipfs.get_dag(v).into_future();
+                        fut_kstore.insert(k, fut);
+                    }
+
+                    while let Some((id, result)) = fut_kstore.next().await {
+                        match result {
+                            Ok(block) => {
+                                resolved_map.insert(id, block);
+                            }
+                            Err(e) => {
+                                tracing::error!(error = %e, conversation_id = %id, "unable to resolve keystore");
+                            }
+                        }
+                    }
+                    Ok(resolved_map)
+                }
+            },
+        );
+
+        let _ = tokio::join!(
+            fut_friends,
+            fut_block_list,
+            fut_blocked_by_list,
+            fut_requests_list,
+            fut_keystore
+        );
+
+        self.verify(&ipfs).await
     }
 
     // TODO: Include optional keypair to represent the actual keypair
@@ -406,6 +440,48 @@ impl RootDocument {
 
         Ok(root_document)
     }
+}
+
+async fn resolve_to_img_doc(ipfs: &Ipfs, cid: Cid) -> Result<(), Error> {
+    let dag: ImageDag = ipfs.get_dag(cid).deserialized().await?;
+    if dag.size > MAX_IMAGE_SIZE as _ {
+        return Err(Error::InvalidLength {
+            context: "image".into(),
+            current: dag.size as _,
+            minimum: None,
+            maximum: Some(MAX_IMAGE_SIZE),
+        });
+    }
+
+    let mut st = ipfs.cat_unixfs(dag.link).max_length(MAX_IMAGE_SIZE);
+
+    while let Some(result) = st.next().await {
+        // drop bytes as we are only polling to ensure that we dont exceed the max size
+        _ = result.map_err(anyhow::Error::from)?;
+    }
+    Ok(())
+}
+
+async fn resolve_verify_image(ipfs: &Ipfs, identity_document: &IdentityDocument) {
+    let _fut_picture = futures::future::ready(
+        identity_document
+            .metadata
+            .profile_picture
+            .ok_or(Error::Other),
+    )
+    .and_then(|cid| async move { resolve_to_img_doc(ipfs, cid).await })
+    .await;
+
+    let _fut_banner = futures::future::ready(
+        identity_document
+            .metadata
+            .profile_banner
+            .ok_or(Error::Other),
+    )
+    .and_then(|cid| async move { resolve_to_img_doc(ipfs, cid).await })
+    .await;
+
+    // _ = tokio::join!(fut_picture, fut_banner);
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
