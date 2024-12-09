@@ -435,7 +435,7 @@ impl ConversationTask {
                 }
 
                 _ = &mut check_mailbox => {
-                    _ = this.load_from_mailbox().await;
+                    // _ = this.load_from_mailbox().await;
                     check_mailbox.reset(Duration::from_secs(60));
                 }
             }
