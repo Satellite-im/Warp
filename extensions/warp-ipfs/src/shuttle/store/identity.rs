@@ -129,7 +129,6 @@ impl IdentityStorageInner {
 
     async fn register(&mut self, document: &IdentityDocument, root_cid: Cid) -> Result<(), Error> {
         document.verify()?;
-
         let mut list: BTreeMap<String, Cid> = match self.users {
             Some(cid) => self
                 .ipfs
@@ -150,6 +149,8 @@ impl IdentityStorageInner {
         list.insert(did_str, root_cid);
 
         let cid = self.ipfs.put_dag(list).await?;
+
+        self.ipfs.insert_pin(cid).recursive().await?;
 
         let old_cid = self.users.replace(cid);
 
