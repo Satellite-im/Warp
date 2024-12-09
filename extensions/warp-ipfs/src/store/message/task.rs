@@ -444,6 +444,7 @@ impl ConversationTask {
 }
 
 impl ConversationTask {
+    #[allow(dead_code)]
     async fn load_from_mailbox(&mut self) -> Result<(), Error> {
         let crate::config::Discovery::Shuttle { addresses } =
             self.discovery.discovery_config().clone()
