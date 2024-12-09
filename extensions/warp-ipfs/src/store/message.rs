@@ -2100,7 +2100,7 @@ impl ConversationTask {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct ConversationInnerMeta {
     pub command_tx: mpsc::Sender<ConversationTaskCommand>,
     pub handle: AbortableJoinHandle<()>,
