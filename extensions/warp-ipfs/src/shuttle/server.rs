@@ -210,6 +210,8 @@ impl ShuttleServer {
         let identity_announcement = ipfs.pubsub_subscribe(IDENTITY_ANNOUNCEMENT).await?;
 
         let subscriptions = Subscriptions::new(&ipfs, &identity, &message);
+        let requests = FuturesUnordered::new();
+        requests.push(futures::future::pending().boxed());
 
         let mut server_event = ShuttleTask {
             ipfs: ipfs.clone(),
@@ -217,7 +219,7 @@ impl ShuttleServer {
             root_storage: root,
             identity_storage: identity,
             message_storage: message,
-            requests: Default::default(),
+            requests,
             identity_request_response,
             message_request_response,
             identity_announcement,
