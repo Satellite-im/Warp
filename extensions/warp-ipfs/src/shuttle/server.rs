@@ -1,7 +1,6 @@
 use chrono::Utc;
-use futures::stream::BoxStream;
+use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{future::BoxFuture, FutureExt, StreamExt};
-use pollable_map::futures::ordered::OrderedFutureSet;
 use pollable_map::stream::StreamMap;
 use rust_ipfs::libp2p::request_response::InboundRequestId;
 use rust_ipfs::SubscriptionStream;
@@ -74,7 +73,7 @@ struct ShuttleTask {
     identity_storage: super::store::identity::IdentityStorage,
     message_storage: super::store::messages::MessageStorage,
     subscriptions: super::subscription_stream::Subscriptions,
-    requests: StreamMap<PeerId, OrderedFutureSet<BoxFuture<'static, ()>>>,
+    requests: FuturesUnordered<BoxFuture<'static, ()>>,
     identity_request_response: IdReqSt,
     message_request_response: MsgReqSt,
     identity_announcement: SubscriptionStream,
@@ -887,15 +886,7 @@ impl ShuttleTask {
             }
         };
 
-        let tasks = match self.requests.get_mut(&sender_peer_id) {
-            Some(task) => task,
-            None => {
-                self.requests
-                    .insert(sender_peer_id, OrderedFutureSet::new());
-                self.requests.get_mut(&sender_peer_id).expect("valid entry")
-            }
-        };
-        tasks.push(fut.boxed());
+        self.requests.push(fut.boxed());
     }
 
     fn process_message_events(
@@ -1039,15 +1030,7 @@ impl ShuttleTask {
             }
         };
 
-        let tasks = match self.requests.get_mut(&sender_peer_id) {
-            Some(task) => task,
-            None => {
-                self.requests
-                    .insert(sender_peer_id, OrderedFutureSet::new());
-                self.requests.get_mut(&sender_peer_id).expect("valid entry")
-            }
-        };
-        tasks.push(fut.boxed());
+        self.requests.push(fut.boxed());
     }
 }
 
