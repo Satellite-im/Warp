@@ -1,7 +1,6 @@
 use chrono::Utc;
 use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{future::BoxFuture, FutureExt, StreamExt};
-use pollable_map::stream::StreamMap;
 use rust_ipfs::libp2p::request_response::InboundRequestId;
 use rust_ipfs::SubscriptionStream;
 use rust_ipfs::{
