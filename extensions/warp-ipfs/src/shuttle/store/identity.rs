@@ -9,15 +9,15 @@ use rust_ipfs::{Ipfs, IpfsPath};
 use tokio::sync::RwLock;
 use warp::{crypto::DID, error::Error};
 
+use super::root::RootStorage;
+use crate::store::identity::RequestResponsePayload;
 use crate::{
-    shuttle::identity::{protocol::Lookup, RequestPayload},
+    shuttle::identity::protocol::Lookup,
     store::{
         document::{identity::IdentityDocument, RootDocument},
         DidExt,
     },
 };
-
-use super::root::RootStorage;
 
 #[derive(Debug, Clone)]
 pub struct IdentityStorage {
@@ -56,12 +56,19 @@ impl IdentityStorage {
         inner.contains(did).await
     }
 
-    pub async fn fetch_mailbox(&self, did: DID) -> Result<(Vec<RequestPayload>, usize), Error> {
+    pub async fn fetch_mailbox(
+        &self,
+        did: DID,
+    ) -> Result<(Vec<RequestResponsePayload>, usize), Error> {
         let inner = &mut *self.inner.write().await;
         inner.fetch_requests(did).await
     }
 
-    pub async fn deliver_request(&self, to: &DID, request: &RequestPayload) -> Result<(), Error> {
+    pub async fn deliver_request(
+        &self,
+        to: &DID,
+        request: &RequestResponsePayload,
+    ) -> Result<(), Error> {
         let inner = &mut *self.inner.write().await;
         inner.deliver_request(to, request).await
     }
@@ -122,7 +129,6 @@ impl IdentityStorageInner {
 
     async fn register(&mut self, document: &IdentityDocument, root_cid: Cid) -> Result<(), Error> {
         document.verify()?;
-
         let mut list: BTreeMap<String, Cid> = match self.users {
             Some(cid) => self
                 .ipfs
@@ -143,6 +149,8 @@ impl IdentityStorageInner {
         list.insert(did_str, root_cid);
 
         let cid = self.ipfs.put_dag(list).await?;
+
+        self.ipfs.insert_pin(cid).recursive().await?;
 
         let old_cid = self.users.replace(cid);
 
@@ -374,7 +382,10 @@ impl IdentityStorageInner {
         Ok(list)
     }
 
-    async fn fetch_requests(&mut self, did: DID) -> Result<(Vec<RequestPayload>, usize), Error> {
+    async fn fetch_requests(
+        &mut self,
+        did: DID,
+    ) -> Result<(Vec<RequestResponsePayload>, usize), Error> {
         let key_str = did.to_string();
         let mut list: BTreeMap<String, Cid> = match self.mailbox {
             Some(cid) => self
@@ -392,7 +403,7 @@ impl IdentityStorageInner {
                 .ipfs
                 .get_dag(*cid)
                 .local()
-                .deserialized::<Vec<RequestPayload>>()
+                .deserialized::<Vec<RequestResponsePayload>>()
                 .await
                 .unwrap_or_default(),
             None => return Ok((Vec::new(), 0)),
@@ -432,7 +443,11 @@ impl IdentityStorageInner {
         Ok((requests, remaining))
     }
 
-    async fn deliver_request(&mut self, to: &DID, request: &RequestPayload) -> Result<(), Error> {
+    async fn deliver_request(
+        &mut self,
+        to: &DID,
+        request: &RequestResponsePayload,
+    ) -> Result<(), Error> {
         if !self.contains(to).await {
             return Err(Error::IdentityDoesntExist);
         }
@@ -455,7 +470,7 @@ impl IdentityStorageInner {
                 .ipfs
                 .get_dag(*cid)
                 .local()
-                .deserialized::<Vec<RequestPayload>>()
+                .deserialized::<Vec<RequestResponsePayload>>()
                 .await
                 .unwrap_or_default(),
             None => Vec::new(),
