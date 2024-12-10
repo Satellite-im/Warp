@@ -2,7 +2,7 @@
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-rust-version = "1.67"
+rust-version = "1.83"
 repository = "https://github.com/Satellite-im/Warp"
 
 
@@ -97,7 +97,7 @@ indexmap = { version = "2.4.0", features = ["serde"] }
 enum_macro = { path = "./tools/enum_macro" }
 
 # ipfs dependency
-rust-ipfs = "0.13.0"
+rust-ipfs = "0.14.0"
 
 # wasm crates
 wasm-bindgen = "0.2"
