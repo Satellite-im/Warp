@@ -292,27 +292,48 @@ impl WarpIpfs {
         }
 
         let (pb_tx, pb_rx) = channel(50);
-        let (id_sh_tx, id_sh_rx) = futures::channel::mpsc::channel(1);
-        let (msg_sh_tx, msg_sh_rx) = futures::channel::mpsc::channel(1);
-
-        let (enable, nodes) = match &self.inner.config.store_setting().discovery {
-            config::Discovery::Shuttle { addresses } => (true, addresses.clone()),
-            _ => Default::default(),
-        };
 
         let behaviour = behaviour::Behaviour {
-            shuttle_identity: enable
-                .then(|| {
-                    shuttle::identity::client::Behaviour::new(&keypair, None, id_sh_rx, &nodes)
-                })
-                .into(),
-            shuttle_message: enable
-                .then(|| {
-                    shuttle::message::client::Behaviour::new(&keypair, None, msg_sh_rx, &nodes)
-                })
-                .into(),
             phonebook: behaviour::phonebook::Behaviour::new(self.multipass_tx.clone(), pb_rx),
         };
+
+        let mut request_response_configs = vec![
+            RequestResponseConfig {
+                protocol: protocols::EXCHANGE_PROTOCOL.as_ref().into(),
+                max_request_size: 8 * 1024,
+                max_response_size: 16 * 1024,
+                ..Default::default()
+            },
+            RequestResponseConfig {
+                protocol: protocols::IDENTITY_PROTOCOL.as_ref().into(),
+                max_request_size: 256 * 1024,
+                max_response_size: 512 * 1024,
+                ..Default::default()
+            },
+            RequestResponseConfig {
+                protocol: protocols::DISCOVERY_PROTOCOL.as_ref().into(),
+                max_request_size: 256 * 1024,
+                max_response_size: 512 * 1024,
+                ..Default::default()
+            },
+        ];
+
+        if let config::Discovery::Shuttle { .. } = &self.inner.config.store_setting().discovery {
+            request_response_configs.extend([
+                RequestResponseConfig {
+                    protocol: protocols::SHUTTLE_IDENTITY.as_ref().into(),
+                    max_request_size: 256 * 1024,
+                    max_response_size: 512 * 1024,
+                    ..Default::default()
+                },
+                RequestResponseConfig {
+                    protocol: protocols::SHUTTLE_MESSAGE.as_ref().into(),
+                    max_request_size: 256 * 1024,
+                    max_response_size: 512 * 1024,
+                    ..Default::default()
+                },
+            ]);
+        }
 
         tracing::info!("Starting ipfs");
         let mut uninitialized = UninitializedIpfs::new()
@@ -333,39 +354,7 @@ impl WarpIpfs {
                 ..Default::default()
             })
             .with_relay(true)
-            .with_request_response(vec![
-                RequestResponseConfig {
-                    protocol: protocols::EXCHANGE_PROTOCOL.as_ref().into(),
-                    max_request_size: 8 * 1024,
-                    max_response_size: 16 * 1024,
-                    ..Default::default()
-                },
-                RequestResponseConfig {
-                    protocol: protocols::IDENTITY_PROTOCOL.as_ref().into(),
-                    max_request_size: 256 * 1024,
-                    max_response_size: 512 * 1024,
-                    ..Default::default()
-                },
-                RequestResponseConfig {
-                    protocol: protocols::DISCOVERY_PROTOCOL.as_ref().into(),
-                    max_request_size: 256 * 1024,
-                    max_response_size: 512 * 1024,
-                    ..Default::default()
-                },
-                // TODO: Uncomment or remove during shuttle protocol refactor
-                // RequestResponseConfig {
-                //     protocol: protocols::SHUTTLE_IDENTITY.as_ref().into(),
-                //     max_request_size: 256 * 1024,
-                //     max_response_size: 512 * 1024,
-                //     ..Default::default()
-                // },
-                // RequestResponseConfig {
-                //     protocol: protocols::SHUTTLE_MESSAGE.as_ref().into(),
-                //     max_request_size: 256 * 1024,
-                //     max_response_size: 512 * 1024,
-                //     ..Default::default()
-                // },
-            ])
+            .with_request_response(request_response_configs)
             .set_listening_addrs(self.inner.config.listen_on().to_vec())
             .with_custom_behaviour(behaviour)
             .set_keypair(&keypair)
@@ -535,6 +524,31 @@ impl WarpIpfs {
             }
         }
 
+        if let config::Discovery::Shuttle { addresses } =
+            self.inner.config.store_setting().discovery.clone()
+        {
+            let mut nodes = IndexSet::new();
+            for mut addr in addresses {
+                let Some(peer_id) = addr.extract_peer_id() else {
+                    tracing::warn!("{addr} does not contain a peer id. Skipping");
+                    continue;
+                };
+
+                if let Err(_e) = ipfs.add_peer((peer_id, addr)).await {
+                    // TODO:
+                    continue;
+                }
+
+                nodes.insert(peer_id);
+            }
+
+            for node in nodes {
+                if let Err(_e) = ipfs.connect(node).await {
+                    // TODO
+                }
+            }
+        }
+
         if matches!(
             self.inner.config.store_setting().discovery,
             config::Discovery::Namespace {
@@ -630,7 +644,6 @@ impl WarpIpfs {
             self.multipass_tx.clone(),
             &phonebook,
             &discovery,
-            id_sh_tx,
             &span,
         )
         .await?;
@@ -654,7 +667,6 @@ impl WarpIpfs {
             &filestore,
             self.raygun_tx.clone(),
             &identity_store,
-            msg_sh_tx,
         )
         .await;
 
