@@ -52,8 +52,7 @@ use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
 use crate::store::community::CommunityDocument;
 use chrono::{DateTime, Utc};
 use warp::raygun::community::{
-    Community, CommunityChannel, CommunityChannelPermission, CommunityChannelType, CommunityInvite,
-    CommunityPermission, CommunityRole, RoleId,
+    Community, CommunityChannel, CommunityChannelType, CommunityInvite, CommunityRole, RoleId,
 };
 use warp::raygun::{ConversationImage, GroupPermissionOpt, Message};
 use warp::{
@@ -1353,7 +1352,7 @@ impl MessageStore {
     pub async fn grant_community_permission(
         &mut self,
         community_id: Uuid,
-        permission: CommunityPermission,
+        permission: String,
         role_id: RoleId,
     ) -> Result<(), Error> {
         let inner = &*self.inner.read().await;
@@ -1376,7 +1375,7 @@ impl MessageStore {
     pub async fn revoke_community_permission(
         &mut self,
         community_id: Uuid,
-        permission: CommunityPermission,
+        permission: String,
         role_id: RoleId,
     ) -> Result<(), Error> {
         let inner = &*self.inner.read().await;
@@ -1399,7 +1398,7 @@ impl MessageStore {
     pub async fn grant_community_permission_for_all(
         &mut self,
         community_id: Uuid,
-        permission: CommunityPermission,
+        permission: String,
     ) -> Result<(), Error> {
         let inner = &*self.inner.read().await;
         let community_meta = inner
@@ -1417,10 +1416,33 @@ impl MessageStore {
             .await;
         rx.await.map_err(anyhow::Error::from)?
     }
+    pub async fn has_community_permission(
+        &mut self,
+        community_id: Uuid,
+        permission: String,
+        member: DID,
+    ) -> Result<bool, Error> {
+        let inner = &*self.inner.read().await;
+        let community_meta = inner
+            .community_task
+            .get(&community_id)
+            .ok_or(Error::InvalidCommunity)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = community_meta
+            .command_tx
+            .clone()
+            .send(CommunityTaskCommand::HasCommunityPermission {
+                permission,
+                member,
+                response: tx,
+            })
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
     pub async fn revoke_community_permission_for_all(
         &mut self,
         community_id: Uuid,
-        permission: CommunityPermission,
+        permission: String,
     ) -> Result<(), Error> {
         let inner = &*self.inner.read().await;
         let community_meta = inner
@@ -1510,7 +1532,7 @@ impl MessageStore {
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
-        permission: CommunityChannelPermission,
+        permission: String,
         role_id: RoleId,
     ) -> Result<(), Error> {
         let inner = &*self.inner.read().await;
@@ -1535,7 +1557,7 @@ impl MessageStore {
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
-        permission: CommunityChannelPermission,
+        permission: String,
         role_id: RoleId,
     ) -> Result<(), Error> {
         let inner = &*self.inner.read().await;
@@ -1560,7 +1582,7 @@ impl MessageStore {
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
-        permission: CommunityChannelPermission,
+        permission: String,
     ) -> Result<(), Error> {
         let inner = &*self.inner.read().await;
         let community_meta = inner
@@ -1585,7 +1607,7 @@ impl MessageStore {
         &mut self,
         community_id: Uuid,
         channel_id: Uuid,
-        permission: CommunityChannelPermission,
+        permission: String,
     ) -> Result<(), Error> {
         let inner = &*self.inner.read().await;
         let community_meta = inner
@@ -1603,6 +1625,31 @@ impl MessageStore {
                     response: tx,
                 },
             )
+            .await;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+    pub async fn has_community_channel_permission(
+        &mut self,
+        community_id: Uuid,
+        channel_id: Uuid,
+        permission: String,
+        member: DID,
+    ) -> Result<bool, Error> {
+        let inner = &*self.inner.read().await;
+        let community_meta = inner
+            .community_task
+            .get(&community_id)
+            .ok_or(Error::InvalidCommunity)?;
+        let (tx, rx) = oneshot::channel();
+        let _ = community_meta
+            .command_tx
+            .clone()
+            .send(CommunityTaskCommand::HasCommunityChannelPermission {
+                channel_id,
+                permission,
+                member,
+                response: tx,
+            })
             .await;
         rx.await.map_err(anyhow::Error::from)?
     }
