@@ -88,6 +88,10 @@ impl ShuttleServer {
         memory_transport: bool,
         listen_addrs: &[Multiaddr],
         external_addrs: &[Multiaddr],
+        enable_gc: bool,
+        run_gc_once: bool,
+        gc_duration: Option<Duration>,
+        gc_trigger: Option<GCTrigger>,
         ext: bool,
     ) -> anyhow::Result<Self> {
         let executor = LocalExecutor;
@@ -123,11 +127,6 @@ impl ShuttleServer {
                 websocket_pem: wss_certs_and_key,
                 ..Default::default()
             })
-            // TODO: Either enable GC or do manual GC during little to no activity unless we reach a specific threshold
-            .with_gc(GCConfig {
-                duration: Duration::from_secs(60),
-                trigger: GCTrigger::None,
-            })
             .set_temp_pin_duration(Duration::from_secs(60 * 30))
             .with_request_response(vec![
                 RequestResponseConfig {
@@ -143,6 +142,13 @@ impl ShuttleServer {
                     ..Default::default()
                 },
             ]);
+
+        if enable_gc {
+            let duration = gc_duration.unwrap_or(Duration::from_secs(60 * 24));
+            let trigger = gc_trigger.unwrap_or_default();
+            // TODO: maybe do manual GC during little to no activity unless we reach a specific threshold?
+            uninitialized = uninitialized.with_gc(GCConfig { duration, trigger })
+        }
 
         if enable_relay_server {
             // Relay is unbound or with higher limits so we can avoid having the connection resetting
@@ -169,6 +175,17 @@ impl ShuttleServer {
         }
 
         let ipfs = uninitialized.start().await?;
+
+        if run_gc_once {
+            match ipfs.gc().await {
+                Ok(blocks) => {
+                    tracing::info!(blocks_removed = blocks.len(), "cleaned up unpinned blocks")
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "unable to run GC")
+                }
+            }
+        }
 
         for addr in addrs {
             ipfs.add_listening_address(addr).await?;
