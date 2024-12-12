@@ -442,7 +442,7 @@ impl RootDocument {
     }
 }
 
-async fn resolve_to_img_doc(ipfs: &Ipfs, cid: Cid) -> Result<(), Error> {
+async fn resolve_to_img_doc(ipfs: Ipfs, cid: Cid) -> Result<(), Error> {
     let dag: ImageDag = ipfs.get_dag(cid).deserialized().await?;
     if dag.size > MAX_IMAGE_SIZE as _ {
         return Err(Error::InvalidLength {
@@ -469,8 +469,10 @@ async fn resolve_verify_image(ipfs: &Ipfs, identity_document: &IdentityDocument)
             .profile_picture
             .ok_or(Error::Other),
     )
-    .and_then(|cid| async move { resolve_to_img_doc(ipfs, cid).await })
-    .await;
+    .and_then(|cid| {
+        let ipfs = ipfs.clone();
+        async move { resolve_to_img_doc(ipfs, cid).await }
+    });
 
     let _fut_banner = futures::future::ready(
         identity_document
@@ -478,10 +480,12 @@ async fn resolve_verify_image(ipfs: &Ipfs, identity_document: &IdentityDocument)
             .profile_banner
             .ok_or(Error::Other),
     )
-    .and_then(|cid| async move { resolve_to_img_doc(ipfs, cid).await })
-    .await;
+    .and_then(|cid| {
+        let ipfs = ipfs.clone();
+        async move { resolve_to_img_doc(ipfs, cid).await }
+    });
 
-    // _ = tokio::join!(fut_picture, fut_banner);
+    _ = tokio::join!(_fut_picture, _fut_banner);
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
