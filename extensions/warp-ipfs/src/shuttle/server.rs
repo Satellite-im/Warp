@@ -407,7 +407,6 @@ impl ShuttleTask {
 
                     let document: IdentityDocument = match ipfs
                         .get_dag(path)
-                        .timeout(Duration::from_secs(10))
                         .deserialized()
                         .await
                     {
@@ -500,7 +499,7 @@ impl ShuttleTask {
                         .build()
                         .expect("Valid payload construction");
 
-                    let bytes = serde_json::to_vec(&payload).expect("Valid serialization");
+                    let bytes = payload.to_bytes().expect("valid deserialization");
 
                     _ = ipfs.pubsub_publish("/identity/announce/v0", bytes).await;
 
@@ -779,7 +778,6 @@ impl ShuttleTask {
 
                     let document: IdentityDocument = match ipfs
                         .get_dag(path)
-                        .timeout(Duration::from_secs(10))
                         .deserialized()
                         .await
                     {
@@ -807,7 +805,7 @@ impl ShuttleTask {
                             .build()
                             .expect("Valid payload construction");
 
-                        let bytes = serde_json::to_vec(&payload).expect("Valid serialization");
+                        let bytes = payload.to_bytes().expect("valid deserialization");
 
                         _ = ipfs.pubsub_publish("/identity/announce/v0", bytes).await;
                     }
