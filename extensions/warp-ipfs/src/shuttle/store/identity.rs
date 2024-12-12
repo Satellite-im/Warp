@@ -146,16 +146,21 @@ impl IdentityStorageInner {
             return Err(Error::IdentityExist);
         }
 
+        tracing::info!(%did_str, "inserting document");
         list.insert(did_str, root_cid);
 
+        tracing::info!(did = %document.did, "document inserted. restructuring dag");
         let cid = self.ipfs.put_dag(list).await?;
 
-        self.ipfs.insert_pin(cid).recursive().await?;
-
+        // tracing::info!(did = %document.did, "pinning document");
+        // self.ipfs.insert_pin(cid).recursive().await?;
+        //
+        // tracing::info!(did = %document.did, "pinning successful");
         let old_cid = self.users.replace(cid);
 
         if let Some(old_cid) = old_cid {
             if old_cid != cid && self.ipfs.is_pinned(&old_cid).await.unwrap_or_default() {
+                tracing::info!(did = %document.did, "unpinning previous document");
                 _ = self.ipfs.remove_pin(old_cid).await;
             }
         }
@@ -215,7 +220,7 @@ impl IdentityStorageInner {
 
         let cid = self.ipfs.put_dag(list).await?;
 
-        self.ipfs.insert_pin(cid).recursive().await?;
+        // self.ipfs.insert_pin(cid).recursive().await?;
 
         let old_cid = self.users.replace(cid);
         if let Some(old_cid) = old_cid {
@@ -427,7 +432,7 @@ impl IdentityStorageInner {
 
         list.insert(key_str, cid);
 
-        let cid = self.ipfs.put_dag(list).pin(true).await?;
+        let cid = self.ipfs.put_dag(list).await?;
 
         let old_cid = self.mailbox.replace(cid);
 
@@ -490,7 +495,7 @@ impl IdentityStorageInner {
 
         list.insert(key_str, cid);
 
-        let cid = self.ipfs.put_dag(list).pin(true).await?;
+        let cid = self.ipfs.put_dag(list).await?;
 
         let old_cid = self.mailbox.replace(cid);
 

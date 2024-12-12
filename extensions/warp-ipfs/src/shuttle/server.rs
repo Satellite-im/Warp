@@ -418,7 +418,7 @@ impl ShuttleTask {
                         }
                     };
 
-                    tracing::info!(%document.did, "Receive register request");
+                    tracing::info!(%document.did, "receive register request");
                     if identity_storage.contains(&document.did).await {
                         tracing::warn!(%document.did, "Identity is already registered");
                         let payload = payload_message_construct(
@@ -438,6 +438,7 @@ impl ShuttleTask {
                         return;
                     }
 
+                    tracing::info!(%document.did, %sender_peer_id, "verifying identity document");
                     if document.verify().is_err() {
                         tracing::warn!(%document.did, "Identity cannot be verified");
                         let payload = payload_message_construct(
@@ -456,6 +457,8 @@ impl ShuttleTask {
 
                         return;
                     }
+
+                    tracing::info!(%document.did, %sender_peer_id, "identity verified. registering identity");
 
                     if let Err(e) = identity_storage.register(&document, root_cid).await {
                         tracing::warn!(%document.did, error = %e, "Unable to register identity");
@@ -480,6 +483,8 @@ impl ShuttleTask {
 
                         return;
                     }
+
+                    tracing::info!(%document.did, %sender_peer_id, "identity regostered");
 
                     if let Err(e) = subscriptions.subscribe(document.did.inbox()).await {
                         tracing::warn!(%document.did, "Unable to subscribe to given topic: {e}. ignoring...");
@@ -904,7 +909,11 @@ impl ShuttleTask {
             }
         };
 
+        tracing::info!(%sender_peer_id, "pushing task into queue");
         self.requests.push(fut.boxed());
+        // since we have "pending" future, we can remove one from the total value since it will always be pending
+        let total_requests = self.requests.len() - 1;
+        tracing::debug!(total_requests);
     }
 
     fn process_message_events(
