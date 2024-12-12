@@ -72,14 +72,17 @@ struct Opt {
     ws_tls_private_key: Option<PathBuf>,
 
     /// Enable GC to cleanup any unpinned or orphaned blocks
+    #[clap(long)]
     enable_gc: bool,
 
     /// Run GC at start
     /// Note: its recommended not to use this if GC is enabled.
+    #[clap(long)]
     run_gc_once: bool,
 
     /// GC Duration in seconds on how often GC should run
     /// Note: NOOP if `enable_gc` is false
+    #[clap(long)]
     gc_duration: Option<u16>,
 }
 
