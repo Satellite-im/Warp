@@ -3353,11 +3353,9 @@ async fn process_identity_events(
 
             for id in list
                 .iter()
-                .filter_map(|c| {
-                    match c.inner {
-                        InnerDocument::Direct(_) => None,
-                        InnerDocument::Group(ref document) => Some((c.id, document))
-                    }
+                .filter_map(|c| match c.inner {
+                    InnerDocument::Direct(_) => None,
+                    InnerDocument::Group(ref document) => Some((c.id, document)),
                 })
                 .filter(|(_, c)| c.restrict.contains(&did))
                 .map(|(id, _)| id)

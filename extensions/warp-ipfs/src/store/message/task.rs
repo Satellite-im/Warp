@@ -3167,8 +3167,8 @@ async fn message_event(
                         let creator = &document.creator;
                         if creator != sender
                             && !document
-                            .permissions
-                            .has_permission(sender, GroupPermission::EditGroupInfo)
+                                .permissions
+                                .has_permission(sender, GroupPermission::EditGroupInfo)
                         {
                             return Err(Error::Unauthorized);
                         }
@@ -3209,8 +3209,8 @@ async fn message_event(
                         let creator = &document.creator;
                         if creator != sender
                             && !document
-                            .permissions
-                            .has_permission(sender, GroupPermission::EditGroupInfo)
+                                .permissions
+                                .has_permission(sender, GroupPermission::EditGroupInfo)
                         {
                             return Err(Error::Unauthorized);
                         }
@@ -3234,8 +3234,8 @@ async fn message_event(
                         let creator = &document.creator;
                         if creator != sender
                             && !document
-                            .permissions
-                            .has_permission(sender, GroupPermission::EditGroupInfo)
+                                .permissions
+                                .has_permission(sender, GroupPermission::EditGroupInfo)
                         {
                             return Err(Error::Unauthorized);
                         }
@@ -3273,8 +3273,8 @@ async fn message_event(
                         let creator = &document.creator;
                         if creator != sender
                             && !document
-                            .permissions
-                            .has_permission(sender, GroupPermission::EditGroupInfo)
+                                .permissions
+                                .has_permission(sender, GroupPermission::EditGroupInfo)
                         {
                             return Err(Error::Unauthorized);
                         }
@@ -3295,8 +3295,8 @@ async fn message_event(
                         let creator = &document.creator;
                         if creator != sender
                             && !document
-                            .permissions
-                            .has_permission(sender, GroupPermission::EditGroupInfo)
+                                .permissions
+                                .has_permission(sender, GroupPermission::EditGroupInfo)
                         {
                             return Err(Error::Unauthorized);
                         }
@@ -3315,8 +3315,8 @@ async fn message_event(
                         let creator = &document.creator;
                         if creator != sender
                             && !document
-                            .permissions
-                            .has_permission(sender, GroupPermission::EditGroupInfo)
+                                .permissions
+                                .has_permission(sender, GroupPermission::EditGroupInfo)
                         {
                             return Err(Error::Unauthorized);
                         }
