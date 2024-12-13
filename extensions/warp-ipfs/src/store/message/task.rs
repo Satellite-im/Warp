@@ -1883,7 +1883,7 @@ impl ConversationTask {
             return Err(Error::InvalidConversation);
         };
 
-        let ref creator = document.creator;
+        let creator = &document.creator;
 
         let own_did = &this.identity.did_key();
 
@@ -1955,7 +1955,7 @@ impl ConversationTask {
             return Err(Error::InvalidConversation);
         };
 
-        let ref creator = document.creator;
+        let creator = &document.creator;
 
         let own_did = &this.identity.did_key();
 
@@ -2012,7 +2012,7 @@ impl ConversationTask {
             return Err(Error::InvalidConversation);
         };
 
-        let ref creator = document.creator;
+        let creator = &document.creator;
 
         let own_did = &this.identity.did_key();
 
@@ -2052,7 +2052,7 @@ impl ConversationTask {
             return Err(Error::InvalidConversation);
         };
 
-        let ref creator = document.creator;
+        let creator = &document.creator;
 
         let own_did = &this.identity.did_key();
 
@@ -2103,7 +2103,7 @@ impl ConversationTask {
             return Err(Error::InvalidConversation);
         };
 
-        let ref creator = document.creator;
+        let creator = &document.creator;
 
         let own_did = &this.identity.did_key();
 
@@ -2685,7 +2685,7 @@ impl ConversationTask {
             return Err(Error::InvalidConversation);
         };
 
-        let ref creator = document.creator;
+        let creator = &document.creator;
 
         let own_did = this.identity.did_key();
 
