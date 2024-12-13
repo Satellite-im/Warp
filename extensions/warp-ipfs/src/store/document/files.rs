@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use futures::stream::FuturesUnordered;
 use futures::{StreamExt, TryFutureExt};
 use ipld_core::cid::Cid;
+use pollable_map::futures::FutureMap;
 use rust_ipfs::{Ipfs, IpfsPath};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -85,7 +86,6 @@ impl DirectoryDocument {
         if let Some(cid) = self.items {
             let list = ipfs
                 .get_dag(cid)
-                .timeout(Duration::from_secs(10))
                 .deserialized::<Vec<ItemDocument>>()
                 .await
                 .unwrap_or_default();
@@ -107,7 +107,6 @@ impl DirectoryDocument {
             directory.set_thumbnail_reference(&IpfsPath::from(cid).to_string());
             let image: ImageDag = ipfs
                 .get_dag(cid)
-                .timeout(Duration::from_secs(10))
                 .deserialized()
                 .await?;
 
@@ -116,7 +115,6 @@ impl DirectoryDocument {
             if resolve_thumbnail {
                 let data = ipfs
                     .cat_unixfs(image.link)
-                    .timeout(Duration::from_secs(10))
                     .max_length(MAX_THUMBNAIL_SIZE)
                     .await
                     .unwrap_or_default();
@@ -128,9 +126,49 @@ impl DirectoryDocument {
         directory.rebuild_paths(&None);
         Ok(directory)
     }
+
+    // #[async_recursion::async_recursion]
+    pub(crate) async fn reconstruct_document_path(&self, ipfs: &Ipfs, resolve_thumbnail: bool) -> Result<(), Error> {
+        if let Some(cid) = self.items {
+            let list = ipfs
+                .get_dag(cid)
+                .deserialized::<Vec<ItemDocument>>()
+                .await
+                .unwrap_or_default();
+
+            let items_resolved = FuturesUnordered::from_iter(
+                list.into_iter()
+                    .map(|item| item.reconstruct_document_path(ipfs, resolve_thumbnail).into_future()),
+            );
+
+            futures::pin_mut!(items_resolved);
+
+            while let Some(item) = items_resolved.next().await {
+                if let Err(e) = item {
+                    tracing::warn!(error = %e, "unable to reconstruct item document");
+                }
+            }
+        }
+
+        if let Some(cid) = self.thumbnail {
+            let image: ImageDag = ipfs
+                .get_dag(cid)
+                .deserialized()
+                .await?;
+
+            if resolve_thumbnail {
+                ipfs
+                    .cat_unixfs(image.link)
+                    .max_length(MAX_THUMBNAIL_SIZE)
+                    .await
+                    .unwrap_or_default();
+            }
+        }
+        Ok(())
+    }
 }
 
-#[derive(Clone, Debug, Copy, Deserialize, Serialize)]
+#[derive(Clone, Debug, Copy, Deserialize, Serialize, Ord, PartialOrd, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum ItemDocument {
     Directory(Cid),
@@ -153,6 +191,29 @@ impl ItemDocument {
         };
 
         Ok(document)
+    }
+
+    pub async fn reconstruct_document_path(&self, ipfs: &Ipfs, resolve_thumbnail: bool) -> Result<(), Error> {
+        match self {
+            ItemDocument::Directory(cid) => {
+                let document: DirectoryDocument = ipfs
+                    .get_dag(cid)
+                    .deserialized()
+                    .await
+                    .map_err(anyhow::Error::from)?;
+
+                document.reconstruct_document_path(ipfs, resolve_thumbnail).await
+            }
+            ItemDocument::File(cid) => {
+                let document: FileDocument = ipfs
+                    .get_dag(cid)
+                    .deserialized()
+                    .await
+                    .map_err(anyhow::Error::from)?;
+
+                document.reconstruct_document_path(ipfs, resolve_thumbnail).await
+            }
+        }
     }
 
     pub async fn resolve(&self, ipfs: &Ipfs, resolve_thumbnail: bool) -> Result<Item, Error> {
@@ -241,6 +302,32 @@ impl FileDocument {
         Ok(document)
     }
 
+    pub async fn reconstruct_document_path(&self, ipfs: &Ipfs, resolve_thumbnail: bool) -> Result<(), Error> {
+        if let Some(cid) = self.thumbnail {
+            let image: ImageDag = ipfs
+                .get_dag(cid)
+                .deserialized()
+                .await?;
+
+
+            if resolve_thumbnail {
+                ipfs
+                    .cat_unixfs(image.link)
+                    .max_length(MAX_THUMBNAIL_SIZE)
+                    .await.map_err(anyhow::Error::from)?;
+            }
+        }
+
+        // TODO: determine if we should also concurrently fetch the file
+        // if let Some(cid) = self
+        //     .reference
+        //     .as_ref()
+        //     .and_then(|cid| Cid::from_str(cid).ok())
+        // {
+        // }
+        Ok(())
+    }
+
     pub fn to_attachment(&self) -> Result<FileAttachmentDocument, Error> {
         let data = self.reference.clone().ok_or(Error::FileNotFound)?;
         Ok(FileAttachmentDocument {
@@ -268,7 +355,6 @@ impl FileDocument {
             file.set_thumbnail_reference(&IpfsPath::from(cid).to_string());
             let image: ImageDag = ipfs
                 .get_dag(cid)
-                .timeout(Duration::from_secs(10))
                 .deserialized()
                 .await?;
 
@@ -277,7 +363,6 @@ impl FileDocument {
             if resolve_thumbnail {
                 let data = ipfs
                     .cat_unixfs(image.link)
-                    .timeout(Duration::from_secs(10))
                     .max_length(MAX_THUMBNAIL_SIZE)
                     .await
                     .unwrap_or_default();

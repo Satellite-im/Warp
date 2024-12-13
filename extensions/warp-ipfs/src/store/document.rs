@@ -294,6 +294,17 @@ impl RootDocument {
                 }
             });
 
+        let fut_conversation_list =
+            futures::future::ready(self.conversations.ok_or(Error::Other)).and_then(|document| {
+                let ipfs = ipfs.clone();
+                async move {
+                    ipfs.get_dag(document)
+                        .await
+                        .map_err(anyhow::Error::from)
+                        .map_err(Error::from)
+                }
+            });
+
         let fut_blocked_by_list = futures::future::ready(self.block_by.ok_or(Error::Other))
             .and_then(|document| {
                 let ipfs = ipfs.clone();
@@ -315,6 +326,20 @@ impl RootDocument {
                         .map_err(Error::from)
                 }
             });
+
+        let fut_file_index = futures::future::ready(self.file_index.ok_or(Error::Other)).and_then(|document| {
+            let ipfs = ipfs.clone();
+            async move {
+                let index: DirectoryDocument = ipfs.get_dag(document).deserialized()
+                    .await
+                    .map_err(anyhow::Error::from)
+                    .map_err(Error::from)?;
+
+                index.reconstruct_document_path(&ipfs, true).await?;
+
+                Ok(())
+            }
+        });
 
         let fut_keystore = futures::future::ready(self.keystore.ok_or(Error::Other)).and_then(
             |document| {
@@ -348,7 +373,9 @@ impl RootDocument {
 
         let _ = tokio::join!(
             fut_friends,
+            fut_file_index,
             fut_block_list,
+            fut_conversation_list,
             fut_blocked_by_list,
             fut_requests_list,
             fut_keystore
