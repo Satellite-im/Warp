@@ -24,6 +24,7 @@ use std::{
     collections::{BTreeSet, HashMap},
     time::Duration,
 };
+use indexmap::IndexSet;
 use uuid::Uuid;
 use warp::{
     crypto::DID,
@@ -160,19 +161,21 @@ impl ConversationDocument {
         let conversation_id = Uuid::new_v4();
         let creator = keypair.to_did()?;
 
-        let mut participants = recipients.into_iter().collect::<Vec<_>>();
+        let mut participants = recipients.into_iter().collect::<IndexSet<_>>();
 
         if !participants.contains(&creator) {
-            participants.push(creator.clone());
+            participants.insert(creator.clone());
         }
-
+        
+        let restrict = IndexSet::from_iter(restrict.iter().cloned());
+        
         let inner = InnerDocument::Group(GroupConversationDocument {
             creator,
             participants,
             messages: None,
             permissions,
             excluded: HashMap::default(),
-            restrict: restrict.to_vec(),
+            restrict,
         });
 
         let mut document = Self {

@@ -1911,7 +1911,7 @@ impl ConversationTask {
             return Err(Error::IdentityExist);
         }
 
-        document.participants.push(did_key.clone());
+        document.participants.insert(did_key.clone());
 
         this.set_document().await?;
 
@@ -2031,7 +2031,7 @@ impl ConversationTask {
         debug_assert!(!document.participants.contains(did_key));
         debug_assert!(!document.restrict.contains(did_key));
 
-        document.restrict.push(did_key.clone());
+        document.restrict.insert(did_key.clone());
 
         this.set_document().await?;
 

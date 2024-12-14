@@ -2,6 +2,7 @@ use crate::store::verify_serde_sig;
 use ipld_core::cid::Cid;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use indexmap::IndexSet;
 use warp::crypto::DID;
 use warp::raygun::GroupPermissions;
 
@@ -15,13 +16,15 @@ pub struct DirectConversationDocument {
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct GroupConversationDocument {
     pub creator: DID,
-    pub participants: Vec<DID>,
+    #[serde(default, skip_serializing_if = "IndexSet::is_empty")]
+    pub participants: IndexSet<DID>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub messages: Option<Cid>,
     pub permissions: GroupPermissions,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub excluded: HashMap<DID, String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub restrict: Vec<DID>,
+    #[serde(default, skip_serializing_if = "IndexSet::is_empty")]
+    pub restrict: IndexSet<DID>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
