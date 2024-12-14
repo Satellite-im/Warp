@@ -17,6 +17,7 @@ use futures::{
     stream::{self, BoxStream},
     StreamExt, TryFutureExt,
 };
+use indexmap::IndexSet;
 use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, Keypair};
 use serde::{Deserialize, Serialize};
@@ -24,7 +25,6 @@ use std::{
     collections::{BTreeSet, HashMap},
     time::Duration,
 };
-use indexmap::IndexSet;
 use uuid::Uuid;
 use warp::{
     crypto::DID,
@@ -166,9 +166,9 @@ impl ConversationDocument {
         if !participants.contains(&creator) {
             participants.insert(creator.clone());
         }
-        
+
         let restrict = IndexSet::from_iter(restrict.iter().cloned());
-        
+
         let inner = InnerDocument::Group(GroupConversationDocument {
             creator,
             participants,

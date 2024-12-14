@@ -1,8 +1,8 @@
 use crate::store::verify_serde_sig;
+use indexmap::IndexSet;
 use ipld_core::cid::Cid;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use indexmap::IndexSet;
 use warp::crypto::DID;
 use warp::raygun::GroupPermissions;
 
