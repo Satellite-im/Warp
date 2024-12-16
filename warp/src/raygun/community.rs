@@ -4,6 +4,7 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use futures::stream::BoxStream;
 use indexmap::{IndexMap, IndexSet};
+use macro_utils::{impl_funcs, VariantExport};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -21,7 +22,7 @@ pub type CommunityRoles = IndexMap<RoleId, CommunityRole>;
 pub type CommunityPermissions = IndexMap<CommunityPermission, IndexSet<RoleId>>;
 pub type CommunityChannelPermissions = IndexMap<CommunityChannelPermission, IndexSet<RoleId>>;
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq, VariantExport)]
 pub struct CommunityRole {
     id: RoleId,
     name: String,
@@ -50,7 +51,7 @@ impl CommunityRole {
     }
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq, VariantExport)]
 pub struct CommunityInvite {
     id: Uuid,
     target_user: Option<DID>,
@@ -86,7 +87,7 @@ impl CommunityInvite {
     }
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, Eq, PartialEq, VariantExport)]
 pub struct Community {
     id: Uuid,
     name: String,
@@ -171,7 +172,7 @@ impl Community {
     }
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq, VariantExport)]
 pub struct CommunityChannel {
     id: Uuid,
     name: String,
@@ -229,7 +230,7 @@ impl CommunityChannel {
     }
 }
 
-#[derive(Default, Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Default, Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, VariantExport)]
 #[serde(rename_all = "snake_case")]
 pub enum CommunityChannelType {
     #[default]
@@ -237,7 +238,7 @@ pub enum CommunityChannelType {
     VoiceEnabled,
 }
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, VariantExport)]
 #[serde(rename_all = "snake_case")]
 pub enum CommunityPermission {
     EditName,
@@ -269,7 +270,7 @@ pub enum CommunityPermission {
     PinMessages,
 }
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, VariantExport)]
 #[serde(rename_all = "snake_case")]
 pub enum CommunityChannelPermission {
     ViewChannel,
@@ -277,6 +278,7 @@ pub enum CommunityChannelPermission {
     SendAttachments,
 }
 
+#[impl_funcs(name = "raygun_community_impls")]
 #[async_trait::async_trait]
 pub trait RayGunCommunity: Sync + Send {
     async fn get_community_stream(
