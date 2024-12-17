@@ -78,6 +78,7 @@ use warp::{Extension, SingleHandle};
 
 mod behaviour;
 pub mod config;
+pub mod hotspot;
 pub(crate) mod rt;
 pub mod shuttle;
 pub mod store;
