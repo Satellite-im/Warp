@@ -3,11 +3,11 @@ use base64::engine::general_purpose::PAD;
 use base64::engine::GeneralPurpose;
 use base64::Engine;
 use clap::Parser;
+use rust_ipfs::p2p::{RateLimit, RelayConfig};
+use rust_ipfs::{Keypair, Multiaddr};
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 use std::{num::NonZeroU32, path::PathBuf, time::Duration};
-use rust_ipfs::{Keypair, Multiaddr};
-use rust_ipfs::p2p::{RateLimit, RelayConfig};
 use warp_ipfs::hotspot;
 use zeroize::Zeroizing;
 
@@ -246,7 +246,7 @@ async fn main() -> anyhow::Result<()> {
     .await?;
 
     tokio::signal::ctrl_c().await?;
-    
+
     Ok(())
 }
 

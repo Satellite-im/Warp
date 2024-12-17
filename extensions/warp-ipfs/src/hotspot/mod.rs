@@ -8,19 +8,16 @@ use futures::{FutureExt, StreamExt};
 use futures_timer::Delay;
 use pollable_map::futures::FutureMap;
 use rust_ipfs::libp2p::gossipsub::Message;
+use rust_ipfs::libp2p::swarm::behaviour::toggle::Toggle;
 use rust_ipfs::p2p::{
     IdentifyConfiguration, PubsubConfig, RelayConfig, TransportConfig, UpgradeVersion,
 };
 use rust_ipfs::Keypair;
-use rust_ipfs::{
-    FDLimit, Ipfs, Multiaddr, SubscriptionStream,
-    UninitializedIpfs,
-};
+use rust_ipfs::{FDLimit, Ipfs, Multiaddr, SubscriptionStream, UninitializedIpfs};
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
-use rust_ipfs::libp2p::swarm::behaviour::toggle::Toggle;
 use warp::crypto::DID;
 
 pub struct Hotspot {
@@ -53,7 +50,7 @@ impl Hotspot {
             ],
             addrs => addrs.to_vec(),
         };
-        
+
         let mut uninitialized = UninitializedIpfs::new()
             .with_identify(IdentifyConfiguration {
                 agent_version: format!("shuttle/hotspot/{}", env!("CARGO_PKG_VERSION")),
@@ -65,7 +62,8 @@ impl Hotspot {
             .with_pubsub(PubsubConfig {
                 max_transmit_size: 4 * 1024 * 1024,
                 ..Default::default()
-            }).set_listening_addrs(addrs)
+            })
+            .set_listening_addrs(addrs)
             .set_transport_configuration(TransportConfig {
                 enable_webrtc: webrtc_enable,
                 enable_memory_transport: memory_transport,
