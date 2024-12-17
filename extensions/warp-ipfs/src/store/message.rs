@@ -31,7 +31,9 @@ use rust_ipfs::{Ipfs, PeerId};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::topics::ConversationTopic;
 use super::{document::root::RootDocumentMap, ds_key::DataStoreKey, PeerIdExt};
+use crate::store::CommunityJoinEvents;
 use crate::store::{
     conversation::ConversationDocument,
     discovery::Discovery,
@@ -1064,26 +1066,30 @@ impl MessageStore {
             .await;
         rx.await.map_err(anyhow::Error::from)?
     }
-    pub async fn accept_community_invite(
-        &mut self,
-        community_id: Uuid,
-        invite_id: Uuid,
-    ) -> Result<(), Error> {
+    pub async fn request_join_community(&mut self, community_id: Uuid) -> Result<(), Error> {
         let inner = &*self.inner.read().await;
-        let community_meta = inner
-            .community_task
-            .get(&community_id)
-            .ok_or(Error::InvalidCommunity)?;
-        let (tx, rx) = oneshot::channel();
-        let _ = community_meta
-            .command_tx
-            .clone()
-            .send(CommunityTaskCommand::AcceptCommunityInvite {
-                invite_id,
-                response: tx,
-            })
-            .await;
-        rx.await.map_err(anyhow::Error::from)?
+        let own_did = &inner.identity.did_key();
+
+        let keypair = inner.root.keypair();
+
+        let event = CommunityJoinEvents::Join {
+            community_id,
+            user: own_did.clone(),
+        };
+        let bytes = serde_json::to_vec(&event)?;
+        let payload = PayloadBuilder::new(keypair, bytes)
+            .from_ipfs(&inner.ipfs)
+            .await?;
+        let bytes = payload.to_bytes()?;
+
+        if let Err(e) = inner
+            .ipfs
+            .pubsub_publish(community_id.join_topic(), bytes)
+            .await
+        {
+            tracing::error!(id=%community_id, "Unable to send event: {e}");
+        }
+        Ok(())
     }
     pub async fn edit_community_invite(
         &mut self,
@@ -3031,8 +3037,7 @@ impl ConversationInner {
     pub async fn get_community(&mut self, community_id: Uuid) -> Result<Community, Error> {
         let doc = self.get_community_document(community_id).await?;
         let own_did = &self.identity.did_key();
-        if own_did != &doc.owner && !doc.has_valid_invite(own_did) && !doc.members.contains(own_did)
-        {
+        if !doc.participants().contains(own_did) {
             return Err(Error::Unauthorized);
         }
         Ok(doc.into())
@@ -3211,32 +3216,7 @@ async fn process_conversation(
         ConversationEvents::NewCommunityInvite {
             community_id,
             invite,
-            community_document,
         } => {
-            let did = this.identity.did_key();
-
-            if this.contains_community(community_id).await {
-                return Err(anyhow::anyhow!("Already apart of {community_id}").into());
-            }
-
-            let recipients = community_document.participants().clone();
-
-            for recipient in &recipients {
-                if !this.discovery.contains(recipient).await {
-                    let _ = this.discovery.insert(recipient).await;
-                }
-            }
-
-            this.set_community_document(community_document).await?;
-
-            this.create_community_task(community_id).await?;
-
-            for recipient in recipients.iter().filter(|d| did.ne(d)) {
-                if let Err(e) = this.request_community_key(community_id, recipient).await {
-                    tracing::warn!(%community_id, error = %e, %recipient, "Failed to send exchange request");
-                }
-            }
-
             this.event
                 .emit(RayGunEventKind::CommunityInvited {
                     community_id,
@@ -3244,6 +3224,58 @@ async fn process_conversation(
                 })
                 .await;
         }
+        ConversationEvents::JoinCommunity {
+            community_id,
+            community_document: result,
+        } => match result {
+            None => {
+                this.event
+                    .emit(RayGunEventKind::CommunityJoinRejected { community_id })
+                    .await;
+                return Ok(());
+            }
+            Some(community_document) => {
+                let did = this.identity.did_key();
+
+                if this.contains_community(community_id).await {
+                    return Ok(());
+                }
+
+                let recipients = community_document.participants().clone();
+
+                for recipient in &recipients {
+                    if !this.discovery.contains(recipient).await {
+                        let _ = this.discovery.insert(recipient).await;
+                    }
+                }
+
+                this.set_community_document(community_document).await?;
+
+                this.create_community_task(community_id).await?;
+
+                for recipient in recipients.iter().filter(|d| did.ne(d)) {
+                    if let Err(e) = this.request_community_key(community_id, recipient).await {
+                        tracing::warn!(%community_id, error = %e, %recipient, "Failed to send exchange request");
+                    }
+                }
+
+                let community_meta = this
+                    .community_task
+                    .get(&community_id)
+                    .ok_or(Error::InvalidCommunity)?;
+                let (tx, rx) = oneshot::channel();
+                let _ = community_meta
+                    .command_tx
+                    .clone()
+                    .send(CommunityTaskCommand::SendJoinedCommunityEvent { response: tx })
+                    .await;
+                let _ = rx.await.map_err(anyhow::Error::from)?;
+
+                this.event
+                    .emit(RayGunEventKind::CommunityJoined { community_id })
+                    .await;
+            }
+        },
         ConversationEvents::DeleteCommunity { community_id } => {
             tracing::trace!("Delete community event received for {community_id}");
             if !this.contains_community(community_id).await {

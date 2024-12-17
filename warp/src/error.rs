@@ -163,10 +163,14 @@ pub enum Error {
     InvalidGroupId,
     #[error("Invalid Group Member")]
     InvalidGroupMember,
+    #[error("Already Community Member")]
+    AlreadyCommunityMember,
     #[error("Invalid Community Member")]
     InvalidCommunityMember,
     #[error("Invite is invalid")]
     InvalidInvite,
+    #[error("No valid Community invite")]
+    NoValidCommunityInvite,
     #[error("Invite is targeting a different user")]
     CommunityInviteIncorrectUser,
     #[error("Invite is expired")]
