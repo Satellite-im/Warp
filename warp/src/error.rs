@@ -33,6 +33,8 @@ pub enum Error {
     InvalidConversion,
     #[error("Attempted community is invalid")]
     InvalidCommunity,
+    #[error("Attempted community invite is invalid")]
+    InvalidCommunityInvite,
     #[error("Path supplied is invalid")]
     InvalidPath,
     #[error("Directory already exist")]

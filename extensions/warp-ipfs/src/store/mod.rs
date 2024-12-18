@@ -314,6 +314,10 @@ pub enum ConversationEvents {
         community_id: Uuid,
         invite: CommunityInviteDocument,
     },
+    DeleteCommunityInvite {
+        community_id: Uuid,
+        invite: CommunityInviteDocument,
+    },
     JoinCommunity {
         community_id: Uuid,
         community_document: Option<CommunityDocument>,
@@ -469,7 +473,8 @@ pub enum CommunityMessagingEvents {
 #[allow(clippy::large_enum_variant)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum CommunityJoinEvents {
-    Join { community_id: Uuid, user: DID },
+    Join,
+    DeleteInvite { invite_id: Uuid },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

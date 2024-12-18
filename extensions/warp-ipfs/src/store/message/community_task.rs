@@ -1285,13 +1285,14 @@ impl CommunityTask {
     }
     async fn process_join_event(&mut self, msg: Message) -> Result<(), Error> {
         let data = PayloadMessage::<Vec<u8>>::from_bytes(&msg.data)?;
-        let id = self.community_id;
+        let community_id = self.community_id;
+        let sender = data.sender().to_did()?;
         let event = serde_json::from_slice::<CommunityJoinEvents>(&data.message()).map_err(|e| {
-            tracing::warn!(id = %id, sender = %data.sender(), error = %e, "Failed to deserialize message");
+            tracing::warn!(community_id = %community_id, sender = %data.sender(), error = %e, "Failed to deserialize message");
             e
         })?;
         match event {
-            CommunityJoinEvents::Join { community_id, user } => {
+            CommunityJoinEvents::Join => {
                 let mut is_invited = false;
                 for (_, invite) in &self.document.invites {
                     if let Some(expiry) = invite.expiry {
@@ -1300,7 +1301,7 @@ impl CommunityTask {
                         }
                     }
                     if let Some(target) = &invite.target_user {
-                        if &user != target {
+                        if &sender != target {
                             continue;
                         }
                     }
@@ -1309,7 +1310,7 @@ impl CommunityTask {
                 }
                 if !is_invited {
                     self.send_single_community_event(
-                        &user.clone(),
+                        &sender.clone(),
                         ConversationEvents::JoinCommunity {
                             community_id,
                             community_document: None,
@@ -1319,24 +1320,24 @@ impl CommunityTask {
                     return Ok(());
                 }
 
-                self.document.members.insert(user.clone());
+                self.document.members.insert(sender.clone());
 
                 let mut invites_to_remove = vec![];
                 for (id, invite) in &self.document.invites {
                     if let Some(target) = &invite.target_user {
-                        if &user == target {
+                        if &sender == target {
                             invites_to_remove.push(id.clone());
                         }
                     }
                 }
-                for id in invites_to_remove {
-                    self.document.invites.swap_remove(&id);
+                for id in &invites_to_remove {
+                    self.document.invites.swap_remove(id);
                 }
 
                 self.set_document().await?;
 
                 self.send_single_community_event(
-                    &user.clone(),
+                    &sender.clone(),
                     ConversationEvents::JoinCommunity {
                         community_id: self.community_id,
                         community_document: Some(self.document.clone()),
@@ -1344,10 +1345,39 @@ impl CommunityTask {
                 )
                 .await?;
 
-                if !self.discovery.contains(&user).await {
-                    let _ = self.discovery.insert(&user).await;
+                if !self.discovery.contains(&sender).await {
+                    let _ = self.discovery.insert(&sender).await;
                 }
-                if let Err(_e) = self.request_key(&user.clone()).await {}
+                if let Err(_e) = self.request_key(&sender.clone()).await {}
+            }
+            CommunityJoinEvents::DeleteInvite { invite_id } => {
+                let invite_id = invite_id.to_string();
+                let invite = self
+                    .document
+                    .invites
+                    .get(&invite_id)
+                    .ok_or(Error::CommunityInviteDoesntExist)?
+                    .clone();
+
+                if !invite
+                    .target_user
+                    .clone()
+                    .is_some_and(|target| target == sender)
+                {
+                    return Err(Error::InvalidCommunityInvite);
+                }
+
+                self.document.invites.swap_remove(&invite_id);
+                self.set_document().await?;
+
+                self.send_single_community_event(
+                    &sender.clone(),
+                    ConversationEvents::DeleteCommunityInvite {
+                        community_id: self.community_id,
+                        invite,
+                    },
+                )
+                .await?;
             }
         }
         Ok(())
@@ -1725,6 +1755,12 @@ impl CommunityTask {
             return Err(Error::Unauthorized);
         }
 
+        let invite = self
+            .document
+            .invites
+            .get(&invite_id.to_string())
+            .ok_or(Error::CommunityInviteDoesntExist)?
+            .clone();
         self.document.invites.swap_remove(&invite_id.to_string());
         self.set_document().await?;
 
@@ -1743,7 +1779,20 @@ impl CommunityTask {
             },
             true,
         )
-        .await
+        .await?;
+
+        if let Some(did_key) = &invite.target_user {
+            self.send_single_community_event(
+                &did_key.clone(),
+                ConversationEvents::DeleteCommunityInvite {
+                    community_id: self.community_id,
+                    invite,
+                },
+            )
+            .await?;
+        }
+
+        Ok(())
     }
     pub async fn get_community_invite(
         &mut self,
@@ -1791,7 +1840,25 @@ impl CommunityTask {
             },
             true,
         )
-        .await
+        .await?;
+
+        let invite = self
+            .document
+            .invites
+            .get(&invite_id.to_string())
+            .ok_or(Error::CommunityInviteDoesntExist)?;
+        if let Some(did_key) = &invite.target_user {
+            self.send_single_community_event(
+                &did_key.clone(),
+                ConversationEvents::NewCommunityInvite {
+                    community_id: self.community_id,
+                    invite: invite.clone(),
+                },
+            )
+            .await?;
+        }
+
+        Ok(())
     }
 
     pub async fn create_community_role(&mut self, name: String) -> Result<CommunityRole, Error> {
