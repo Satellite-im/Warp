@@ -915,7 +915,7 @@ impl MessageStore {
         Ok(inner
             .community_invites
             .iter()
-            .map(|(community_id, i)| (community_id.clone(), CommunityInvite::from(i.clone())))
+            .map(|(community_id, i)| (*community_id, CommunityInvite::from(i.clone())))
             .collect())
     }
     pub async fn leave_community(&mut self, community_id: Uuid) -> Result<(), Error> {
@@ -3223,7 +3223,7 @@ async fn process_conversation(
             let mut updated = false;
             for i in this.community_invites.len()..0 {
                 let (community, invitation) = this.community_invites[i].clone();
-                if community == community_id && &invitation.id == &invite.id {
+                if community == community_id && invitation.id == invite.id {
                     this.community_invites[i] = (community_id, invite.clone());
                     updated = true;
                     break;
