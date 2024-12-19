@@ -1295,7 +1295,7 @@ impl CommunityTask {
             CommunityJoinEvents::Join => {
                 let now = Utc::now();
 
-                if self.document.invites.iter().any(|(_, invite)| {
+                if !self.document.invites.iter().any(|(_, invite)| {
                     invite.expiry.is_none_or(|expiry| expiry > now)
                         && invite
                             .target_user
