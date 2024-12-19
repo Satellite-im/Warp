@@ -526,7 +526,6 @@ impl WarpIpfs {
             }
         }
 
-
         if let config::Discovery::Shuttle { addresses } =
             self.inner.config.store_setting().discovery.clone()
         {
@@ -646,9 +645,12 @@ impl WarpIpfs {
                         continue;
                     };
 
-                    let opt = AddPeerOpt::with_peer_id(peer_id).add_address(addr.clone()).set_dial();
+                    let opt = AddPeerOpt::with_peer_id(peer_id)
+                        .add_address(addr.clone())
+                        .set_dial(true)
+                        .set_keepalive(true);
 
-                    if let Err(e) = ipfs.add_peer(addr.clone()).await {
+                    if let Err(e) = ipfs.add_peer(opt).await {
                         tracing::error!(error = %e, "unable to add {addr} to address book");
                         continue;
                     }
@@ -674,7 +676,7 @@ impl WarpIpfs {
             &discovery,
             &span,
         )
-            .await?;
+        .await?;
 
         tracing::info!("Identity initialized");
 
@@ -687,7 +689,7 @@ impl WarpIpfs {
             self.constellation_tx.clone(),
             &span,
         )
-            .await;
+        .await;
 
         let message_store = MessageStore::new(
             &ipfs,
@@ -696,7 +698,7 @@ impl WarpIpfs {
             self.raygun_tx.clone(),
             &identity_store,
         )
-            .await;
+        .await;
 
         tracing::info!("Messaging store initialized");
 
@@ -1152,7 +1154,7 @@ impl LocalIdentity for WarpIpfs {
             format.into(),
             Some(MAX_IMAGE_SIZE),
         )
-            .await?;
+        .await?;
 
         tracing::debug!("Image cid: {cid}");
 
