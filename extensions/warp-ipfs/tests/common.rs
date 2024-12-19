@@ -62,10 +62,9 @@ pub async fn create_account(
     *config.listen_on_mut() = vec![Multiaddr::empty().with(Protocol::Memory(0))];
     config.ipfs_setting_mut().memory_transport = true;
     config.store_setting_mut().discovery = Discovery::None;
+    config.store_setting_mut().auto_push_duration = Duration::from_secs(1);
     config.ipfs_setting_mut().relay_client.relay_address = vec![];
     config.ipfs_setting_mut().mdns.enable = false;
-    config.store_setting_mut().announce_to_mesh = true;
-    config.store_setting_mut().auto_push = Some(Duration::from_secs(1));
 
     *config.bootstrap_mut() = Bootstrap::None;
 
