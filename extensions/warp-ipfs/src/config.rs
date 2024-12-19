@@ -133,7 +133,6 @@ pub struct StoreSetting {
     /// Duration in seconds before the identity document is announced
     /// Note: This field should be left as default unless it is used for testing
     pub auto_push_duration: Duration,
-
 }
 
 impl std::fmt::Debug for StoreSetting {
