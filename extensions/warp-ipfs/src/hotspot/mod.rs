@@ -26,6 +26,7 @@ pub struct Hotspot {
 }
 
 impl Hotspot {
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         keypair: &Keypair,
         enable_wss: bool,
@@ -58,7 +59,7 @@ impl Hotspot {
             })
             .with_ping(Default::default())
             .fd_limit(FDLimit::Max)
-            .set_keypair(&keypair)
+            .set_keypair(keypair)
             .with_pubsub(PubsubConfig {
                 max_transmit_size: 4 * 1024 * 1024,
                 ..Default::default()
