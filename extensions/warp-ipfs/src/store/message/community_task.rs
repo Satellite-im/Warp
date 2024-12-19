@@ -1293,24 +1293,17 @@ impl CommunityTask {
         })?;
         match event {
             CommunityJoinEvents::Join => {
-                let mut is_invited = false;
-                for (_, invite) in &self.document.invites {
-                    if let Some(expiry) = invite.expiry {
-                        if expiry < Utc::now() {
-                            continue;
-                        }
-                    }
-                    if let Some(target) = &invite.target_user {
-                        if &sender != target {
-                            continue;
-                        }
-                    }
-                    is_invited = true;
-                    break;
-                }
-                if !is_invited {
+                let now = Utc::now();
+
+                if self.document.invites.iter().any(|(_, invite)| {
+                    invite.expiry.is_none_or(|expiry| expiry > now)
+                        && invite
+                            .target_user
+                            .as_ref()
+                            .is_none_or(|target| &sender == target)
+                }) {
                     self.send_single_community_event(
-                        &sender.clone(),
+                        &sender,
                         ConversationEvents::JoinCommunity {
                             community_id,
                             community_document: None,
@@ -1322,22 +1315,17 @@ impl CommunityTask {
 
                 self.document.members.insert(sender.clone());
 
-                let mut invites_to_remove = vec![];
-                for (id, invite) in &self.document.invites {
-                    if let Some(target) = &invite.target_user {
-                        if &sender == target {
-                            invites_to_remove.push(id.clone());
-                        }
-                    }
-                }
-                for id in &invites_to_remove {
-                    self.document.invites.swap_remove(id);
-                }
+                self.document.invites.retain(|_, invite| {
+                    !invite
+                        .target_user
+                        .as_ref()
+                        .is_some_and(|target| &sender == target)
+                });
 
                 self.set_document().await?;
 
                 self.send_single_community_event(
-                    &sender.clone(),
+                    &sender,
                     ConversationEvents::JoinCommunity {
                         community_id: self.community_id,
                         community_document: Some(self.document.clone()),
@@ -1348,7 +1336,7 @@ impl CommunityTask {
                 if !self.discovery.contains(&sender).await {
                     let _ = self.discovery.insert(&sender).await;
                 }
-                if let Err(_e) = self.request_key(&sender.clone()).await {}
+                if let Err(_e) = self.request_key(&sender).await {}
             }
             CommunityJoinEvents::DeleteInvite { invite_id } => {
                 let invite_id = invite_id.to_string();
@@ -1371,7 +1359,7 @@ impl CommunityTask {
                 self.set_document().await?;
 
                 self.send_single_community_event(
-                    &sender.clone(),
+                    &sender,
                     ConversationEvents::DeleteCommunityInvite {
                         community_id: self.community_id,
                         invite,
