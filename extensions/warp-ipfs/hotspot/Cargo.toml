@@ -13,7 +13,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 clap = { version = "4.4", features = ["derive"] }
 zeroize.workspace = true
-base64 = "0.21"
+base64 = "0.22"
 
 tokio = { workspace = true }
-toml = "0.5.11"
+toml = "0.8.19"

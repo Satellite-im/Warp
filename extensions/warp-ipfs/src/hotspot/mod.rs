@@ -157,6 +157,8 @@ impl HotspotTask {
         // TODO: Maybe perform in match condition to prevent nesdless update if the document entry is new?
         user.update_identity_document(document.clone());
 
+        // TODO: manually propagate initial message to mesh network
+
         Ok(())
     }
 }
@@ -253,6 +255,7 @@ impl HotspotUser {
         self.identity = identity_document;
         self.last_seen = Utc::now();
         self.last_seen_timer = Delay::new(Duration::from_secs(2 * 60));
+        tracing::info!(identity = %self.identity.did, last_seen = %self.last_seen, "last seen identity.");
     }
 }
 

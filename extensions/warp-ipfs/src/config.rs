@@ -107,6 +107,7 @@ pub struct IpfsSetting {
     /// Used for testing with a memory transport
     pub memory_transport: bool,
     pub dht_client: bool,
+    pub preload: Vec<Multiaddr>,
 }
 
 pub type DefaultPfpFn = std::sync::Arc<
@@ -118,12 +119,6 @@ pub struct StoreSetting {
     /// Allow only interactions with friends
     /// Note: This is ignored when it comes to chating between group chat recipients
     pub with_friends: bool,
-    /// Interval for broadcasting out identity (cannot be less than 3 minutes)
-    /// Note:
-    ///     - If `None`, this will be disabled
-    ///     - Will default to 3 minutes if less than
-    ///     - This may be removed in the future
-    pub auto_push: Option<Duration>,
     /// Discovery type
     pub discovery: Discovery,
 
@@ -133,8 +128,6 @@ pub struct StoreSetting {
     pub friend_request_response_duration: Option<Duration>,
     /// Disable providing images for identities
     pub disable_images: bool,
-    /// Announce to mesh network
-    pub announce_to_mesh: bool,
     /// Function to call to provide data for a default profile picture if one is not apart of the identity
     pub default_profile_picture: Option<DefaultPfpFn>,
 }
@@ -148,7 +141,6 @@ impl std::fmt::Debug for StoreSetting {
 impl Default for StoreSetting {
     fn default() -> Self {
         Self {
-            auto_push: None,
             discovery: Discovery::Namespace {
                 namespace: None,
                 discovery_type: Default::default(),
@@ -158,7 +150,6 @@ impl Default for StoreSetting {
             disable_images: false,
             with_friends: false,
             default_profile_picture: None,
-            announce_to_mesh: false,
         }
     }
 }

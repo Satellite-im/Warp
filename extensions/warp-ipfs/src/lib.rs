@@ -13,6 +13,7 @@ use ipfs::{DhtMode, Ipfs, Keypair, Protocol, UninitializedIpfs};
 use parking_lot::RwLock;
 use rust_ipfs as ipfs;
 use rust_ipfs::p2p::{RequestResponseConfig, UpgradeVersion};
+use rust_ipfs::AddPeerOpt;
 use std::any::Any;
 use std::collections::HashSet;
 use std::ffi::OsStr;
@@ -525,6 +526,7 @@ impl WarpIpfs {
             }
         }
 
+
         if let config::Discovery::Shuttle { addresses } =
             self.inner.config.store_setting().discovery.clone()
         {
@@ -633,6 +635,31 @@ impl WarpIpfs {
             }
         }
 
+        let preload = self.inner.config.ipfs_setting().preload.clone();
+
+        self.executor.dispatch({
+            let ipfs = ipfs.clone();
+            async move {
+                for addr in preload {
+                    let Some(peer_id) = addr.peer_id() else {
+                        tracing::warn!("{addr} does not contain a peer id. Skipping");
+                        continue;
+                    };
+
+                    let opt = AddPeerOpt::with_peer_id(peer_id).add_address(addr.clone()).set_dial();
+
+                    if let Err(e) = ipfs.add_peer(addr.clone()).await {
+                        tracing::error!(error = %e, "unable to add {addr} to address book");
+                        continue;
+                    }
+
+                    if !ipfs.is_connected(peer_id).await.unwrap_or_default() {
+                        let _ = ipfs.connect(peer_id).await;
+                    }
+                }
+            }
+        });
+
         let discovery =
             Discovery::new(&ipfs, &self.inner.config.store_setting().discovery, &relays);
 
@@ -647,7 +674,7 @@ impl WarpIpfs {
             &discovery,
             &span,
         )
-        .await?;
+            .await?;
 
         tracing::info!("Identity initialized");
 
@@ -660,7 +687,7 @@ impl WarpIpfs {
             self.constellation_tx.clone(),
             &span,
         )
-        .await;
+            .await;
 
         let message_store = MessageStore::new(
             &ipfs,
@@ -669,7 +696,7 @@ impl WarpIpfs {
             self.raygun_tx.clone(),
             &identity_store,
         )
-        .await;
+            .await;
 
         tracing::info!("Messaging store initialized");
 
@@ -1125,7 +1152,7 @@ impl LocalIdentity for WarpIpfs {
             format.into(),
             Some(MAX_IMAGE_SIZE),
         )
-        .await?;
+            .await?;
 
         tracing::debug!("Image cid: {cid}");
 
