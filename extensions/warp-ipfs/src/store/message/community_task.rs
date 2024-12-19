@@ -49,9 +49,9 @@ use crate::store::ds_key::DataStoreKey;
 use crate::store::event_subscription::EventSubscription;
 use crate::store::topics::PeerTopic;
 use crate::store::{
-    CommunityUpdateKind, ConversationEvents, ConversationImageType, MAX_COMMUNITY_CHANNELS,
-    MAX_COMMUNITY_DESCRIPTION, MAX_CONVERSATION_BANNER_SIZE, MAX_CONVERSATION_ICON_SIZE,
-    MAX_MESSAGE_SIZE, MAX_REACTIONS, MIN_MESSAGE_SIZE,
+    CommunityJoinEvents, CommunityUpdateKind, ConversationEvents, ConversationImageType,
+    MAX_COMMUNITY_CHANNELS, MAX_COMMUNITY_DESCRIPTION, MAX_CONVERSATION_BANNER_SIZE,
+    MAX_CONVERSATION_ICON_SIZE, MAX_MESSAGE_SIZE, MAX_REACTIONS, MIN_MESSAGE_SIZE,
 };
 use crate::utils::{ByteCollection, ExtensionType};
 use crate::{
@@ -104,10 +104,6 @@ pub enum CommunityTaskCommand {
     GetCommunityInvite {
         invite_id: Uuid,
         response: oneshot::Sender<Result<CommunityInvite, Error>>,
-    },
-    AcceptCommunityInvite {
-        invite_id: Uuid,
-        response: oneshot::Sender<Result<(), Error>>,
     },
     EditCommunityInvite {
         invite_id: Uuid,
@@ -311,6 +307,9 @@ pub enum CommunityTaskCommand {
         response: oneshot::Sender<Result<BoxStream<'static, Result<Bytes, std::io::Error>>, Error>>,
     },
 
+    SendJoinedCommunityEvent {
+        response: oneshot::Sender<Result<(), Error>>,
+    },
     EventHandler {
         response: oneshot::Sender<tokio::sync::broadcast::Sender<MessageEventKind>>,
     },
@@ -333,6 +332,7 @@ pub struct CommunityTask {
     messaging_stream: SubscriptionStream,
     event_stream: SubscriptionStream,
     request_stream: SubscriptionStream,
+    join_stream: SubscriptionStream,
 
     attachment_tx: futures::channel::mpsc::Sender<AttachmentOneshot>,
     attachment_rx: futures::channel::mpsc::Receiver<AttachmentOneshot>,
@@ -390,12 +390,12 @@ impl CommunityTask {
         let main_topic = document.topic();
         let event_topic = document.event_topic();
         let request_topic = document.exchange_topic(&identity.did_key());
+        let join_topic = document.join_topic();
 
         let messaging_stream = ipfs.pubsub_subscribe(main_topic).await?;
-
         let event_stream = ipfs.pubsub_subscribe(event_topic).await?;
-
         let request_stream = ipfs.pubsub_subscribe(request_topic).await?;
+        let join_stream = ipfs.pubsub_subscribe(join_topic).await?;
 
         let (atx, arx) = futures::channel::mpsc::channel(256);
         let (btx, _) = tokio::sync::broadcast::channel(1024);
@@ -413,6 +413,7 @@ impl CommunityTask {
             messaging_stream,
             request_stream,
             event_stream,
+            join_stream,
 
             attachment_tx: atx,
             attachment_rx: arx,
@@ -506,6 +507,12 @@ impl CommunityTask {
                     let source = message.source;
                     if let Err(e) = this.process_msg_event(message).await {
                         tracing::error!(%community_id, sender = ?source, error = %e, name = "msg", "Failed to process payload");
+                    }
+                },
+                Some(message) = this.join_stream.next() => {
+                    let source = message.source;
+                    if let Err(e) = this.process_join_event(message).await {
+                        tracing::error!(%community_id, sender = ?source, error = %e, name = "join", "Failed to process payload");
                     }
                 },
                 _ = &mut queue_timer => {
@@ -740,13 +747,6 @@ impl CommunityTask {
                 invite_id,
             } => {
                 let result = self.get_community_invite(invite_id).await;
-                let _ = response.send(result);
-            }
-            CommunityTaskCommand::AcceptCommunityInvite {
-                response,
-                invite_id,
-            } => {
-                let result = self.accept_community_invite(invite_id).await;
                 let _ = response.send(result);
             }
             CommunityTaskCommand::EditCommunityInvite {
@@ -1100,6 +1100,14 @@ impl CommunityTask {
                 let _ = response.send(result);
             }
 
+            CommunityTaskCommand::SendJoinedCommunityEvent { response } => {
+                let event = CommunityMessagingEvents::JoinedCommunity {
+                    community_id: self.community_id,
+                    user: self.identity.did_key(),
+                };
+                let result = self.publish(None, event, true).await;
+                let _ = response.send(result);
+            }
             CommunityTaskCommand::EventHandler { response } => {
                 let sender = self.event_broadcast.clone();
                 let _ = response.send(sender);
@@ -1275,6 +1283,93 @@ impl CommunityTask {
 
         Ok(())
     }
+    async fn process_join_event(&mut self, msg: Message) -> Result<(), Error> {
+        let data = PayloadMessage::<Vec<u8>>::from_bytes(&msg.data)?;
+        let community_id = self.community_id;
+        let sender = data.sender().to_did()?;
+        let event = serde_json::from_slice::<CommunityJoinEvents>(data.message()).map_err(|e| {
+            tracing::warn!(community_id = %community_id, sender = %data.sender(), error = %e, "Failed to deserialize message");
+            e
+        })?;
+        match event {
+            CommunityJoinEvents::Join => {
+                let now = Utc::now();
+
+                if self.document.invites.iter().any(|(_, invite)| {
+                    invite.expiry.is_none_or(|expiry| expiry > now)
+                        && invite
+                            .target_user
+                            .as_ref()
+                            .is_none_or(|target| &sender == target)
+                }) {
+                    self.send_single_community_event(
+                        &sender,
+                        ConversationEvents::JoinCommunity {
+                            community_id,
+                            community_document: None,
+                        },
+                    )
+                    .await?;
+                    return Ok(());
+                }
+
+                self.document.members.insert(sender.clone());
+
+                self.document.invites.retain(|_, invite| {
+                    !invite
+                        .target_user
+                        .as_ref()
+                        .is_some_and(|target| &sender == target)
+                });
+
+                self.set_document().await?;
+
+                self.send_single_community_event(
+                    &sender,
+                    ConversationEvents::JoinCommunity {
+                        community_id: self.community_id,
+                        community_document: Some(self.document.clone()),
+                    },
+                )
+                .await?;
+
+                if !self.discovery.contains(&sender).await {
+                    let _ = self.discovery.insert(&sender).await;
+                }
+                if let Err(_e) = self.request_key(&sender).await {}
+            }
+            CommunityJoinEvents::DeleteInvite { invite_id } => {
+                let invite_id = invite_id.to_string();
+                let invite = self
+                    .document
+                    .invites
+                    .get(&invite_id)
+                    .ok_or(Error::CommunityInviteDoesntExist)?
+                    .clone();
+
+                if !invite
+                    .target_user
+                    .clone()
+                    .is_some_and(|target| target == sender)
+                {
+                    return Err(Error::InvalidCommunityInvite);
+                }
+
+                self.document.invites.swap_remove(&invite_id);
+                self.set_document().await?;
+
+                self.send_single_community_event(
+                    &sender,
+                    ConversationEvents::DeleteCommunityInvite {
+                        community_id: self.community_id,
+                        invite,
+                    },
+                )
+                .await?;
+            }
+        }
+        Ok(())
+    }
 
     fn community_key(&self, member: Option<&DID>) -> Result<Vec<u8>, Error> {
         let keypair = self.root.keypair();
@@ -1378,7 +1473,6 @@ impl CommunityTask {
                 kind: CommunityUpdateKind::LeaveCommunity,
             },
             true,
-            vec![],
         )
         .await
     }
@@ -1569,7 +1663,7 @@ impl CommunityTask {
 
         let _ = self.event_broadcast.send(message_event);
 
-        self.publish(None, event, true, vec![]).await
+        self.publish(None, event, true).await
     }
 
     pub async fn create_community_invite(
@@ -1583,6 +1677,12 @@ impl CommunityTask {
             .has_permission(own_did, &CommunityPermission::CreateInvites)
         {
             return Err(Error::Unauthorized);
+        }
+
+        if let Some(target) = &target_user {
+            if self.document.members.contains(target) {
+                return Err(Error::AlreadyCommunityMember);
+            }
         }
 
         let invite_doc = CommunityInviteDocument::new(target_user.clone(), expiry);
@@ -1599,10 +1699,6 @@ impl CommunityTask {
                 invite: CommunityInvite::from(invite_doc.clone()),
             });
 
-        let mut exclude = vec![];
-        if let Some(target) = &target_user {
-            exclude.push(target.clone());
-        }
         self.publish(
             None,
             CommunityMessagingEvents::UpdateCommunity {
@@ -1612,22 +1708,18 @@ impl CommunityTask {
                 },
             },
             true,
-            exclude,
         )
         .await?;
 
-        //TODO: implement non targeted invites
         if let Some(did_key) = target_user {
             self.send_single_community_event(
                 &did_key.clone(),
                 ConversationEvents::NewCommunityInvite {
                     community_id: self.community_id,
-                    community_document: self.document.clone(),
                     invite: invite_doc.clone(),
                 },
             )
             .await?;
-            if let Err(_e) = self.request_key(&did_key.clone()).await {}
         }
 
         Ok(CommunityInvite::from(invite_doc))
@@ -1651,6 +1743,12 @@ impl CommunityTask {
             return Err(Error::Unauthorized);
         }
 
+        let invite = self
+            .document
+            .invites
+            .get(&invite_id.to_string())
+            .ok_or(Error::CommunityInviteDoesntExist)?
+            .clone();
         self.document.invites.swap_remove(&invite_id.to_string());
         self.set_document().await?;
 
@@ -1668,9 +1766,21 @@ impl CommunityTask {
                 kind: CommunityUpdateKind::DeleteCommunityInvite { invite_id },
             },
             true,
-            vec![],
         )
-        .await
+        .await?;
+
+        if let Some(did_key) = &invite.target_user {
+            self.send_single_community_event(
+                &did_key.clone(),
+                ConversationEvents::DeleteCommunityInvite {
+                    community_id: self.community_id,
+                    invite,
+                },
+            )
+            .await?;
+        }
+
+        Ok(())
     }
     pub async fn get_community_invite(
         &mut self,
@@ -1680,55 +1790,6 @@ impl CommunityTask {
             Some(invite_doc) => Ok(CommunityInvite::from(invite_doc.clone())),
             None => Err(Error::CommunityInviteDoesntExist),
         }
-    }
-    pub async fn accept_community_invite(&mut self, invite_id: Uuid) -> Result<(), Error> {
-        let own_did = &self.identity.did_key();
-        let invite_doc = self
-            .document
-            .invites
-            .get(&invite_id.to_string())
-            .ok_or(Error::CommunityInviteDoesntExist)?;
-
-        if let Some(target_user) = &invite_doc.target_user {
-            if own_did != target_user {
-                return Err(Error::CommunityInviteIncorrectUser);
-            }
-        }
-        if let Some(expiry) = &invite_doc.expiry {
-            if expiry < &Utc::now() {
-                return Err(Error::CommunityInviteExpired);
-            }
-        }
-
-        self.document.members.insert(own_did.clone());
-        if invite_doc.target_user.is_some() {
-            self.document
-                .invites
-                .swap_remove(&invite_doc.id.to_string());
-        }
-        self.set_document().await?;
-
-        let _ = self
-            .event_broadcast
-            .send(MessageEventKind::AcceptedCommunityInvite {
-                community_id: self.community_id,
-                invite_id,
-                user: own_did.clone(),
-            });
-
-        self.publish(
-            None,
-            CommunityMessagingEvents::UpdateCommunity {
-                community: self.document.clone(),
-                kind: CommunityUpdateKind::AcceptCommunityInvite {
-                    invite_id,
-                    user: own_did.clone(),
-                },
-            },
-            true,
-            vec![],
-        )
-        .await
     }
     pub async fn edit_community_invite(
         &mut self,
@@ -1766,9 +1827,26 @@ impl CommunityTask {
                 kind: CommunityUpdateKind::EditCommunityInvite { invite_id },
             },
             true,
-            vec![],
         )
-        .await
+        .await?;
+
+        let invite = self
+            .document
+            .invites
+            .get(&invite_id.to_string())
+            .ok_or(Error::CommunityInviteDoesntExist)?;
+        if let Some(did_key) = &invite.target_user {
+            self.send_single_community_event(
+                &did_key.clone(),
+                ConversationEvents::NewCommunityInvite {
+                    community_id: self.community_id,
+                    invite: invite.clone(),
+                },
+            )
+            .await?;
+        }
+
+        Ok(())
     }
 
     pub async fn create_community_role(&mut self, name: String) -> Result<CommunityRole, Error> {
@@ -1800,7 +1878,6 @@ impl CommunityTask {
                 kind: CommunityUpdateKind::CreateCommunityRole { role: role.clone() },
             },
             true,
-            vec![],
         )
         .await?;
 
@@ -1843,7 +1920,6 @@ impl CommunityTask {
                 kind: CommunityUpdateKind::DeleteCommunityRole { role_id },
             },
             true,
-            vec![],
         )
         .await
     }
@@ -1889,7 +1965,6 @@ impl CommunityTask {
                 kind: CommunityUpdateKind::EditCommunityRole { role_id },
             },
             true,
-            vec![],
         )
         .await
     }
@@ -1928,7 +2003,6 @@ impl CommunityTask {
                 kind: CommunityUpdateKind::GrantCommunityRole { role_id, user },
             },
             true,
-            vec![],
         )
         .await
     }
@@ -1964,7 +2038,6 @@ impl CommunityTask {
                 kind: CommunityUpdateKind::RevokeCommunityRole { role_id, user },
             },
             true,
-            vec![],
         )
         .await
     }
@@ -2008,7 +2081,6 @@ impl CommunityTask {
                 },
             },
             true,
-            vec![],
         )
         .await?;
 
@@ -2040,7 +2112,6 @@ impl CommunityTask {
                 kind: CommunityUpdateKind::DeleteCommunityChannel { channel_id },
             },
             true,
-            vec![],
         )
         .await
     }
@@ -2093,7 +2164,6 @@ impl CommunityTask {
                 },
             },
             true,
-            vec![],
         )
         .await
     }
@@ -2139,7 +2209,6 @@ impl CommunityTask {
                 },
             },
             true,
-            vec![],
         )
         .await
     }
@@ -2187,7 +2256,6 @@ impl CommunityTask {
                 },
             },
             true,
-            vec![],
         )
         .await
     }
@@ -2227,7 +2295,6 @@ impl CommunityTask {
                 },
             },
             true,
-            vec![],
         )
         .await
     }
@@ -2264,7 +2331,6 @@ impl CommunityTask {
                 kind: CommunityUpdateKind::GrantCommunityPermissionForAll { permission },
             },
             true,
-            vec![],
         )
         .await
     }
@@ -2299,7 +2365,6 @@ impl CommunityTask {
                 kind: CommunityUpdateKind::RevokeCommunityPermissionForAll { permission },
             },
             true,
-            vec![],
         )
         .await
     }
@@ -2332,7 +2397,6 @@ impl CommunityTask {
                 kind: CommunityUpdateKind::RemoveCommunityMember { member },
             },
             true,
-            vec![],
         )
         .await
     }
@@ -2376,7 +2440,6 @@ impl CommunityTask {
                 },
             },
             true,
-            vec![],
         )
         .await
     }
@@ -2419,7 +2482,6 @@ impl CommunityTask {
                 },
             },
             true,
-            vec![],
         )
         .await
     }
@@ -2474,7 +2536,6 @@ impl CommunityTask {
                 },
             },
             true,
-            vec![],
         )
         .await
     }
@@ -2522,7 +2583,6 @@ impl CommunityTask {
                 },
             },
             true,
-            vec![],
         )
         .await
     }
@@ -2569,7 +2629,6 @@ impl CommunityTask {
                 },
             },
             true,
-            vec![],
         )
         .await
     }
@@ -2612,7 +2671,6 @@ impl CommunityTask {
                 },
             },
             true,
-            vec![],
         )
         .await
     }
@@ -2906,7 +2964,7 @@ impl CommunityTask {
         //     }
         // }
 
-        self.publish(Some(message_id), event, true, vec![])
+        self.publish(Some(message_id), event, true)
             .await
             .map(|_| message_id)
     }
@@ -3027,7 +3085,7 @@ impl CommunityTask {
         //     }
         // }
 
-        self.publish(None, event, true, vec![]).await
+        self.publish(None, event, true).await
     }
     pub async fn reply_to_community_channel_message(
         &mut self,
@@ -3134,7 +3192,7 @@ impl CommunityTask {
         //     }
         // }
 
-        self.publish(Some(message_id), event, true, vec![])
+        self.publish(Some(message_id), event, true)
             .await
             .map(|_| message_id)
     }
@@ -3187,7 +3245,7 @@ impl CommunityTask {
             channel_id,
             message_id,
         });
-        self.publish(None, event, true, vec![]).await?;
+        self.publish(None, event, true).await?;
         Ok(())
     }
     pub async fn pin_community_channel_message(
@@ -3287,7 +3345,7 @@ impl CommunityTask {
             state,
         };
 
-        self.publish(None, event, true, vec![]).await
+        self.publish(None, event, true).await
     }
     pub async fn react_to_community_channel_message(
         &mut self,
@@ -3432,7 +3490,7 @@ impl CommunityTask {
         //     }
         // }
 
-        self.publish(None, event, true, vec![]).await
+        self.publish(None, event, true).await
     }
     pub async fn send_community_channel_messsage_event(
         &mut self,
@@ -3652,7 +3710,7 @@ impl CommunityTask {
         //     }
         // }
 
-        self.publish(Some(message_id), event, true, vec![]).await
+        self.publish(Some(message_id), event, true).await
     }
 
     pub async fn publish(
@@ -3660,7 +3718,6 @@ impl CommunityTask {
         message_id: Option<Uuid>,
         event: CommunityMessagingEvents,
         queue: bool,
-        exclude: Vec<DID>,
     ) -> Result<(), Error> {
         let event = serde_json::to_vec(&event)?;
         let keypair = self.root.keypair();
@@ -3680,11 +3737,7 @@ impl CommunityTask {
 
         let recipients = self.document.participants().clone();
 
-        for recipient in recipients
-            .iter()
-            .filter(|did| own_did.ne(did))
-            .filter(|did| !exclude.contains(did))
-        {
+        for recipient in recipients.iter().filter(|did| own_did.ne(did)) {
             let peer_id = recipient.to_peer_id()?;
 
             // We want to confirm that there is atleast one peer subscribed before attempting to send a message
@@ -4134,6 +4187,14 @@ async fn message_event(
                 }
             }
         }
+        CommunityMessagingEvents::JoinedCommunity { community_id, user } => {
+            if let Err(e) = this
+                .event_broadcast
+                .send(MessageEventKind::CommunityJoined { community_id, user })
+            {
+                tracing::warn!(%community_id, error = %e, "Error broadcasting event");
+            }
+        }
         CommunityMessagingEvents::UpdateCommunity { community, kind } => {
             match kind {
                 CommunityUpdateKind::LeaveCommunity => {
@@ -4147,15 +4208,6 @@ async fn message_event(
                 }
                 CommunityUpdateKind::CreateCommunityInvite { invite } => {
                     this.replace_document(community).await?;
-                    if let Some(did) = &invite.target_user {
-                        if !this.discovery.contains(did).await {
-                            let _ = this.discovery.insert(did).await;
-                        }
-                        if let Err(e) = this.request_key(did).await {
-                            tracing::error!(%community_id, error = %e, "error requesting key");
-                        }
-                    }
-
                     if let Err(e) =
                         this.event_broadcast
                             .send(MessageEventKind::CreatedCommunityInvite {
@@ -4173,19 +4225,6 @@ async fn message_event(
                             .send(MessageEventKind::DeletedCommunityInvite {
                                 community_id,
                                 invite_id,
-                            })
-                    {
-                        tracing::warn!(%community_id, error = %e, "Error broadcasting event");
-                    }
-                }
-                CommunityUpdateKind::AcceptCommunityInvite { invite_id, user } => {
-                    this.replace_document(community).await?;
-                    if let Err(e) =
-                        this.event_broadcast
-                            .send(MessageEventKind::AcceptedCommunityInvite {
-                                community_id,
-                                invite_id,
-                                user,
                             })
                     {
                         tracing::warn!(%community_id, error = %e, "Error broadcasting event");

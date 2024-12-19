@@ -1785,13 +1785,9 @@ impl RayGunCommunity for WarpIpfs {
             .get_community_invite(community_id, invite_id)
             .await
     }
-    async fn accept_community_invite(
-        &mut self,
-        community_id: Uuid,
-        invite_id: Uuid,
-    ) -> Result<(), Error> {
+    async fn request_join_community(&mut self, community_id: Uuid) -> Result<(), Error> {
         self.messaging_store()?
-            .accept_community_invite(community_id, invite_id)
+            .request_join_community(community_id)
             .await
     }
     async fn edit_community_invite(

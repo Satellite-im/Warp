@@ -139,6 +139,10 @@ impl CommunityDocument {
         self.id.exchange_topic(did)
     }
 
+    pub fn join_topic(&self) -> String {
+        self.id.join_topic()
+    }
+
     pub fn sign(&mut self, keypair: &Keypair) -> Result<(), Error> {
         let construct = warp::crypto::hash::sha256_iter(
             [
@@ -275,12 +279,9 @@ impl From<CommunityDocument> for Community {
 }
 impl CommunityDocument {
     pub fn participants(&self) -> IndexSet<DID> {
-        self.invites
-            .iter()
-            .filter_map(|(_, invite)| invite.target_user.clone())
-            .chain(self.members.clone())
-            .chain(std::iter::once(self.owner.clone()))
-            .collect::<IndexSet<_>>()
+        let mut participants = self.members.clone();
+        participants.insert(self.owner.clone());
+        participants
     }
     pub fn has_valid_invite(&self, user: &DID) -> bool {
         for (_, invite) in &self.invites {

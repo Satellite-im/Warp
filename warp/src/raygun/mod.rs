@@ -37,6 +37,9 @@ pub enum RayGunEventKind {
     ConversationDeleted { conversation_id: Uuid },
     CommunityCreated { community_id: Uuid },
     CommunityInvited { community_id: Uuid, invite_id: Uuid },
+    CommunityUninvited { community_id: Uuid, invite_id: Uuid },
+    CommunityJoined { community_id: Uuid },
+    CommunityJoinRejected { community_id: Uuid },
     CommunityDeleted { community_id: Uuid },
 }
 
@@ -141,9 +144,8 @@ pub enum MessageEventKind {
         community_id: Uuid,
         invite_id: Uuid,
     },
-    AcceptedCommunityInvite {
+    CommunityJoined {
         community_id: Uuid,
-        invite_id: Uuid,
         user: DID,
     },
     EditedCommunityInvite {
