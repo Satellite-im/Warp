@@ -855,25 +855,7 @@ impl IdentityStore {
         Ok(())
     }
 
-    async fn push_iter<I: IntoIterator<Item = DID>>(&self, list: I) {
-        for did in list {
-            if let Err(e) = self.push(&did).await {
-                tracing::error!("Error pushing identity to {did}: {e}");
-            }
-        }
-    }
-
     pub async fn push_to_all(&self) {
-        //TODO: Possibly announce only to mesh, though this *might* require changing the logic to establish connection
-        //      if profile pictures and banners are supplied in this push too.
-        let list = self
-            .discovery
-            .list()
-            .await
-            .iter()
-            .filter_map(|entry| entry.peer_id().to_did().ok())
-            .collect::<Vec<_>>();
-        self.push_iter(list).await;
         let _ = self.announce_identity_to_mesh().await;
     }
 
