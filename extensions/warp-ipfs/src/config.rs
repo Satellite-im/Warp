@@ -76,24 +76,24 @@ impl Default for RelayClient {
             #[cfg(not(target_arch = "wasm32"))]
             relay_address: vec![
                 //NYC-1
-                "/ip4/146.190.184.59/tcp/4001/p2p/12D3KooWCHWLQXTR2N6ukWM99pZYc4TM82VS7eVaDE4Ryk8ked8h".parse().unwrap(), 
+                "/ip4/146.190.184.59/tcp/4001/p2p/12D3KooWCHWLQXTR2N6ukWM99pZYc4TM82VS7eVaDE4Ryk8ked8h".parse().unwrap(),
                 "/ip4/146.190.184.59/udp/4001/quic-v1/p2p/12D3KooWCHWLQXTR2N6ukWM99pZYc4TM82VS7eVaDE4Ryk8ked8h".parse().unwrap(),
                 //SF-1
-                "/ip4/64.225.88.100/udp/4001/quic-v1/p2p/12D3KooWMfyuTCbehQYy68zPH6vpGUwg8raKbrS7pd3qZrG7bFuB".parse().unwrap(), 
-                "/ip4/64.225.88.100/tcp/4001/p2p/12D3KooWMfyuTCbehQYy68zPH6vpGUwg8raKbrS7pd3qZrG7bFuB".parse().unwrap(), 
+                "/ip4/64.225.88.100/udp/4001/quic-v1/p2p/12D3KooWMfyuTCbehQYy68zPH6vpGUwg8raKbrS7pd3qZrG7bFuB".parse().unwrap(),
+                "/ip4/64.225.88.100/tcp/4001/p2p/12D3KooWMfyuTCbehQYy68zPH6vpGUwg8raKbrS7pd3qZrG7bFuB".parse().unwrap(),
                 //NYC-1-EXP
                 "/ip4/24.199.86.91/udp/46315/quic-v1/p2p/12D3KooWQcyxuNXxpiM7xyoXRZC7Vhfbh2yCtRg272CerbpFkhE6".parse().unwrap(),
                 "/ip4/24.199.86.91/tcp/46315/p2p/12D3KooWQcyxuNXxpiM7xyoXRZC7Vhfbh2yCtRg272CerbpFkhE6".parse().unwrap()
             ],
             // Relays that are meant to be used from a web standpoint.
             // Note: webrtc addresses are prone to change due an upstream issue and shouldnt be relied on for primary connections
-            #[cfg(target_arch="wasm32")]
+            #[cfg(target_arch = "wasm32")]
             relay_address: vec![
                 //NYC-1
                 "/dns4/nyc-3-dev.relay.satellite.im/tcp/4410/wss/p2p/12D3KooWJWw4KG2KKpUxQAc8kZZDqmownRvjWGxnr5Y6XRur8WSx".parse().unwrap(),
             ],
             background: true,
-            quorum: Default::default()
+            quorum: Default::default(),
         }
     }
 }
@@ -117,7 +117,7 @@ pub type DefaultPfpFn = std::sync::Arc<
 #[derive(Clone)]
 pub struct StoreSetting {
     /// Allow only interactions with friends
-    /// Note: This is ignored when it comes to chating between group chat recipients
+    /// Note: This is ignored when it comes to chatting between group chat recipients
     pub with_friends: bool,
     /// Discovery type
     pub discovery: Discovery,
@@ -128,8 +128,12 @@ pub struct StoreSetting {
     pub friend_request_response_duration: Option<Duration>,
     /// Disable providing images for identities
     pub disable_images: bool,
-    /// Function to call to provide data for a default profile picture if one is not apart of the identity
+    /// Function to call to provide data for a default profile picture if one is not a part of the identity
     pub default_profile_picture: Option<DefaultPfpFn>,
+    /// Duration in seconds before the identity document is announced
+    /// Note: This field should be left as default unless it is used for testing
+    pub auto_push_duration: Duration,
+
 }
 
 impl std::fmt::Debug for StoreSetting {
@@ -150,6 +154,7 @@ impl Default for StoreSetting {
             disable_images: false,
             with_friends: false,
             default_profile_picture: None,
+            auto_push_duration: Duration::from_secs(60),
         }
     }
 }

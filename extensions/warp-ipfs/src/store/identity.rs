@@ -439,7 +439,9 @@ impl IdentityStore {
                 futures::pin_mut!(event_stream);
                 futures::pin_mut!(friend_stream);
 
-                let interval = Duration::from_secs(60);
+                let interval = store.config.store_setting().auto_push_duration;
+
+                assert!(interval != Duration::ZERO);
 
                 let mut tick = Delay::new(interval);
 
