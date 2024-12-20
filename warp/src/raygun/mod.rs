@@ -1400,6 +1400,7 @@ impl PartialEq for Location {
 impl Eq for Location {}
 
 #[async_trait::async_trait]
+#[impl_funcs(name = "raygun_impls")]
 pub trait RayGun:
     RayGunStream
     + RayGunGroupConversation
@@ -1587,6 +1588,7 @@ pub trait RayGunGroupConversation: Sync + Send {
 }
 
 #[async_trait::async_trait]
+#[impl_funcs(name = "raygun_attachment_impls")]
 pub trait RayGunAttachment: Sync + Send {
     /// Send files to a conversation.
     /// If no files is provided in the array, it will throw an error
@@ -1625,6 +1627,7 @@ pub trait RayGunAttachment: Sync + Send {
 }
 
 #[async_trait::async_trait]
+#[impl_funcs(name = "raygun_stream_impls")]
 pub trait RayGunStream: Sync + Send {
     /// Subscribe to an stream of events from the conversation
     async fn get_conversation_stream(&mut self, _: Uuid) -> Result<MessageEventStream, Error> {
@@ -1638,6 +1641,7 @@ pub trait RayGunStream: Sync + Send {
 }
 
 #[async_trait::async_trait]
+#[impl_funcs(name = "raygun_events_impls")]
 pub trait RayGunEvents: Sync + Send {
     /// Send an event to a conversation
     async fn send_event(&mut self, _: Uuid, _: MessageEvent) -> Result<(), Error> {
@@ -1651,6 +1655,7 @@ pub trait RayGunEvents: Sync + Send {
 }
 
 #[async_trait::async_trait]
+#[impl_funcs(name = "raygun_conversations_impls")]
 pub trait RayGunConversationInformation: Sync + Send {
     /// Set a description to a conversation
     async fn set_conversation_description(

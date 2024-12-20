@@ -69,6 +69,7 @@ pub enum IdentityImportOption<'a> {
 pub type MultiPassEventStream = BoxStream<'static, MultiPassEventKind>;
 
 #[async_trait::async_trait]
+#[impl_funcs(name = "multipass_impls")]
 pub trait MultiPass:
     Extension
     + IdentityInformation
@@ -92,6 +93,7 @@ pub trait MultiPass:
 }
 
 #[async_trait::async_trait]
+#[impl_funcs(name = "multipass_local_id_impls")]
 pub trait LocalIdentity: Sync + Send {
     /// Reference to the local [`Identity`]
     async fn identity(&self) -> Result<Identity, Error>;
@@ -109,6 +111,7 @@ pub trait LocalIdentity: Sync + Send {
 }
 
 #[async_trait::async_trait]
+#[impl_funcs(name = "multipass_im_export_impls")]
 pub trait MultiPassImportExport: Sync + Send {
     /// Import identity from a specific location
     async fn import_identity<'a>(
@@ -125,6 +128,7 @@ pub trait MultiPassImportExport: Sync + Send {
 }
 
 #[async_trait::async_trait]
+#[impl_funcs(name = "multipass_friends_impls")]
 pub trait Friends: Sync + Send {
     /// Send friend request to corresponding public key
     async fn send_request(&mut self, _: &DID) -> Result<(), Error> {
@@ -203,6 +207,7 @@ pub trait Friends: Sync + Send {
 }
 
 #[async_trait::async_trait]
+#[impl_funcs(name = "multipass_event_impls")]
 pub trait MultiPassEvent: Sync + Send {
     /// Subscribe to an stream of events
     async fn multipass_subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
@@ -211,6 +216,7 @@ pub trait MultiPassEvent: Sync + Send {
 }
 
 #[async_trait::async_trait]
+#[impl_funcs(name = "multipass_identity_impls")]
 pub trait IdentityInformation: Send + Sync {
     /// Profile picture belonging to the `Identity`
     async fn identity_picture(&self, _: &DID) -> Result<IdentityImage, Error> {

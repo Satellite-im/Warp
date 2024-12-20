@@ -82,6 +82,7 @@ pub type ConstellationProgressStream = BoxStream<'static, Progression>;
 
 /// Interface that would provide functionality around the filesystem.
 #[async_trait::async_trait]
+#[impl_funcs(name = "constellation_impls")]
 pub trait Constellation: ConstellationEvent + Extension + Sync + Send + SingleHandle {
     /// Provides the timestamp of when the file system was modified
     fn modified(&self) -> DateTime<Utc>;

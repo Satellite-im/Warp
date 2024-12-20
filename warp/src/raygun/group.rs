@@ -154,6 +154,7 @@ impl GroupInvitation {
 }
 
 // General/Base GroupChat Trait
+#[impl_funcs(name = "raygun_group_chat_impls")]
 pub trait GroupChat: GroupInvite + GroupChatManagement {
     /// Join a existing group
     fn join_group(&mut self, _: Uuid) -> Result<(), Error> {
@@ -172,6 +173,7 @@ pub trait GroupChat: GroupInvite + GroupChatManagement {
 }
 
 // Group Invite Management Trait
+#[impl_funcs(name = "raygun_group_invite_impls")]
 pub trait GroupInvite {
     /// Sends a invite to join a group
     fn send_invite(&mut self, _: Uuid, _: DID) -> Result<(), Error> {
@@ -195,6 +197,7 @@ pub trait GroupInvite {
 }
 
 // Group Admin Management Trait
+#[impl_funcs(name = "raygun_group_management_impls")]
 pub trait GroupChatManagement {
     /// Create a group
     fn create_group(&mut self, _: &str) -> Result<Group, Error> {
