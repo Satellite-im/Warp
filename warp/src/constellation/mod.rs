@@ -14,6 +14,7 @@ use chrono::{DateTime, Utc};
 use directory::Directory;
 use futures::stream::BoxStream;
 use futures::Stream;
+use macro_utils::impl_funcs;
 
 #[derive(Debug, Clone)]
 pub enum ConstellationEventKind {

@@ -1,6 +1,7 @@
 #![allow(clippy::result_large_err)]
 use crate::crypto::DID;
 use crate::error::Error;
+use macro_utils::impl_funcs;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;

@@ -3,6 +3,7 @@
 use chrono::{DateTime, Utc};
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
+use macro_utils::impl_funcs;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::path::PathBuf;

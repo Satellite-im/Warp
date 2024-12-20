@@ -19,6 +19,7 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use core::ops::Range;
 use indexmap::{IndexMap, IndexSet};
+use macro_utils::impl_funcs;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashSet};
 use std::fmt::Debug;

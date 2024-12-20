@@ -1,7 +1,11 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
-    parse::{Parse, Parser}, parse_quote, punctuated::Punctuated, spanned::Spanned, Error, ImplItem, ItemImpl, ItemTrait, Meta, Result, TraitItem, Visibility
+    parse::{Parse, Parser},
+    parse_quote,
+    punctuated::Punctuated,
+    spanned::Spanned,
+    Error, ImplItem, ItemImpl, ItemTrait, Meta, Result, TraitItem, Visibility,
 };
 
 pub fn expand(attr: TokenStream, input: TokenStream) -> Result<TokenStream> {
@@ -36,11 +40,10 @@ pub fn expand(attr: TokenStream, input: TokenStream) -> Result<TokenStream> {
         let mut functions = vec![];
         for item in impls.items.iter() {
             if let ImplItem::Fn(function) = item {
-                if (function
+                if function
                     .attrs
                     .iter()
-                    .find(|attr| attr.path().is_ident("skip")))
-                .is_none()
+                    .any(|attr| attr.path().is_ident("skip"))
                 {
                     let is_async = function.sig.asyncness.is_some();
                     if matches!(function.vis, Visibility::Public(_) | Visibility::Inherited) {
@@ -67,11 +70,10 @@ pub fn expand(attr: TokenStream, input: TokenStream) -> Result<TokenStream> {
         let mut functions = vec![];
         for item in &trait_impl.items {
             if let TraitItem::Fn(function) = item {
-                if (function
+                if function
                     .attrs
                     .iter()
-                    .find(|attr| attr.path().is_ident("skip")))
-                .is_none()
+                    .any(|attr| attr.path().is_ident("skip"))
                 {
                     let is_async = function.sig.asyncness.is_some();
                     let id = function.sig.ident.to_string();
