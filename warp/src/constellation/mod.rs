@@ -219,6 +219,7 @@ pub trait Constellation: ConstellationEvent + Extension + Sync + Send + SingleHa
 }
 
 #[async_trait::async_trait]
+#[impl_funcs(name = "constellation_event_impls")]
 pub trait ConstellationEvent: Sync + Send {
     /// Subscribe to an stream of events
     async fn constellation_subscribe(&mut self) -> Result<ConstellationEventStream, Error> {
