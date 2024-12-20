@@ -467,7 +467,13 @@ impl IdentityStore {
                                 }
                             };
 
-                            let identity = payload.message().clone();
+                            let identity= match payload.message(None) {
+                                Ok(payload) => payload,
+                                Err(_e) => {
+                                    // invalid payload
+                                    continue
+                                }
+                            };
 
                             if identity.verify().is_err() {
                                 tracing::warn!(from = %from_did, "invalid identity document");
@@ -564,7 +570,14 @@ impl IdentityStore {
 
                             tracing::info!("Received event from {did}");
 
-                            let data = match ecdh_decrypt(store.root_document().keypair(), Some(&did), payload.message()).and_then(|bytes| {
+                            let msg = match payload.message(None) {
+                                Ok(m) => m,
+                                Err(_) => {
+                                    continue;
+                                }
+                            };
+
+                            let data = match ecdh_decrypt(store.root_document().keypair(), Some(&did), msg).and_then(|bytes| {
                                 serde_json::from_slice::<RequestResponsePayload>(&bytes).map_err(Error::from)
                             }) {
                                 Ok(pl) => pl,
@@ -1740,9 +1753,9 @@ impl IdentityStore {
                         }
                     };
 
-                match payload.message() {
+                match payload.message(None)? {
                     Response::SynchronizedResponse(SynchronizedResponse::Package(cid)) => {
-                        return Ok(*cid)
+                        return Ok(cid)
                     }
                     Response::InvalidPayload => {
                         tracing::error!(%peer_id, "request was invalid");
@@ -1801,7 +1814,7 @@ impl IdentityStore {
                         }
                     };
 
-                match payload.message() {
+                match payload.message(None)? {
                     Response::Ack => {}
                     Response::InvalidPayload => {
                         tracing::error!(%peer_id, "request was invalid");
@@ -1858,7 +1871,7 @@ impl IdentityStore {
                         }
                     };
 
-                match payload.message() {
+                match payload.message(None)? {
                     Response::RegisterResponse(RegisterResponse::Ok) => return Ok(()),
                     Response::InvalidPayload => {
                         tracing::error!(%peer_id, "request was invalid");
@@ -1918,7 +1931,7 @@ impl IdentityStore {
                         }
                     };
 
-                match payload.message() {
+                match payload.message(None)? {
                     Response::RegisterResponse(RegisterResponse::Ok) => return Ok(()),
                     Response::InvalidPayload => {
                         tracing::error!(%peer_id, "request was invalid");
@@ -1975,7 +1988,7 @@ impl IdentityStore {
                         }
                     };
 
-                match payload.message() {
+                match payload.message(None)? {
                     Response::MailboxResponse(MailboxResponse::Receive { list, .. }) => {
                         let list = list.clone();
 
@@ -2056,7 +2069,7 @@ impl IdentityStore {
                         }
                     };
 
-                match payload.message() {
+                match payload.message(None)? {
                     Response::MailboxResponse(MailboxResponse::Sent) => {}
                     Response::InvalidPayload => {
                         tracing::error!(%peer_id, "request was invalid");
@@ -2243,8 +2256,8 @@ impl IdentityStore {
                                 }
                             };
 
-                        match payload.message() {
-                            Response::LookupResponse(LookupResponse::Ok { identity }) => {
+                        match payload.message(None) {
+                            Ok(Response::LookupResponse(LookupResponse::Ok { identity })) => {
                                 for ident in identity {
                                     let ident = ident.clone();
                                     let did = ident.did.clone();
@@ -2261,15 +2274,19 @@ impl IdentityStore {
 
                                 break;
                             },
-                            Response::InvalidPayload => {
+                            Ok(Response::InvalidPayload) => {
                                 tracing::error!(%peer_id, "request was invalid");
                                 continue;
                             }
-                            Response::Error(e) => {
+                            Ok(Response::Error(e)) => {
                                 tracing::error!(error = %e, %peer_id, "error handling request");
                             }
-                            _ => {
+                            Ok(_) => {
                                 tracing::error!(%peer_id, "response from shuttle node was invalid");
+                                continue;
+                            }
+                            Err(e) => {
+                                tracing::error!(%peer_id, error = %e, "invalid message");
                                 continue;
                             }
                         }
