@@ -138,7 +138,7 @@ impl HotspotTask {
             anyhow::bail!("sender is not the original sender");
         }
 
-        let document = payload.message();
+        let document = payload.message(None)?;
 
         let document_did = &document.did;
 
