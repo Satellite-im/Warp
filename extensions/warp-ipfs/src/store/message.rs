@@ -1041,8 +1041,7 @@ impl MessageStore {
                 let keypair = inner.root.keypair();
 
                 let event = CommunityJoinEvents::DeleteInvite { invite_id };
-                let bytes = serde_json::to_vec(&event)?;
-                let payload = PayloadBuilder::new(keypair, bytes)
+                let payload = PayloadBuilder::new(keypair, event)
                     .from_ipfs(&inner.ipfs)
                     .await?;
                 let bytes = payload.to_bytes()?;
@@ -1096,8 +1095,7 @@ impl MessageStore {
         let keypair = inner.root.keypair();
 
         let event = CommunityJoinEvents::Join;
-        let bytes = serde_json::to_vec(&event)?;
-        let payload = PayloadBuilder::new(keypair, bytes)
+        let payload = PayloadBuilder::new(keypair, event)
             .from_ipfs(&inner.ipfs)
             .await?;
         let bytes = payload.to_bytes()?;

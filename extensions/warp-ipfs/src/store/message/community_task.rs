@@ -1284,14 +1284,11 @@ impl CommunityTask {
         Ok(())
     }
     async fn process_join_event(&mut self, msg: Message) -> Result<(), Error> {
-        let data = PayloadMessage::<Vec<u8>>::from_bytes(&msg.data)?;
+        let data = PayloadMessage::<CommunityJoinEvents>::from_bytes(&msg.data)?;
         let community_id = self.community_id;
         let sender = data.sender().to_did()?;
-        let event = serde_json::from_slice::<CommunityJoinEvents>(data.message()).map_err(|e| {
-            tracing::warn!(community_id = %community_id, sender = %data.sender(), error = %e, "Failed to deserialize message");
-            e
-        })?;
-        match event {
+
+        match data.message() {
             CommunityJoinEvents::Join => {
                 let now = Utc::now();
 
