@@ -352,7 +352,7 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadMessage<M> {
 
                 let raw_key = ecdh_decrypt(keypair, Some(&sender_did), encrypted_key)?;
 
-                let message_bytes = Cipher::direct_decrypt(&message, &raw_key)?;
+                let message_bytes = Cipher::direct_decrypt(message, &raw_key)?;
 
                 let message =
                     cbor4ii::serde::from_slice(&message_bytes).map_err(std::io::Error::other)?;
