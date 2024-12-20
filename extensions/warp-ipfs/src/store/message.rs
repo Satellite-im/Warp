@@ -2070,7 +2070,14 @@ impl ConversationTask {
                         }
                     };
 
-                    let data = match ecdh_decrypt(self.identity.root_document().keypair(), Some(&sender), payload.message()) {
+                    let msg = match payload.message(None) {
+                        Ok(m) => m,
+                        Err(_) => {
+                            continue
+                        }
+                    };
+
+                    let data = match ecdh_decrypt(self.identity.root_document().keypair(), Some(&sender), msg) {
                         Ok(d) => d,
                         Err(e) => {
                             tracing::warn!(%sender, error = %e, "failed to decrypt message");
@@ -2272,7 +2279,7 @@ impl ConversationInner {
             tracing::warn!(conversation_id = %convo_id, "Unable to publish to topic. Queuing event");
             self.queue_event(
                 did.clone(),
-                Queue::direct(peer_id, did.messaging(), payload.message().to_vec()),
+                Queue::direct(peer_id, did.messaging(), payload.message(None)?.to_vec()),
             )
             .await;
         }
@@ -2384,7 +2391,7 @@ impl ConversationInner {
                 tracing::warn!("Unable to publish to topic. Queuing event");
                 self.queue_event(
                     did.clone(),
-                    Queue::direct(peer_id, did.messaging(), payload.message().to_vec()),
+                    Queue::direct(peer_id, did.messaging(), payload.message(None)?.to_vec()),
                 )
                 .await;
             }
@@ -2618,7 +2625,7 @@ impl ConversationInner {
             tracing::warn!(%conversation_id, "Unable to publish to topic");
             self.queue_event(
                 did.clone(),
-                Queue::direct(peer_id, topic.clone(), payload.message().to_vec()),
+                Queue::direct(peer_id, topic.clone(), payload.message(None)?.to_vec()),
             )
             .await;
         }
@@ -2664,7 +2671,7 @@ impl ConversationInner {
             tracing::warn!(%community_id, "Unable to publish to topic");
             self.queue_event(
                 did.clone(),
-                Queue::direct(peer_id, topic.clone(), payload.message().to_vec()),
+                Queue::direct(peer_id, topic.clone(), payload.message(None)?.to_vec()),
             )
             .await;
         }
@@ -2749,7 +2756,7 @@ impl ConversationInner {
                             Queue::direct(
                                 peer_id,
                                 recipient.messaging(),
-                                payload.message().to_vec(),
+                                payload.message(None)?.to_vec(),
                             ),
                         )
                         .await;
@@ -2845,7 +2852,11 @@ impl ConversationInner {
             tracing::warn!(%conversation_id, "Unable to publish to topic. Queuing event");
             self.queue_event(
                 did_key.clone(),
-                Queue::direct(peer_id, did_key.messaging(), payload.message().to_vec()),
+                Queue::direct(
+                    peer_id,
+                    did_key.messaging(),
+                    payload.message(None)?.to_vec(),
+                ),
             )
             .await;
             time = false;
@@ -3001,7 +3012,11 @@ impl ConversationInner {
                 //      For now we will queue the message if we hit an error
                 self.queue_event(
                     recipient.clone(),
-                    Queue::direct(peer_id, recipient.messaging(), payload.message().to_vec()),
+                    Queue::direct(
+                        peer_id,
+                        recipient.messaging(),
+                        payload.message(None)?.to_vec(),
+                    ),
                 )
                 .await;
                 time = false;
