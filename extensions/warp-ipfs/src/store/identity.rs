@@ -471,7 +471,13 @@ impl IdentityStore {
                                 }
                             };
 
-                            let identity = payload.message().clone();
+                            let identity= match payload.message(None) {
+                                Ok(payload) => payload,
+                                Err(_e) => {
+                                    // invalid payload
+                                    continue
+                                }
+                            };
 
                             //Maybe establish a connection?
                             //Note: Although it would be prefer not to establish a connection, it may be ideal to check to determine
@@ -562,7 +568,14 @@ impl IdentityStore {
 
                             tracing::info!("Received event from {did}");
 
-                            let data = match ecdh_decrypt(store.root_document().keypair(), Some(&did), payload.message()).and_then(|bytes| {
+                            let msg = match payload.message(None) {
+                                Ok(m) => m,
+                                Err(_) => {
+                                    continue;
+                                }
+                            };
+
+                            let data = match ecdh_decrypt(store.root_document().keypair(), Some(&did), msg).and_then(|bytes| {
                                 serde_json::from_slice::<RequestResponsePayload>(&bytes).map_err(Error::from)
                             }) {
                                 Ok(pl) => pl,
@@ -1301,14 +1314,14 @@ impl IdentityStore {
                                             let store = self.clone();
                                             let did = in_did.clone();
                                             async move {
-                                                    let peer_id = vec![did.to_peer_id()?];
-                                                    let _ = super::document::image_dag::get_image(
-                                                        &ipfs,
-                                                        identity_profile_picture,
-                                                        &peer_id,
-                                                        false,
-                                                        Some(MAX_IMAGE_SIZE),
-                                                    )
+                                                let peer_id = vec![did.to_peer_id()?];
+                                                let _ = super::document::image_dag::get_image(
+                                                    &ipfs,
+                                                    identity_profile_picture,
+                                                    &peer_id,
+                                                    false,
+                                                    Some(MAX_IMAGE_SIZE),
+                                                )
                                                     .await
                                                     .map_err(|e| {
                                                         tracing::error!(
@@ -1317,17 +1330,17 @@ impl IdentityStore {
                                                         e
                                                     })?;
 
-                                                    tracing::trace!("Image pointed to {identity_profile_picture} for {did} downloaded");
+                                                tracing::trace!("Image pointed to {identity_profile_picture} for {did} downloaded");
 
-                                                        store
-                                                        .emit_event(
-                                                            MultiPassEventKind::IdentityUpdate {
-                                                                did,
-                                                            },
-                                                        )
-                                                        .await;
+                                                store
+                                                    .emit_event(
+                                                        MultiPassEventKind::IdentityUpdate {
+                                                            did,
+                                                        },
+                                                    )
+                                                    .await;
 
-                                                    Ok::<_, anyhow::Error>(())
+                                                Ok::<_, anyhow::Error>(())
                                             }
                                         });
                                     }
@@ -1366,15 +1379,15 @@ impl IdentityStore {
                                             let did = in_did.clone();
                                             let store = self.clone();
                                             async move {
-                                                    let peer_id = vec![did.to_peer_id()?];
+                                                let peer_id = vec![did.to_peer_id()?];
 
-                                                    let _ = super::document::image_dag::get_image(
-                                                        &ipfs,
-                                                        identity_profile_banner,
-                                                        &peer_id,
-                                                        false,
-                                                        Some(MAX_IMAGE_SIZE),
-                                                    )
+                                                let _ = super::document::image_dag::get_image(
+                                                    &ipfs,
+                                                    identity_profile_banner,
+                                                    &peer_id,
+                                                    false,
+                                                    Some(MAX_IMAGE_SIZE),
+                                                )
                                                     .await
                                                     .map_err(|e| {
                                                         tracing::error!(
@@ -1383,17 +1396,17 @@ impl IdentityStore {
                                                         e
                                                     })?;
 
-                                                    tracing::trace!("Image pointed to {identity_profile_banner} for {did} downloaded");
+                                                tracing::trace!("Image pointed to {identity_profile_banner} for {did} downloaded");
 
-                                                    store
-                                                            .emit_event(
-                                                                MultiPassEventKind::IdentityUpdate {
-                                                                    did,
-                                                                },
-                                                            )
-                                                            .await;
+                                                store
+                                                    .emit_event(
+                                                        MultiPassEventKind::IdentityUpdate {
+                                                            did,
+                                                        },
+                                                    )
+                                                    .await;
 
-                                                    Ok::<_, anyhow::Error>(())
+                                                Ok::<_, anyhow::Error>(())
                                             }
                                         });
                                     }
@@ -1426,34 +1439,34 @@ impl IdentityStore {
                                             let did = in_did.clone();
                                             let store = self.clone();
                                             async move {
-                                                        let peer_id = vec![did.to_peer_id()?];
-                                                        let _ =
-                                                            super::document::image_dag::get_image(
-                                                                &ipfs,
-                                                                picture,
-                                                                &peer_id,
-                                                                false,
-                                                                Some(MAX_IMAGE_SIZE),
-                                                            )
-                                                            .await
-                                                            .map_err(|e| {
-                                                                tracing::error!(
+                                                let peer_id = vec![did.to_peer_id()?];
+                                                let _ =
+                                                    super::document::image_dag::get_image(
+                                                        &ipfs,
+                                                        picture,
+                                                        &peer_id,
+                                                        false,
+                                                        Some(MAX_IMAGE_SIZE),
+                                                    )
+                                                        .await
+                                                        .map_err(|e| {
+                                                            tracing::error!(
                                                             "Error fetching image from {did}: {e}"
                                                         );
-                                                                e
-                                                            })?;
+                                                            e
+                                                        })?;
 
-                                                        tracing::trace!("Image pointed to {picture} for {did} downloaded");
+                                                tracing::trace!("Image pointed to {picture} for {did} downloaded");
 
-                                                        store
-                                                        .emit_event(
-                                                            MultiPassEventKind::IdentityUpdate {
-                                                                did,
-                                                            },
-                                                        )
-                                                        .await;
+                                                store
+                                                    .emit_event(
+                                                        MultiPassEventKind::IdentityUpdate {
+                                                            did,
+                                                        },
+                                                    )
+                                                    .await;
 
-                                                        Ok::<_, anyhow::Error>(())
+                                                Ok::<_, anyhow::Error>(())
                                             }
                                         });
                                     }
@@ -1464,34 +1477,34 @@ impl IdentityStore {
 
                                             let did = in_did.clone();
                                             async move {
-                                                        let peer_id = vec![did.to_peer_id()?];
-                                                        let _ =
-                                                            super::document::image_dag::get_image(
-                                                                &ipfs,
-                                                                banner,
-                                                                &peer_id,
-                                                                false,
-                                                                Some(MAX_IMAGE_SIZE),
-                                                            )
-                                                            .await
-                                                            .map_err(|e| {
-                                                                tracing::error!(
+                                                let peer_id = vec![did.to_peer_id()?];
+                                                let _ =
+                                                    super::document::image_dag::get_image(
+                                                        &ipfs,
+                                                        banner,
+                                                        &peer_id,
+                                                        false,
+                                                        Some(MAX_IMAGE_SIZE),
+                                                    )
+                                                        .await
+                                                        .map_err(|e| {
+                                                            tracing::error!(
                                                             "Error fetching image from {did}: {e}"
                                                         );
-                                                                e
-                                                            })?;
+                                                            e
+                                                        })?;
 
-                                                        tracing::trace!("Image pointed to {banner} for {did} downloaded");
+                                                tracing::trace!("Image pointed to {banner} for {did} downloaded");
 
-                                                        store
-                                                        .emit_event(
-                                                            MultiPassEventKind::IdentityUpdate {
-                                                                did,
-                                                            },
-                                                        )
-                                                        .await;
+                                                store
+                                                    .emit_event(
+                                                        MultiPassEventKind::IdentityUpdate {
+                                                            did,
+                                                        },
+                                                    )
+                                                    .await;
 
-                                                        Ok::<_, anyhow::Error>(())
+                                                Ok::<_, anyhow::Error>(())
                                             }
                                         });
                                     }
@@ -1752,9 +1765,9 @@ impl IdentityStore {
                         }
                     };
 
-                match payload.message() {
+                match payload.message(None)? {
                     Response::SynchronizedResponse(SynchronizedResponse::Package(cid)) => {
-                        return Ok(*cid)
+                        return Ok(cid)
                     }
                     Response::InvalidPayload => {
                         tracing::error!(%peer_id, "request was invalid");
@@ -1813,7 +1826,7 @@ impl IdentityStore {
                         }
                     };
 
-                match payload.message() {
+                match payload.message(None)? {
                     Response::Ack => {}
                     Response::InvalidPayload => {
                         tracing::error!(%peer_id, "request was invalid");
@@ -1870,7 +1883,7 @@ impl IdentityStore {
                         }
                     };
 
-                match payload.message() {
+                match payload.message(None)? {
                     Response::RegisterResponse(RegisterResponse::Ok) => return Ok(()),
                     Response::InvalidPayload => {
                         tracing::error!(%peer_id, "request was invalid");
@@ -1930,7 +1943,7 @@ impl IdentityStore {
                         }
                     };
 
-                match payload.message() {
+                match payload.message(None)? {
                     Response::RegisterResponse(RegisterResponse::Ok) => return Ok(()),
                     Response::InvalidPayload => {
                         tracing::error!(%peer_id, "request was invalid");
@@ -1987,7 +2000,7 @@ impl IdentityStore {
                         }
                     };
 
-                match payload.message() {
+                match payload.message(None)? {
                     Response::MailboxResponse(MailboxResponse::Receive { list, .. }) => {
                         let list = list.clone();
 
@@ -2068,7 +2081,7 @@ impl IdentityStore {
                         }
                     };
 
-                match payload.message() {
+                match payload.message(None)? {
                     Response::MailboxResponse(MailboxResponse::Sent) => {}
                     Response::InvalidPayload => {
                         tracing::error!(%peer_id, "request was invalid");
@@ -2255,8 +2268,8 @@ impl IdentityStore {
                                 }
                             };
 
-                        match payload.message() {
-                            Response::LookupResponse(LookupResponse::Ok { identity }) => {
+                        match payload.message(None) {
+                            Ok(Response::LookupResponse(LookupResponse::Ok { identity })) => {
                                 for ident in identity {
                                     let ident = ident.clone();
                                     let did = ident.did.clone();
@@ -2273,15 +2286,19 @@ impl IdentityStore {
 
                                 break;
                             },
-                            Response::InvalidPayload => {
+                            Ok(Response::InvalidPayload) => {
                                 tracing::error!(%peer_id, "request was invalid");
                                 continue;
                             }
-                            Response::Error(e) => {
+                            Ok(Response::Error(e)) => {
                                 tracing::error!(error = %e, %peer_id, "error handling request");
                             }
-                            _ => {
+                            Ok(_) => {
                                 tracing::error!(%peer_id, "response from shuttle node was invalid");
+                                continue;
+                            }
+                            Err(e) => {
+                                tracing::error!(%peer_id, error = %e, "invalid message");
                                 continue;
                             }
                         }
