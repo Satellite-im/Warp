@@ -361,7 +361,7 @@ impl DiscoveryPeerTask {
 
             let payload: PayloadMessage<DiscoveryResponse> = PayloadMessage::from_bytes(&response)?;
 
-            match payload.message() {
+            match payload.message(None)? {
                 DiscoveryResponse::Pong => {}
                 _ => return Err(Error::Other),
             }
@@ -815,9 +815,15 @@ impl Future for DiscoveryTask {
                 continue;
             }
 
-            let bytes = match payload.message() {
-                DiscoveryRequest::Ping => {
+            let bytes = match payload.message(None) {
+                Ok(DiscoveryRequest::Ping) => {
                     let pl = PayloadBuilder::new(&self.keypair, DiscoveryResponse::Pong)
+                        .build()
+                        .expect("valid payload");
+                    pl.to_bytes().expect("valid payload")
+                }
+                _ => {
+                    let pl = PayloadBuilder::new(&self.keypair, DiscoveryResponse::InvalidRequest)
                         .build()
                         .expect("valid payload");
                     pl.to_bytes().expect("valid payload")
