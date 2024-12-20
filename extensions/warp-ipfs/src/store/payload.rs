@@ -331,7 +331,7 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadMessage<M> {
     }
 
     pub fn message<'a, K: Into<Option<&'a Keypair>>>(&self, keypair: K) -> Result<M, Error> {
-        // self.verify()?;
+        self.verify()?;
 
         match &self.message {
             PayloadSelectMessage::Clear { message } => Ok(message.clone()),
