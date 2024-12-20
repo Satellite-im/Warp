@@ -1288,7 +1288,7 @@ impl CommunityTask {
         let community_id = self.community_id;
         let sender = data.sender().to_did()?;
 
-        match data.message() {
+        match data.message(None)? {
             CommunityJoinEvents::Join => {
                 let now = Utc::now();
 
