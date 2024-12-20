@@ -25,6 +25,7 @@ pub struct PayloadMessage<M> {
     date: DateTime<Utc>,
 
     /// bytes of the message serialized as cbor
+    #[serde(flatten)]
     message: PayloadSelectMessage<M>,
 
     /// recipients of the payload message, if any.
@@ -44,7 +45,7 @@ pub struct PayloadMessage<M> {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "lowercase")]
+#[serde(untagged)]
 enum PayloadSelectMessage<M> {
     Clear { message: M },
     Encrypted { bytes: Bytes },
