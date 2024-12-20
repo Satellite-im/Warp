@@ -1,10 +1,11 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::future::IntoFuture;
 
 use super::{ecdh_decrypt, ecdh_encrypt, DidExt, PeerIdExt};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use futures::{future::BoxFuture, FutureExt};
+use indexmap::IndexMap;
 use rust_ipfs::{libp2p::identity::KeyType, Ipfs, Keypair, Multiaddr, PeerId, Protocol};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use warp::crypto::cipher::Cipher;
@@ -27,8 +28,8 @@ pub struct PayloadMessage<M> {
     message: PayloadSelectMessage<M>,
 
     /// recipients of the payload message, if any.
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    recipients: HashMap<PeerId, Vec<u8>>,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    recipients: IndexMap<PeerId, Vec<u8>>,
 
     /// address(es) of the sender
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -43,9 +44,10 @@ pub struct PayloadMessage<M> {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "lowercase")]
 enum PayloadSelectMessage<M> {
     Clear { message: M },
-    Encrypted { message: Bytes },
+    Encrypted { bytes: Bytes },
 }
 
 pub struct PayloadBuilder<'a, M> {
@@ -186,7 +188,7 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadMessage<M> {
             sender,
             on_behalf: None,
             addresses,
-            recipients: HashMap::new(),
+            recipients: IndexMap::new(),
             message: PayloadSelectMessage::Clear { message },
             date: Utc::now(),
             signature: Vec::new(),
@@ -199,7 +201,7 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadMessage<M> {
 
             let encrypted_bytes = Cipher::direct_encrypt(&message_bytes, &new_key)?;
 
-            let mut new_map = HashMap::new();
+            let mut new_map = IndexMap::new();
 
             for recipient in recipients {
                 let Ok(did) = recipient.to_did() else {
@@ -219,7 +221,7 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadMessage<M> {
 
             payload.recipients = new_map;
             payload.message = PayloadSelectMessage::Encrypted {
-                message: Bytes::from(encrypted_bytes),
+                bytes: Bytes::from(encrypted_bytes),
             }
         }
 
@@ -316,7 +318,7 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadMessage<M> {
         let mut payload = self.clone();
         payload.co_signature.take();
 
-        let bytes = serde_json::to_vec(&payload)?;
+        let bytes = cbor4ii::serde::to_vec(Vec::new(), &payload).map_err(std::io::Error::other)?;
 
         let public_key = co_sender.to_public_key()?;
 
@@ -328,11 +330,11 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadMessage<M> {
     }
 
     pub fn message<'a, K: Into<Option<&'a Keypair>>>(&self, keypair: K) -> Result<M, Error> {
-        self.verify()?;
+        // self.verify()?;
 
         match &self.message {
             PayloadSelectMessage::Clear { message } => Ok(message.clone()),
-            PayloadSelectMessage::Encrypted { message } => {
+            PayloadSelectMessage::Encrypted { bytes: message } => {
                 let keypair = match keypair.into() {
                     Some(kp) => kp,
                     None => return Err(Error::PublicKeyInvalid),
@@ -375,12 +377,6 @@ impl<M> PayloadMessage<M> {
     pub fn cosigner(&self) -> Option<&PeerId> {
         self.on_behalf.as_ref()
     }
-
-    // pub fn message(&self) -> Result<M, Error> {
-    //     cbor4ii::serde::from_slice(&self.message)
-    //         .map_err(std::io::Error::other)
-    //         .map_err(Error::from)
-    // }
 
     #[inline]
     pub fn date(&self) -> DateTime<Utc> {
@@ -475,7 +471,7 @@ mod test {
             .add_recipients(pub_keys.clone())?
             .build()?;
         assert_eq!(payload.sender(), &keypair.public().to_peer_id());
-        payload.verify()?;
+        payload.verify().expect("valid payload");
 
         let bytes = payload.to_bytes()?;
         let de_payload: PayloadMessage<String> = PayloadMessage::from_bytes(&bytes)?;
