@@ -40,7 +40,7 @@ pub fn expand(attr: TokenStream, input: TokenStream) -> Result<TokenStream> {
         let mut functions = vec![];
         for item in impls.items.iter() {
             if let ImplItem::Fn(function) = item {
-                if function
+                if !function
                     .attrs
                     .iter()
                     .any(|attr| attr.path().is_ident("skip"))
@@ -70,7 +70,7 @@ pub fn expand(attr: TokenStream, input: TokenStream) -> Result<TokenStream> {
         let mut functions = vec![];
         for item in &trait_impl.items {
             if let TraitItem::Fn(function) = item {
-                if function
+                if !function
                     .attrs
                     .iter()
                     .any(|attr| attr.path().is_ident("skip"))
