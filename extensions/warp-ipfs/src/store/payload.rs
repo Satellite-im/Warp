@@ -56,6 +56,7 @@ pub struct PayloadBuilder<'a, M> {
     keypair: &'a Keypair,
     cosigner_keypair: Option<&'a Keypair>,
     recipients: HashSet<PeerId>,
+    key: Option<Bytes>,
     message: M,
     ipfs: Option<&'a Ipfs>,
     addresses: Vec<Multiaddr>,
@@ -68,6 +69,7 @@ impl<'a, M: Serialize + DeserializeOwned + Clone> PayloadBuilder<'a, M> {
             sender,
             keypair,
             cosigner_keypair: None,
+            key: None,
             message,
             recipients: HashSet::new(),
             ipfs: None,
@@ -118,6 +120,12 @@ impl<'a, M: Serialize + DeserializeOwned + Clone> PayloadBuilder<'a, M> {
         Ok(self)
     }
 
+    pub fn set_key(mut self, key: impl Into<Bytes>) -> Self {
+        let key = key.into();
+        self.key = Some(key);
+        self
+    }
+
     pub fn add_addresses(mut self, addresses: Vec<Multiaddr>) -> Self {
         for address in addresses {
             self = self.add_address(address);
@@ -135,6 +143,7 @@ impl<'a, M: Serialize + DeserializeOwned + Clone> PayloadBuilder<'a, M> {
         PayloadMessage::new(
             self.keypair,
             self.cosigner_keypair,
+            self.key,
             self.recipients,
             self.message,
             self.addresses,
@@ -161,6 +170,7 @@ where
             PayloadMessage::new(
                 self.keypair,
                 self.cosigner_keypair,
+                self.key,
                 self.recipients,
                 self.message,
                 self.addresses,
@@ -174,6 +184,7 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadMessage<M> {
     pub fn new(
         keypair: &Keypair,
         cosigner: Option<&Keypair>,
+        key: Option<Bytes>,
         recipients: HashSet<PeerId>,
         message: M,
         addresses: Vec<Multiaddr>,
@@ -200,7 +211,12 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadMessage<M> {
             let keypair = cosigner.unwrap_or(keypair);
             let new_key = generate::<64>();
 
-            let encrypted_bytes = Cipher::direct_encrypt(&message_bytes, &new_key)?;
+            let new_key = match key.as_ref() {
+                Some(key) => &key[..],
+                None => &new_key[..],
+            };
+
+            let encrypted_bytes = Cipher::direct_encrypt(&message_bytes, new_key)?;
 
             let mut new_map = IndexMap::new();
 
@@ -218,6 +234,14 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadMessage<M> {
 
             if new_map.is_empty() {
                 return Err(Error::EmptyMessage); // TODO: error for arb message being empty
+            }
+
+            let sender = payload.sender();
+
+            // Although we could decrypt any of the keys above, we will have an entry for the sender
+            if !new_map.contains_key(sender) {
+                let own_key = ecdh_encrypt(keypair, None, new_key)?;
+                new_map.insert(*sender, own_key);
             }
 
             payload.recipients = new_map;
@@ -392,11 +416,12 @@ impl<M> PayloadMessage<M> {
 
 #[cfg(test)]
 mod test {
-    use rust_ipfs::Keypair;
-
     use super::PayloadMessage;
     use crate::store::payload::PayloadBuilder;
     use crate::store::PeerIdExt;
+    use rust_ipfs::Keypair;
+    use warp::crypto::rand::prelude::SliceRandom;
+    use warp::crypto::{generate, rand};
 
     #[test]
     fn payload_validation() -> anyhow::Result<()> {
@@ -454,7 +479,44 @@ mod test {
     }
 
     #[test]
+    fn payload_multiple_recipients_with_custom_key() -> anyhow::Result<()> {
+        let mut rng = rand::thread_rng();
+        let data = String::from("Request");
+        let key = generate::<32>().to_vec();
+
+        let keypair = Keypair::generate_ed25519();
+
+        let keys = (0..3)
+            .map(|_| Keypair::generate_ed25519())
+            .collect::<Vec<_>>();
+
+        let pub_keys = &keys
+            .iter()
+            .map(|k| k.public().to_peer_id())
+            .filter_map(|k| k.to_did().ok())
+            .collect::<Vec<_>>();
+
+        let payload = PayloadBuilder::new(&keypair, data)
+            .add_recipients(pub_keys.clone())?
+            .set_key(key)
+            .build()?;
+
+        assert_eq!(payload.sender(), &keypair.public().to_peer_id());
+        payload.verify().expect("valid payload");
+
+        let bytes = payload.to_bytes()?;
+        let de_payload: PayloadMessage<String> = PayloadMessage::from_bytes(&bytes)?;
+
+        let key = keys.choose(&mut rng).expect("valid entry");
+
+        assert_eq!(de_payload.message(key)?, "Request");
+
+        Ok(())
+    }
+
+    #[test]
     fn payload_multiple_recipients() -> anyhow::Result<()> {
+        let mut rng = rand::thread_rng();
         let data = String::from("Request");
         let keypair = Keypair::generate_ed25519();
 
@@ -476,7 +538,7 @@ mod test {
 
         let bytes = payload.to_bytes()?;
         let de_payload: PayloadMessage<String> = PayloadMessage::from_bytes(&bytes)?;
-        let key = keys.get(0).expect("key exist");
+        let key = keys.choose(&mut rng).expect("valid entry");
 
         assert_eq!(de_payload.message(key)?, "Request");
 
