@@ -77,11 +77,15 @@ impl<'a, M: Serialize + DeserializeOwned + Clone> PayloadBuilder<'a, M> {
         }
     }
 
+    /// Keypair of the cosigner. This will be used for the primary keypair which would be separate from the network
+    /// keypair from Ipfs, which would cosign the payload and act as the original sender
     pub fn cosign(mut self, keypair: &'a Keypair) -> Self {
         self.cosigner_keypair = Some(keypair);
         self
     }
 
+    /// Add address for reachability of the node for content discovery and establishing connections
+    /// if needed
     pub fn add_address(mut self, mut address: Multiaddr) -> Self {
         if address.is_empty() || self.addresses.len() > 32 {
             // we will only permit 32 address slot for content discovery
@@ -104,12 +108,15 @@ impl<'a, M: Serialize + DeserializeOwned + Clone> PayloadBuilder<'a, M> {
         self
     }
 
+    /// Add a recipient to the message, which would ensure that the message is decrypted for the intended
+    /// parties involved in the message.
     pub fn add_recipient(mut self, recipient: impl DidExt) -> Result<Self, Error> {
         let recipient = recipient.to_peer_id()?;
         self.recipients.insert(recipient);
         Ok(self)
     }
 
+    /// Provide an array of recipients.
     pub fn add_recipients<R: DidExt>(
         mut self,
         recipients: impl IntoIterator<Item = R>,
@@ -120,6 +127,7 @@ impl<'a, M: Serialize + DeserializeOwned + Clone> PayloadBuilder<'a, M> {
         Ok(self)
     }
 
+    /// Set custom encryption key.
     pub fn set_key(mut self, key: impl Into<Bytes>) -> Self {
         let key = key.into();
         self.key = Some(key);
@@ -134,11 +142,14 @@ impl<'a, M: Serialize + DeserializeOwned + Clone> PayloadBuilder<'a, M> {
         self
     }
 
+    /// Provide an Ipfs instance to obtain the external address of the local node
+    /// for reachability.
     pub fn from_ipfs(mut self, ipfs: &'a Ipfs) -> Self {
         self.ipfs.replace(ipfs);
         self
     }
 
+    /// Construct and build a `PayloadMessage`
     pub fn build(self) -> Result<PayloadMessage<M>, Error> {
         PayloadMessage::new(
             self.keypair,
