@@ -946,7 +946,7 @@ impl ConversationTask {
                     None,
                     peer_id,
                     did_key.messaging(),
-                    payload.message().to_vec(),
+                    payload.message(None)?.to_vec(),
                 ),
             )
             .await;
@@ -1066,7 +1066,7 @@ impl ConversationTask {
                     return Err(Error::IdentityDoesntExist);
                 };
 
-                ecdh_decrypt(keypair, Some(member), data.message())?
+                ecdh_decrypt(keypair, Some(member), data.message(None)?)?
             }
             ConversationType::Group => {
                 let key = match self.keystore.get_latest(keypair, &sender) {
@@ -1083,7 +1083,7 @@ impl ConversationTask {
                         self.pending_key_exchange
                             .entry(sender)
                             .or_default()
-                            .push((data.message().to_vec(), false));
+                            .push((data.message(None)?, false));
 
                         // Maybe send a request? Although we could, we should check to determine if one was previously sent or queued first,
                         // but for now we can leave this commented until the queue is removed and refactored.
@@ -1098,7 +1098,7 @@ impl ConversationTask {
                     }
                 };
 
-                Cipher::direct_decrypt(data.message(), &key)?
+                Cipher::direct_decrypt(&data.message(None)?, &key)?
             }
         };
 
@@ -1232,7 +1232,7 @@ impl ConversationTask {
             tracing::warn!(id = %self.conversation_id, "Unable to publish to topic");
             self.queue_event(
                 did.clone(),
-                QueueItem::direct(None, peer_id, topic.clone(), payload.message().to_vec()),
+                QueueItem::direct(None, peer_id, topic.clone(), payload.message(None)?),
             )
             .await;
         }
@@ -2618,7 +2618,7 @@ impl ConversationTask {
                                 message_id,
                                 peer_id,
                                 self.document.topic(),
-                                payload.message().to_vec(),
+                                payload.message(None)?,
                             ),
                         )
                         .await;
@@ -3344,7 +3344,7 @@ async fn process_request_response_event(
 
     let sender = payload.sender().to_did()?;
 
-    let data = ecdh_decrypt(keypair, Some(&sender), payload.message())?;
+    let data = ecdh_decrypt(keypair, Some(&sender), payload.message(None)?)?;
 
     let event = serde_json::from_slice::<ConversationRequestResponse>(&data)?;
 
@@ -3419,7 +3419,7 @@ async fn process_request_response_event(
                     // TODO
                     this.queue_event(
                         sender.clone(),
-                        QueueItem::direct(None, peer_id, topic.clone(), payload.message().to_vec()),
+                        QueueItem::direct(None, peer_id, topic.clone(), payload.message(None)?),
                     )
                     .await;
                 }
@@ -3523,7 +3523,7 @@ async fn process_conversation_event(
 
     let key = this.conversation_key(Some(&sender))?;
 
-    let data = Cipher::direct_decrypt(payload.message(), &key)?;
+    let data = Cipher::direct_decrypt(&payload.message(None)?, &key)?;
 
     let event = match serde_json::from_slice::<MessagingEvents>(&data)? {
         event @ MessagingEvents::Event { .. } => event,
