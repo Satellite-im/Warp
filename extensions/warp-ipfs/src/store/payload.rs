@@ -181,6 +181,7 @@ where
 }
 
 impl<M: Serialize + DeserializeOwned + Clone> PayloadMessage<M> {
+    /// Creates a new payload
     pub fn new(
         keypair: &Keypair,
         cosigner: Option<&Keypair>,
@@ -264,12 +265,14 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadMessage<M> {
         Ok(payload)
     }
 
+    /// Returns the payload by deserializing the bytes of data, which is in cbor format.
     pub fn from_bytes(data: &[u8]) -> Result<Self, Error> {
         let payload: Self = cbor4ii::serde::from_slice(data).map_err(std::io::Error::other)?;
         payload.verify()?;
         Ok(payload)
     }
 
+    /// Returns a serialized bytes of the payload in cbor format
     pub fn to_bytes(&self) -> Result<Bytes, Error> {
         cbor4ii::serde::to_vec(Vec::new(), self)
             .map_err(std::io::Error::other)
@@ -277,6 +280,7 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadMessage<M> {
             .map(Bytes::from)
     }
 
+    /// Verify the message of the payload
     #[inline]
     pub fn verify(&self) -> Result<(), Error> {
         self.verify_original()?;
@@ -354,6 +358,7 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadMessage<M> {
         Ok(())
     }
 
+    /// Returns the original message from the payload. If the message is encrypted, a Keypair will need to be supplied
     pub fn message<'a, K: Into<Option<&'a Keypair>>>(&self, keypair: K) -> Result<M, Error> {
         self.verify()?;
 
@@ -388,26 +393,32 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadMessage<M> {
 }
 
 impl<M> PayloadMessage<M> {
+    /// Sender of the message. If the message is cosigned, it will used the cosigner PeerId,
+    /// otherwise the original sender PeerId
     #[inline]
     pub fn sender(&self) -> &PeerId {
         self.on_behalf.as_ref().unwrap_or(&self.sender)
     }
 
+    /// Original sender of the message
     #[inline]
     pub fn original_sender(&self) -> &PeerId {
         &self.sender
     }
 
+    /// Cosigner of the message, if any.
     #[inline]
     pub fn cosigner(&self) -> Option<&PeerId> {
         self.on_behalf.as_ref()
     }
 
+    /// Date of when the message was created and signed.
     #[inline]
     pub fn date(&self) -> DateTime<Utc> {
         self.date
     }
 
+    /// Addresses of the sender for content discovery
     #[inline]
     pub fn addresses(&self) -> &[Multiaddr] {
         &self.addresses
