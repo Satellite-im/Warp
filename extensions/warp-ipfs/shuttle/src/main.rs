@@ -1,7 +1,5 @@
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-use std::path::PathBuf;
-
 use base64::{
     alphabet::STANDARD,
     engine::{general_purpose::PAD, GeneralPurpose},
@@ -9,6 +7,8 @@ use base64::{
 };
 use clap::Parser;
 use rust_ipfs::{Keypair, Multiaddr};
+use std::path::PathBuf;
+use std::time::Duration;
 
 use zeroize::Zeroizing;
 
@@ -70,6 +70,20 @@ struct Opt {
     /// TLS Private Key when websocket is used
     #[clap(long)]
     ws_tls_private_key: Option<PathBuf>,
+
+    /// Enable GC to cleanup any unpinned or orphaned blocks
+    #[clap(long)]
+    enable_gc: bool,
+
+    /// Run GC at start
+    /// Note: its recommended not to use this if GC is enabled.
+    #[clap(long)]
+    run_gc_once: bool,
+
+    /// GC Duration in seconds on how often GC should run
+    /// Note: NOOP if `enable_gc` is false
+    #[clap(long)]
+    gc_duration: Option<u16>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -162,6 +176,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         false,
         &opts.listen_addr,
         &opts.external_addr,
+        opts.enable_gc,
+        opts.run_gc_once,
+        opts.gc_duration.map(u64::from).map(Duration::from_secs),
+        None,
         true,
     )
     .await?;
