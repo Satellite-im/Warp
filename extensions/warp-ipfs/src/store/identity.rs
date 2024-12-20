@@ -749,7 +749,7 @@ impl IdentityStore {
                         from,
                         date: req.date(),
                     })
-                        .await;
+                    .await;
                 }
 
                 let payload =
@@ -774,7 +774,7 @@ impl IdentityStore {
                 self.emit_event(MultiPassEventKind::OutgoingFriendRequestRejected {
                     did: data.sender,
                 })
-                    .await;
+                .await;
             }
             Event::Remove => {
                 if self.is_friend(&data.sender).await? {
@@ -797,7 +797,7 @@ impl IdentityStore {
                 self.emit_event(MultiPassEventKind::IncomingFriendRequestClosed {
                     did: data.sender,
                 })
-                    .await;
+                .await;
             }
             Event::Block => {
                 let sender = data.sender;
@@ -806,12 +806,12 @@ impl IdentityStore {
                     self.emit_event(MultiPassEventKind::IncomingFriendRequestClosed {
                         did: sender.clone(),
                     })
-                        .await;
+                    .await;
                 } else if self.sent_friend_request_to(&sender).await? {
                     self.emit_event(MultiPassEventKind::OutgoingFriendRequestRejected {
                         did: sender.clone(),
                     })
-                        .await;
+                    .await;
                 }
 
                 let list = self.list_all_raw_request().await?;
@@ -868,7 +868,7 @@ impl IdentityStore {
         Ok(())
     }
 
-    async fn push_iter<I: IntoIterator<Item=DID>>(&self, list: I) {
+    async fn push_iter<I: IntoIterator<Item = DID>>(&self, list: I) {
         for did in list {
             if let Err(e) = self.push(&did).await {
                 tracing::error!("Error pushing identity to {did}: {e}");
@@ -1250,7 +1250,7 @@ impl IdentityStore {
                             self.emit_event(MultiPassEventKind::IdentityUpdate {
                                 did: document.did.clone(),
                             })
-                                .await;
+                            .await;
 
                             if !exclude_images {
                                 if document.metadata.arb_data != identity.metadata.arb_data
@@ -1541,7 +1541,7 @@ impl IdentityStore {
                                 ty,
                                 Some(MAX_IMAGE_SIZE),
                             )
-                                .await?;
+                            .await?;
 
                             debug_assert_eq!(added_cid, cid);
                             store
@@ -1747,7 +1747,7 @@ impl IdentityStore {
                     crate::shuttle::identity::protocol::Synchronized::Fetch,
                 ),
             )
-                .build()?;
+            .build()?;
 
             let bytes = payload.to_bytes().expect("valid deserialization");
 
@@ -1809,7 +1809,7 @@ impl IdentityStore {
                     crate::shuttle::identity::protocol::Synchronized::Store { package },
                 ),
             )
-                .build()?;
+            .build()?;
 
             let bytes = payload.to_bytes().expect("valid deserialization");
 
@@ -1865,7 +1865,7 @@ impl IdentityStore {
                     crate::shuttle::identity::protocol::Register::IsRegistered,
                 ),
             )
-                .build()?;
+            .build()?;
 
             let bytes = payload.to_bytes().expect("valid deserialization");
 
@@ -1925,7 +1925,7 @@ impl IdentityStore {
                     crate::shuttle::identity::protocol::Register::RegisterIdentity { root_cid },
                 ),
             )
-                .build()?;
+            .build()?;
 
             let bytes = payload.to_bytes().expect("valid deserialization");
 
@@ -1982,7 +1982,7 @@ impl IdentityStore {
                     crate::shuttle::identity::protocol::Mailbox::FetchAll,
                 ),
             )
-                .build()?;
+            .build()?;
 
             let bytes = payload.to_bytes().expect("valid deserialization");
 
@@ -2063,7 +2063,7 @@ impl IdentityStore {
                     },
                 ),
             )
-                .build()?;
+            .build()?;
 
             let bytes = payload.to_bytes().expect("valid deserialization");
 
@@ -2694,7 +2694,7 @@ impl IdentityStore {
                 self.emit_event(MultiPassEventKind::OutgoingFriendRequestClosed {
                     did: pubkey.clone(),
                 })
-                    .await;
+                .await;
 
                 return Ok(());
             }
@@ -2835,7 +2835,7 @@ impl IdentityStore {
         self.emit_event(MultiPassEventKind::FriendAdded {
             did: pubkey.clone(),
         })
-            .await;
+        .await;
 
         let _ = self.announce_identity_to_mesh().await;
 
@@ -2867,7 +2867,7 @@ impl IdentityStore {
         self.emit_event(MultiPassEventKind::FriendRemoved {
             did: pubkey.clone(),
         })
-            .await;
+        .await;
 
         Ok(())
     }
@@ -2990,12 +2990,12 @@ impl IdentityStore {
         let start = Instant::now();
         if !peers.contains(&remote_peer_id)
             || (peers.contains(&remote_peer_id)
-            && self
-            .ipfs
-            .pubsub_publish(recipient.inbox(), message_bytes)
-            .await
-            .is_err())
-            && queue_broadcast
+                && self
+                    .ipfs
+                    .pubsub_publish(recipient.inbox(), message_bytes)
+                    .await
+                    .is_err())
+                && queue_broadcast
         {
             self.queue.insert(recipient, payload.clone()).await;
             queued = true;
@@ -3030,19 +3030,19 @@ impl IdentityStore {
                     to: recipient.clone(),
                     date: outgoing_request_date.expect("date is valid"),
                 })
-                    .await;
+                .await;
             }
             Event::Retract => {
                 self.emit_event(MultiPassEventKind::OutgoingFriendRequestClosed {
                     did: recipient.clone(),
                 })
-                    .await;
+                .await;
             }
             Event::Reject => {
                 self.emit_event(MultiPassEventKind::IncomingFriendRequestRejected {
                     did: recipient.clone(),
                 })
-                    .await;
+                .await;
             }
             Event::Block => {
                 let _ = self.push(recipient).await;
@@ -3050,7 +3050,7 @@ impl IdentityStore {
                 self.emit_event(MultiPassEventKind::Blocked {
                     did: recipient.clone(),
                 })
-                    .await;
+                .await;
             }
             Event::Unblock => {
                 let _ = self.push(recipient).await;
@@ -3059,7 +3059,7 @@ impl IdentityStore {
                 self.emit_event(MultiPassEventKind::Unblocked {
                     did: recipient.clone(),
                 })
-                    .await;
+                .await;
             }
             _ => {}
         };
