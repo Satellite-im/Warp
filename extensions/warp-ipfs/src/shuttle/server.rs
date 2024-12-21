@@ -11,8 +11,6 @@ use rust_ipfs::{
 use std::{path::Path, time::Duration};
 use warp::error::{Error as WarpError, Error};
 
-use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
-use crate::store::topics::IDENTITY_ANNOUNCEMENT;
 // use crate::shuttle::identity::protocol::RegisterError;
 use super::{
     identity::{
@@ -28,6 +26,8 @@ use super::{
     },
     subscription_stream::Subscriptions,
 };
+use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
+use crate::store::topics::IDENTITY_ANNOUNCEMENT;
 use crate::store::{
     document::identity::IdentityDocument,
     payload::{PayloadBuilder, PayloadMessage},
@@ -88,6 +88,10 @@ impl ShuttleServer {
         memory_transport: bool,
         listen_addrs: &[Multiaddr],
         external_addrs: &[Multiaddr],
+        enable_gc: bool,
+        run_gc_once: bool,
+        gc_duration: Option<Duration>,
+        gc_trigger: Option<GCTrigger>,
         ext: bool,
     ) -> anyhow::Result<Self> {
         let executor = LocalExecutor;
@@ -123,11 +127,6 @@ impl ShuttleServer {
                 websocket_pem: wss_certs_and_key,
                 ..Default::default()
             })
-            // TODO: Either enable GC or do manual GC during little to no activity unless we reach a specific threshold
-            .with_gc(GCConfig {
-                duration: Duration::from_secs(60),
-                trigger: GCTrigger::None,
-            })
             .set_temp_pin_duration(Duration::from_secs(60 * 30))
             .with_request_response(vec![
                 RequestResponseConfig {
@@ -143,6 +142,13 @@ impl ShuttleServer {
                     ..Default::default()
                 },
             ]);
+
+        if enable_gc {
+            let duration = gc_duration.unwrap_or(Duration::from_secs(60 * 24));
+            let trigger = gc_trigger.unwrap_or_default();
+            // TODO: maybe do manual GC during little to no activity unless we reach a specific threshold?
+            uninitialized = uninitialized.with_gc(GCConfig { duration, trigger })
+        }
 
         if enable_relay_server {
             // Relay is unbound or with higher limits so we can avoid having the connection resetting
@@ -169,6 +175,17 @@ impl ShuttleServer {
         }
 
         let ipfs = uninitialized.start().await?;
+
+        if run_gc_once {
+            match ipfs.gc().await {
+                Ok(blocks) => {
+                    tracing::info!(blocks_removed = blocks.len(), "cleaned up unpinned blocks")
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "unable to run GC")
+                }
+            }
+        }
 
         for addr in addrs {
             ipfs.add_listening_address(addr).await?;
@@ -210,6 +227,8 @@ impl ShuttleServer {
         let identity_announcement = ipfs.pubsub_subscribe(IDENTITY_ANNOUNCEMENT).await?;
 
         let subscriptions = Subscriptions::new(&ipfs, &identity, &message);
+        let requests = FuturesUnordered::new();
+        requests.push(futures::future::pending().boxed());
 
         let mut server_event = ShuttleTask {
             ipfs: ipfs.clone(),
@@ -217,7 +236,7 @@ impl ShuttleServer {
             root_storage: root,
             identity_storage: identity,
             message_storage: message,
-            requests: Default::default(),
+            requests,
             identity_request_response,
             message_request_response,
             identity_announcement,
@@ -266,7 +285,9 @@ impl ShuttleTask {
                         continue;
                     }
 
-                    let document = payload.message();
+                    let Ok(document) = payload.message(None) else {
+                        continue;
+                    };
 
                     if document.verify().is_err() {
                         continue;
@@ -319,7 +340,27 @@ impl ShuttleTask {
 
             tracing::info!(%sender_peer_id, "Processing Incoming Request");
             let sender = payload.sender();
-            match payload.message() {
+
+            let message = match payload.message(None) {
+                Ok(message) => message,
+                Err(_e) => {
+                    tracing::warn!(%sender, error = %_e, "could not parse payload");
+                    let payload = payload_message_construct(
+                        keypair,
+                        None,
+                        MessageResponse::Error("public key is invalid".into()),
+                    )
+                    .expect("Valid payload construction");
+
+                    let bytes = payload.to_bytes().expect("valid deserialization");
+                    _ = ipfs
+                        .send_response(sender_peer_id, id, (protocols::SHUTTLE_IDENTITY, bytes))
+                        .await;
+                    return;
+                }
+            };
+
+            match message {
                 identity::protocol::Request::Register(Register::IsRegistered) => {
                     let peer_id = payload.sender();
                     let Ok(did) = peer_id.to_did() else {
@@ -372,8 +413,6 @@ impl ShuttleTask {
                         .await;
                 }
                 identity::protocol::Request::Register(Register::RegisterIdentity { root_cid }) => {
-                    let root_cid = *root_cid;
-
                     tracing::debug!(%sender, %root_cid, "preloading root document");
                     if let Err(e) = ipfs.fetch(&root_cid).recursive().await {
                         tracing::warn!(%sender, %root_cid, error = %e, "unable to preload root document");
@@ -585,7 +624,7 @@ impl ShuttleTask {
                                 .await;
                         }
                         identity::protocol::Mailbox::Send { did: to, request } => {
-                            if !identity_storage.contains(to).await {
+                            if !identity_storage.contains(&to).await {
                                 tracing::warn!(%did, "Identity is not registered");
                                 let payload = payload_message_construct(
                                     keypair,
@@ -635,7 +674,7 @@ impl ShuttleTask {
                                 return;
                             }
 
-                            if let Err(e) = identity_storage.deliver_request(to, request).await {
+                            if let Err(e) = identity_storage.deliver_request(&to, &request).await {
                                 match e {
                                     WarpError::InvalidSignature => {
                                         tracing::warn!(%did, to = %to, "request could not be vertified");
@@ -732,7 +771,7 @@ impl ShuttleTask {
 
                     let keypair = ipfs.keypair();
                     tracing::debug!(%did, %package, "preloading root document");
-                    if let Err(e) = ipfs.fetch(package).recursive().await {
+                    if let Err(e) = ipfs.fetch(&package).recursive().await {
                         tracing::warn!(%did, %package, error = %e, "unable to preload root document");
                         return;
                     }
@@ -749,7 +788,7 @@ impl ShuttleTask {
                         }
                     };
 
-                    let path = IpfsPath::from(*package)
+                    let path = IpfsPath::from(package)
                         .sub_path("identity")
                         .expect("valid path");
 
@@ -767,7 +806,7 @@ impl ShuttleTask {
                     };
 
                     tracing::debug!(%did, %package, "root document preloaded");
-                    if let Err(e) = identity_storage.update_user_document(&did, *package).await {
+                    if let Err(e) = identity_storage.update_user_document(&did, package).await {
                         tracing::warn!(%did, %package, error = %e, "unable to store document");
                         return;
                     }
@@ -938,7 +977,26 @@ impl ShuttleTask {
             };
 
             tracing::info!(%peer_id, %did, "Processing Incoming Message Request");
-            match payload.message() {
+            let message = match payload.message(None) {
+                Ok(message) => message,
+                Err(_e) => {
+                    tracing::warn!(%peer_id, error = %_e, "could not parse payload");
+                    let payload = message::protocol::payload_message_construct(
+                        keypair,
+                        None,
+                        MessageResponse::Error("public key is invalid".into()),
+                    )
+                    .expect("Valid payload construction");
+
+                    let bytes = payload.to_bytes().expect("valid deserialization");
+                    _ = ipfs
+                        .send_response(sender_peer_id, id, (protocols::SHUTTLE_MESSAGE, bytes))
+                        .await;
+                    return;
+                }
+            };
+
+            match message {
                 message::protocol::Request::RegisterConversation(RegisterConversation {
                     ..
                 }) => todo!(),
@@ -949,11 +1007,6 @@ impl ShuttleTask {
                         recipients,
                         message_cid,
                     } => {
-                        let conversation_id = *conversation_id;
-                        let message_id = *message_id;
-                        let recipients = recipients.to_owned();
-                        let message_cid = *message_cid;
-
                         tracing::info!(%conversation_id, %message_id, %did, "inserting message into mailbox");
                         if let Err(e) = message_storage
                             .insert_or_update(
@@ -974,9 +1027,6 @@ impl ShuttleTask {
                         conversation_id,
                         message_id,
                     } => {
-                        let conversation_id = *conversation_id;
-                        let message_id = *message_id;
-
                         tracing::info!(%conversation_id, %message_id, %did, "marking message as delivered");
                         if let Err(e) = message_storage
                             .message_delivered(&did, conversation_id, message_id)
@@ -991,9 +1041,6 @@ impl ShuttleTask {
                         conversation_id,
                         message_id,
                     } => {
-                        let conversation_id = *conversation_id;
-                        let message_id = *message_id;
-
                         tracing::info!(%conversation_id, %message_id, %did, "removing message from mailbox");
                         if let Err(e) = message_storage
                             .remove_message(&did, conversation_id, message_id)
@@ -1007,11 +1054,11 @@ impl ShuttleTask {
                 },
                 message::protocol::Request::FetchMailBox { conversation_id } => {
                     let message = match message_storage
-                        .get_unsent_messages(did, *conversation_id)
+                        .get_unsent_messages(did, conversation_id)
                         .await
                     {
                         Ok(content) => message::protocol::Response::Mailbox {
-                            conversation_id: *conversation_id,
+                            conversation_id,
                             content,
                         },
                         Err(e) => message::protocol::Response::Error(e.to_string()),
