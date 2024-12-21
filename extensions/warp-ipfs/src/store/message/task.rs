@@ -8,7 +8,6 @@ use futures_timer::Delay;
 use indexmap::{IndexMap, IndexSet};
 use ipld_core::cid::Cid;
 use pollable_map::futures::FutureMap;
-use rust_ipfs::p2p::MultiaddrExt;
 use rust_ipfs::{libp2p::gossipsub::Message, Ipfs};
 use rust_ipfs::{IpfsPath, PeerId, SubscriptionStream};
 use serde::{Deserialize, Serialize};
