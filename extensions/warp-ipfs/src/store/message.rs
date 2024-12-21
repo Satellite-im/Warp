@@ -32,22 +32,19 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{document::root::RootDocumentMap, ds_key::DataStoreKey, PeerIdExt};
-use crate::{
-    shuttle::message::client::MessageCommand,
-    store::{
-        conversation::ConversationDocument,
-        discovery::Discovery,
-        ecdh_decrypt, ecdh_encrypt,
-        event_subscription::EventSubscription,
-        files::FileStore,
-        generate_shared_topic,
-        identity::IdentityStore,
-        keystore::Keystore,
-        payload::{PayloadBuilder, PayloadMessage},
-        sign_serde,
-        topics::PeerTopic,
-        ConversationEvents, ConversationRequestKind, ConversationRequestResponse, DidExt,
-    },
+use crate::store::{
+    conversation::ConversationDocument,
+    discovery::Discovery,
+    ecdh_decrypt, ecdh_encrypt,
+    event_subscription::EventSubscription,
+    files::FileStore,
+    generate_shared_topic,
+    identity::IdentityStore,
+    keystore::Keystore,
+    payload::{PayloadBuilder, PayloadMessage},
+    sign_serde,
+    topics::PeerTopic,
+    ConversationEvents, ConversationRequestKind, ConversationRequestResponse, DidExt,
 };
 
 use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
@@ -88,7 +85,6 @@ impl MessageStore {
         file: &FileStore,
         event: EventSubscription<RayGunEventKind>,
         identity: &IdentityStore,
-        message_command: mpsc::Sender<MessageCommand>,
     ) -> Self {
         let executor = LocalExecutor;
         tracing::info!("Initializing MessageStore");
@@ -104,7 +100,6 @@ impl MessageStore {
             discovery,
             file: file.clone(),
             event,
-            message_command,
             queue: Default::default(),
             executor,
         };
@@ -2074,7 +2069,14 @@ impl ConversationTask {
                         }
                     };
 
-                    let data = match ecdh_decrypt(self.identity.root_document().keypair(), Some(&sender), payload.message()) {
+                    let msg = match payload.message(None) {
+                        Ok(m) => m,
+                        Err(_) => {
+                            continue
+                        }
+                    };
+
+                    let data = match ecdh_decrypt(self.identity.root_document().keypair(), Some(&sender), msg) {
                         Ok(d) => d,
                         Err(e) => {
                             tracing::warn!(%sender, error = %e, "failed to decrypt message");
@@ -2105,7 +2107,7 @@ impl ConversationTask {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct ConversationInnerMeta {
     pub command_tx: mpsc::Sender<ConversationTaskCommand>,
     pub handle: AbortableJoinHandle<()>,
@@ -2126,7 +2128,6 @@ struct ConversationInner {
     identity: IdentityStore,
     discovery: Discovery,
 
-    message_command: mpsc::Sender<MessageCommand>,
     // Note: Temporary
     queue: HashMap<DID, Vec<Queue>>,
     executor: LocalExecutor,
@@ -2190,7 +2191,6 @@ impl ConversationInner {
             &self.file,
             &self.discovery,
             crx,
-            self.message_command.clone(),
             self.event.clone(),
         )
         .await?;
@@ -2278,7 +2278,7 @@ impl ConversationInner {
             tracing::warn!(conversation_id = %convo_id, "Unable to publish to topic. Queuing event");
             self.queue_event(
                 did.clone(),
-                Queue::direct(peer_id, did.messaging(), payload.message().to_vec()),
+                Queue::direct(peer_id, did.messaging(), payload.message(None)?.to_vec()),
             )
             .await;
         }
@@ -2390,7 +2390,7 @@ impl ConversationInner {
                 tracing::warn!("Unable to publish to topic. Queuing event");
                 self.queue_event(
                     did.clone(),
-                    Queue::direct(peer_id, did.messaging(), payload.message().to_vec()),
+                    Queue::direct(peer_id, did.messaging(), payload.message(None)?.to_vec()),
                 )
                 .await;
             }
@@ -2623,7 +2623,7 @@ impl ConversationInner {
             tracing::warn!(%conversation_id, "Unable to publish to topic");
             self.queue_event(
                 did.clone(),
-                Queue::direct(peer_id, topic.clone(), payload.message().to_vec()),
+                Queue::direct(peer_id, topic.clone(), payload.message(None)?.to_vec()),
             )
             .await;
         }
@@ -2669,7 +2669,7 @@ impl ConversationInner {
             tracing::warn!(%community_id, "Unable to publish to topic");
             self.queue_event(
                 did.clone(),
-                Queue::direct(peer_id, topic.clone(), payload.message().to_vec()),
+                Queue::direct(peer_id, topic.clone(), payload.message(None)?.to_vec()),
             )
             .await;
         }
@@ -2759,7 +2759,7 @@ impl ConversationInner {
                             Queue::direct(
                                 peer_id,
                                 recipient.messaging(),
-                                payload.message().to_vec(),
+                                payload.message(None)?.to_vec(),
                             ),
                         )
                         .await;
@@ -2855,7 +2855,11 @@ impl ConversationInner {
             tracing::warn!(%conversation_id, "Unable to publish to topic. Queuing event");
             self.queue_event(
                 did_key.clone(),
-                Queue::direct(peer_id, did_key.messaging(), payload.message().to_vec()),
+                Queue::direct(
+                    peer_id,
+                    did_key.messaging(),
+                    payload.message(None)?.to_vec(),
+                ),
             )
             .await;
             time = false;
@@ -2881,7 +2885,6 @@ impl ConversationInner {
             &self.file,
             &self.discovery,
             crx,
-            self.message_command.clone(),
             self.event.clone(),
         )
         .await?;
@@ -3012,7 +3015,11 @@ impl ConversationInner {
                 //      For now we will queue the message if we hit an error
                 self.queue_event(
                     recipient.clone(),
-                    Queue::direct(peer_id, recipient.messaging(), payload.message().to_vec()),
+                    Queue::direct(
+                        peer_id,
+                        recipient.messaging(),
+                        payload.message(None)?.to_vec(),
+                    ),
                 )
                 .await;
                 time = false;

@@ -1,7 +1,5 @@
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-use std::path::PathBuf;
-
 use base64::{
     alphabet::STANDARD,
     engine::{general_purpose::PAD, GeneralPurpose},
@@ -9,6 +7,8 @@ use base64::{
 };
 use clap::Parser;
 use rust_ipfs::{Keypair, Multiaddr};
+use std::path::PathBuf;
+use std::time::Duration;
 
 use zeroize::Zeroizing;
 
@@ -37,6 +37,11 @@ struct Opt {
     #[clap(long)]
     listen_addr: Vec<Multiaddr>,
 
+    /// External address in multiaddr format that would indicate how the node can be reached.
+    /// If empty, all listening addresses will be used as an external address
+    #[clap(long)]
+    external_addr: Vec<Multiaddr>,
+
     /// Primary node in multiaddr format for bootstrap, discovery and building out mesh network
     #[clap(long)]
     primary_nodes: Vec<Multiaddr>,
@@ -45,6 +50,7 @@ struct Opt {
     #[clap(long)]
     trusted_nodes: Vec<Multiaddr>,
 
+    /// Path to keyfile
     #[clap(long)]
     keyfile: Option<PathBuf>,
 
@@ -52,8 +58,32 @@ struct Opt {
     #[clap(long)]
     path: Option<PathBuf>,
 
+    /// Enable relay server
     #[clap(long)]
     enable_relay_server: bool,
+
+    /// TLS Certificate when websocket is used
+    /// Note: websocket required a signed certificate.
+    #[clap(long)]
+    ws_tls_certificate: Option<Vec<PathBuf>>,
+
+    /// TLS Private Key when websocket is used
+    #[clap(long)]
+    ws_tls_private_key: Option<PathBuf>,
+
+    /// Enable GC to cleanup any unpinned or orphaned blocks
+    #[clap(long)]
+    enable_gc: bool,
+
+    /// Run GC at start
+    /// Note: its recommended not to use this if GC is enabled.
+    #[clap(long)]
+    run_gc_once: bool,
+
+    /// GC Duration in seconds on how often GC should run
+    /// Note: NOOP if `enable_gc` is false
+    #[clap(long)]
+    gc_duration: Option<u16>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -109,15 +139,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
+    let (ws_cert, ws_pk) = match (
+        opts.ws_tls_certificate.map(|list| {
+            list.into_iter()
+                .map(|conf| path.as_ref().map(|p| p.join(conf.clone())).unwrap_or(conf))
+                .collect::<Vec<_>>()
+        }),
+        opts.ws_tls_private_key
+            .map(|conf| path.as_ref().map(|p| p.join(conf.clone())).unwrap_or(conf)),
+    ) {
+        (Some(cert), Some(prv)) => {
+            let mut certs = Vec::with_capacity(cert.len());
+            for c in cert {
+                let Ok(cert) = tokio::fs::read_to_string(c).await else {
+                    continue;
+                };
+                certs.push(cert);
+            }
+
+            let prv = tokio::fs::read_to_string(prv).await.ok();
+            ((!certs.is_empty()).then_some(certs), prv)
+        }
+        _ => (None, None),
+    };
+
+    let wss_opt = ws_cert.and_then(|list| ws_pk.map(|k| (list, k)));
+
     let local_peer_id = keypair.public().to_peer_id();
     println!("Local PeerID: {local_peer_id}");
 
-    let _ = shuttle::server::ShuttleServer::new(
+    let _handle = shuttle::server::ShuttleServer::new(
         &keypair,
+        wss_opt,
         path,
         opts.enable_relay_server,
         false,
         &opts.listen_addr,
+        &opts.external_addr,
+        opts.enable_gc,
+        opts.run_gc_once,
+        opts.gc_duration.map(u64::from).map(Duration::from_secs),
+        None,
         true,
     )
     .await?;

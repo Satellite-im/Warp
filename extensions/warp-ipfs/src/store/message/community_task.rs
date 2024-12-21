@@ -2,19 +2,17 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use either::Either;
 use futures::channel::oneshot;
-use futures::stream::{BoxStream, FuturesUnordered};
-use futures::{FutureExt, SinkExt, StreamExt, TryFutureExt};
-use futures_timeout::TimeoutExt;
+use futures::stream::BoxStream;
+use futures::{StreamExt, TryFutureExt};
 use futures_timer::Delay;
 use indexmap::{IndexMap, IndexSet};
 use ipld_core::cid::Cid;
 use rust_ipfs::libp2p::gossipsub::Message;
-use rust_ipfs::p2p::MultiaddrExt;
 use rust_ipfs::{Ipfs, IpfsPath};
 use rust_ipfs::{PeerId, SubscriptionStream};
 use serde::{Deserialize, Serialize};
 use std::borrow::BorrowMut;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -40,8 +38,6 @@ use warp::{
 };
 use web_time::Instant;
 
-use crate::config;
-use crate::shuttle::message::client::MessageCommand;
 use crate::store::community::{
     CommunityChannelDocument, CommunityDocument, CommunityInviteDocument, CommunityRoleDocument,
 };
@@ -55,7 +51,7 @@ use crate::store::topics::PeerTopic;
 use crate::store::{
     CommunityUpdateKind, ConversationEvents, ConversationImageType, MAX_COMMUNITY_CHANNELS,
     MAX_COMMUNITY_DESCRIPTION, MAX_CONVERSATION_BANNER_SIZE, MAX_CONVERSATION_ICON_SIZE,
-    MAX_MESSAGE_SIZE, MAX_REACTIONS, MIN_MESSAGE_SIZE, SHUTTLE_TIMEOUT,
+    MAX_MESSAGE_SIZE, MAX_REACTIONS, MIN_MESSAGE_SIZE,
 };
 use crate::utils::{ByteCollection, ExtensionType};
 use crate::{
@@ -340,7 +336,6 @@ pub struct CommunityTask {
 
     attachment_tx: futures::channel::mpsc::Sender<AttachmentOneshot>,
     attachment_rx: futures::channel::mpsc::Receiver<AttachmentOneshot>,
-    message_command: futures::channel::mpsc::Sender<MessageCommand>,
     event_broadcast: tokio::sync::broadcast::Sender<MessageEventKind>,
     _event_subscription: EventSubscription<RayGunEventKind>,
 
@@ -389,7 +384,6 @@ impl CommunityTask {
         file: &FileStore,
         discovery: &Discovery,
         command_rx: futures::channel::mpsc::Receiver<CommunityTaskCommand>,
-        message_command: futures::channel::mpsc::Sender<MessageCommand>,
         _event_subscription: EventSubscription<RayGunEventKind>,
     ) -> Result<Self, Error> {
         let document = root.get_community_document(community_id).await?;
@@ -424,7 +418,6 @@ impl CommunityTask {
             attachment_rx: arx,
             event_broadcast: btx,
             _event_subscription,
-            message_command,
             command_rx,
             queue: Default::default(),
             terminate: CommunityTermination::default(),
@@ -535,166 +528,166 @@ impl CommunityTask {
 
 impl CommunityTask {
     async fn load_from_mailbox(&mut self) -> Result<(), Error> {
-        let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config().clone()
-        else {
-            return Ok(());
-        };
-
-        let ipfs = self.ipfs.clone();
-        let message_command = self.message_command.clone();
-        let addresses = addresses.clone();
-
-        let community_id = self.community_id;
-
-        for channel in self.document.channels.values_mut() {
-            let channel_id = channel.id;
-
-            let mut mailbox = BTreeMap::new();
-            let mut providers = vec![];
-            for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                let (tx, rx) = futures::channel::oneshot::channel();
-                let _ = message_command
-                    .clone()
-                    .send(MessageCommand::FetchMailbox {
-                        peer_id,
-                        conversation_id: channel_id,
-                        response: tx,
-                    })
-                    .await;
-
-                match rx.timeout(SHUTTLE_TIMEOUT).await {
-                    Ok(Ok(Ok(list))) => {
-                        providers.push(peer_id);
-                        mailbox.extend(list);
-                        break;
-                    }
-                    Ok(Ok(Err(e))) => {
-                        tracing::error!(
-                            "unable to get mailbox to community channel {channel_id} from {peer_id}: {e}"
-                        );
-                        break;
-                    }
-                    Ok(Err(_)) => {
-                        tracing::error!("Channel been unexpectedly closed for {peer_id}");
-                        continue;
-                    }
-                    Err(_) => {
-                        tracing::error!("Request timed out for {peer_id}");
-                        continue;
-                    }
-                }
-            }
-
-            let community_mailbox = mailbox
-                .into_iter()
-                .filter_map(|(id, cid)| {
-                    let id = Uuid::from_str(&id).ok()?;
-                    Some((id, cid))
-                })
-                .collect::<BTreeMap<Uuid, Cid>>();
-
-            let mut messages =
-                FuturesUnordered::from_iter(community_mailbox.into_iter().map(|(id, cid)| {
-                    let ipfs = ipfs.clone();
-                    async move {
-                        ipfs.fetch(&cid).recursive().await?;
-                        Ok((id, cid))
-                    }
-                    .boxed()
-                }))
-                .filter_map(|res: Result<_, anyhow::Error>| async move { res.ok() })
-                .filter_map(|(_, cid)| {
-                    let ipfs = ipfs.clone();
-                    let providers = providers.clone();
-                    let addresses = addresses.clone();
-                    let message_command = message_command.clone();
-                    async move {
-                        let message_document = ipfs
-                            .get_dag(cid)
-                            .providers(&providers)
-                            .deserialized::<MessageDocument>()
-                            .await
-                            .ok()?;
-
-                        if !message_document.verify() {
-                            return None;
-                        }
-
-                        for peer_id in addresses.into_iter().filter_map(|addr| addr.peer_id()) {
-                            let _ = message_command
-                                .clone()
-                                .send(MessageCommand::MessageDelivered {
-                                    peer_id,
-                                    conversation_id: channel_id,
-                                    message_id: message_document.id,
-                                })
-                                .await;
-                        }
-                        Some(message_document)
-                    }
-                })
-                .collect::<Vec<_>>()
-                .await;
-
-            messages.sort_by(|a, b| b.cmp(a));
-
-            for message in messages {
-                if !message.verify() {
-                    continue;
-                }
-                let message_id = message.id;
-                match channel
-                    .contains(&self.ipfs, message_id)
-                    .await
-                    .unwrap_or_default()
-                {
-                    true => {
-                        let current_message =
-                            channel.get_message_document(&self.ipfs, message_id).await?;
-
-                        channel
-                            .update_message_document(&self.ipfs, &message)
-                            .await?;
-
-                        let is_edited = matches!((message.modified, current_message.modified), (Some(modified), Some(current_modified)) if modified > current_modified )
-                            | matches!(
-                                (message.modified, current_message.modified),
-                                (Some(_), None)
-                            );
-
-                        match is_edited {
-                            true => {
-                                let _ = self.event_broadcast.send(
-                                    MessageEventKind::CommunityMessageEdited {
-                                        community_id,
-                                        channel_id,
-                                        message_id,
-                                    },
-                                );
-                            }
-                            false => {
-                                //TODO: Emit event showing message was updated in some way
-                            }
-                        }
-                    }
-                    false => {
-                        channel
-                            .insert_message_document(&self.ipfs, &message)
-                            .await?;
-
-                        let _ =
-                            self.event_broadcast
-                                .send(MessageEventKind::CommunityMessageReceived {
-                                    community_id,
-                                    channel_id,
-                                    message_id,
-                                });
-                    }
-                }
-            }
-        }
-
-        self.set_document().await?;
+        // let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config().clone()
+        // else {
+        //     return Ok(());
+        // };
+        //
+        // let ipfs = self.ipfs.clone();
+        // let message_command = self.message_command.clone();
+        // let addresses = addresses.clone();
+        //
+        // let community_id = self.community_id;
+        //
+        // for channel in self.document.channels.values_mut() {
+        //     let channel_id = channel.id;
+        //
+        //     let mut mailbox = BTreeMap::new();
+        //     let mut providers = vec![];
+        //     for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+        //         let (tx, rx) = futures::channel::oneshot::channel();
+        //         let _ = message_command
+        //             .clone()
+        //             .send(MessageCommand::FetchMailbox {
+        //                 peer_id,
+        //                 conversation_id: channel_id,
+        //                 response: tx,
+        //             })
+        //             .await;
+        //
+        //         match rx.timeout(SHUTTLE_TIMEOUT).await {
+        //             Ok(Ok(Ok(list))) => {
+        //                 providers.push(peer_id);
+        //                 mailbox.extend(list);
+        //                 break;
+        //             }
+        //             Ok(Ok(Err(e))) => {
+        //                 tracing::error!(
+        //                     "unable to get mailbox to community channel {channel_id} from {peer_id}: {e}"
+        //                 );
+        //                 break;
+        //             }
+        //             Ok(Err(_)) => {
+        //                 tracing::error!("Channel been unexpectedly closed for {peer_id}");
+        //                 continue;
+        //             }
+        //             Err(_) => {
+        //                 tracing::error!("Request timed out for {peer_id}");
+        //                 continue;
+        //             }
+        //         }
+        //     }
+        //
+        //     let community_mailbox = mailbox
+        //         .into_iter()
+        //         .filter_map(|(id, cid)| {
+        //             let id = Uuid::from_str(&id).ok()?;
+        //             Some((id, cid))
+        //         })
+        //         .collect::<BTreeMap<Uuid, Cid>>();
+        //
+        //     let mut messages =
+        //         FuturesUnordered::from_iter(community_mailbox.into_iter().map(|(id, cid)| {
+        //             let ipfs = ipfs.clone();
+        //             async move {
+        //                 ipfs.fetch(&cid).recursive().await?;
+        //                 Ok((id, cid))
+        //             }
+        //             .boxed()
+        //         }))
+        //         .filter_map(|res: Result<_, anyhow::Error>| async move { res.ok() })
+        //         .filter_map(|(_, cid)| {
+        //             let ipfs = ipfs.clone();
+        //             let providers = providers.clone();
+        //             let addresses = addresses.clone();
+        //             let message_command = message_command.clone();
+        //             async move {
+        //                 let message_document = ipfs
+        //                     .get_dag(cid)
+        //                     .providers(&providers)
+        //                     .deserialized::<MessageDocument>()
+        //                     .await
+        //                     .ok()?;
+        //
+        //                 if !message_document.verify() {
+        //                     return None;
+        //                 }
+        //
+        //                 for peer_id in addresses.into_iter().filter_map(|addr| addr.peer_id()) {
+        //                     let _ = message_command
+        //                         .clone()
+        //                         .send(MessageCommand::MessageDelivered {
+        //                             peer_id,
+        //                             conversation_id: channel_id,
+        //                             message_id: message_document.id,
+        //                         })
+        //                         .await;
+        //                 }
+        //                 Some(message_document)
+        //             }
+        //         })
+        //         .collect::<Vec<_>>()
+        //         .await;
+        //
+        //     messages.sort_by(|a, b| b.cmp(a));
+        //
+        //     for message in messages {
+        //         if !message.verify() {
+        //             continue;
+        //         }
+        //         let message_id = message.id;
+        //         match channel
+        //             .contains(&self.ipfs, message_id)
+        //             .await
+        //             .unwrap_or_default()
+        //         {
+        //             true => {
+        //                 let current_message =
+        //                     channel.get_message_document(&self.ipfs, message_id).await?;
+        //
+        //                 channel
+        //                     .update_message_document(&self.ipfs, &message)
+        //                     .await?;
+        //
+        //                 let is_edited = matches!((message.modified, current_message.modified), (Some(modified), Some(current_modified)) if modified > current_modified )
+        //                     | matches!(
+        //                         (message.modified, current_message.modified),
+        //                         (Some(_), None)
+        //                     );
+        //
+        //                 match is_edited {
+        //                     true => {
+        //                         let _ = self.event_broadcast.send(
+        //                             MessageEventKind::CommunityMessageEdited {
+        //                                 community_id,
+        //                                 channel_id,
+        //                                 message_id,
+        //                             },
+        //                         );
+        //                     }
+        //                     false => {
+        //                         //TODO: Emit event showing message was updated in some way
+        //                     }
+        //                 }
+        //             }
+        //             false => {
+        //                 channel
+        //                     .insert_message_document(&self.ipfs, &message)
+        //                     .await?;
+        //
+        //                 let _ =
+        //                     self.event_broadcast
+        //                         .send(MessageEventKind::CommunityMessageReceived {
+        //                             community_id,
+        //                             channel_id,
+        //                             message_id,
+        //                         });
+        //             }
+        //         }
+        //     }
+        // }
+        //
+        // self.set_document().await?;
 
         Ok(())
     }
@@ -1217,7 +1210,7 @@ impl CommunityTask {
                     None,
                     peer_id,
                     did_key.messaging(),
-                    payload.message().to_vec(),
+                    payload.message(None)?.to_vec(),
                 ),
             )
             .await;
@@ -1255,7 +1248,7 @@ impl CommunityTask {
                     self.pending_key_exchange
                         .entry(sender)
                         .or_default()
-                        .push((data.message().to_vec(), false));
+                        .push((data.message(None)?, false));
 
                     // Maybe send a request? Although we could, we should check to determine if one was previously sent or queued first,
                     // but for now we can leave this commented until the queue is removed and refactored.
@@ -1270,7 +1263,7 @@ impl CommunityTask {
                 }
             };
 
-            Cipher::direct_decrypt(data.message(), &key)?
+            Cipher::direct_decrypt(&data.message(None)?, &key)?
         };
 
         let event = serde_json::from_slice::<CommunityMessagingEvents>(&bytes).map_err(|e| {
@@ -1328,7 +1321,12 @@ impl CommunityTask {
             tracing::warn!(id = %self.community_id, "Unable to publish to topic");
             self.queue_event(
                 did.clone(),
-                QueueItem::direct(None, peer_id, topic.clone(), payload.message().to_vec()),
+                QueueItem::direct(
+                    None,
+                    peer_id,
+                    topic.clone(),
+                    payload.message(None)?.to_vec(),
+                ),
             )
             .await;
         }
@@ -2869,11 +2867,11 @@ impl CommunityTask {
             None => return Err(Error::CommunityChannelDoesntExist),
         };
 
-        let message_cid = channel
+        let _message_cid = channel
             .insert_message_document(&self.ipfs, &message)
             .await?;
 
-        let recipients = self.document.participants();
+        // let recipients = self.document.participants();
 
         self.set_document().await?;
 
@@ -2895,23 +2893,23 @@ impl CommunityTask {
             message,
         };
 
-        if !recipients.is_empty() {
-            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
-                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                    let _ = self
-                        .message_command
-                        .clone()
-                        .send(MessageCommand::InsertMessage {
-                            peer_id,
-                            conversation_id: channel_id,
-                            recipients: recipients.iter().cloned().collect(),
-                            message_id,
-                            message_cid,
-                        })
-                        .await;
-                }
-            }
-        }
+        // if !recipients.is_empty() {
+        //     if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+        //         for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+        //             let _ = self
+        //                 .message_command
+        //                 .clone()
+        //                 .send(MessageCommand::InsertMessage {
+        //                     peer_id,
+        //                     conversation_id: channel_id,
+        //                     recipients: recipients.iter().cloned().collect(),
+        //                     message_id,
+        //                     message_cid,
+        //                 })
+        //                 .await;
+        //         }
+        //     }
+        // }
 
         self.publish(Some(message_id), event, true, vec![])
             .await
@@ -2992,11 +2990,11 @@ impl CommunityTask {
         let nonce = message_document.nonce_from_message()?;
         let signature = message_document.signature.expect("message to be signed");
 
-        let message_cid = channel
+        let _message_cid = channel
             .update_message_document(&self.ipfs, &message_document)
             .await?;
 
-        let recipients = self.document.participants();
+        // let recipients = self.document.participants();
 
         self.set_document().await?;
 
@@ -3016,23 +3014,23 @@ impl CommunityTask {
             signature: signature.into(),
         };
 
-        if !recipients.is_empty() {
-            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
-                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                    let _ = self
-                        .message_command
-                        .clone()
-                        .send(MessageCommand::InsertMessage {
-                            peer_id,
-                            conversation_id: channel_id,
-                            recipients: recipients.iter().cloned().collect(),
-                            message_id,
-                            message_cid,
-                        })
-                        .await;
-                }
-            }
-        }
+        // if !recipients.is_empty() {
+        //     if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+        //         for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+        //             let _ = self
+        //                 .message_command
+        //                 .clone()
+        //                 .send(MessageCommand::InsertMessage {
+        //                     peer_id,
+        //                     conversation_id: channel_id,
+        //                     recipients: recipients.iter().cloned().collect(),
+        //                     message_id,
+        //                     message_cid,
+        //                 })
+        //                 .await;
+        //         }
+        //     }
+        // }
 
         self.publish(None, event, true, vec![]).await
     }
@@ -3099,11 +3097,11 @@ impl CommunityTask {
             None => return Err(Error::CommunityChannelDoesntExist),
         };
 
-        let message_cid = channel
+        let _message_cid = channel
             .insert_message_document(&self.ipfs, &message)
             .await?;
 
-        let recipients = self.document.participants();
+        // let recipients = self.document.participants();
 
         self.set_document().await?;
 
@@ -3123,23 +3121,23 @@ impl CommunityTask {
             message,
         };
 
-        if !recipients.is_empty() {
-            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
-                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                    let _ = self
-                        .message_command
-                        .clone()
-                        .send(MessageCommand::InsertMessage {
-                            peer_id,
-                            conversation_id: channel_id,
-                            recipients: recipients.iter().cloned().collect(),
-                            message_id,
-                            message_cid,
-                        })
-                        .await;
-                }
-            }
-        }
+        // if !recipients.is_empty() {
+        //     if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+        //         for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+        //             let _ = self
+        //                 .message_command
+        //                 .clone()
+        //                 .send(MessageCommand::InsertMessage {
+        //                     peer_id,
+        //                     conversation_id: channel_id,
+        //                     recipients: recipients.iter().cloned().collect(),
+        //                     message_id,
+        //                     message_cid,
+        //                 })
+        //                 .await;
+        //         }
+        //     }
+        // }
 
         self.publish(Some(message_id), event, true, vec![])
             .await
@@ -3175,19 +3173,19 @@ impl CommunityTask {
 
         self.set_document().await?;
 
-        if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
-            for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                let _ = self
-                    .message_command
-                    .clone()
-                    .send(MessageCommand::RemoveMessage {
-                        peer_id,
-                        conversation_id: channel_id,
-                        message_id,
-                    })
-                    .await;
-            }
-        }
+        // if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+        //     for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+        //         let _ = self
+        //             .message_command
+        //             .clone()
+        //             .send(MessageCommand::RemoveMessage {
+        //                 peer_id,
+        //                 conversation_id: channel_id,
+        //                 message_id,
+        //             })
+        //             .await;
+        //     }
+        // }
 
         let _ = tx.send(MessageEventKind::CommunityMessageDeleted {
             community_id: self.community_id,
@@ -3258,33 +3256,33 @@ impl CommunityTask {
             .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
             .await?;
 
-        let message_cid = channel
+        let _message_cid = channel
             .update_message_document(&self.ipfs, &message_document)
             .await?;
 
-        let recipients = self.document.participants();
+        // let recipients = self.document.participants();
 
         self.set_document().await?;
 
         let _ = tx.send(event);
 
-        if !recipients.is_empty() {
-            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
-                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                    let _ = self
-                        .message_command
-                        .clone()
-                        .send(MessageCommand::InsertMessage {
-                            peer_id,
-                            conversation_id: channel_id,
-                            recipients: recipients.iter().cloned().collect(),
-                            message_id,
-                            message_cid,
-                        })
-                        .await;
-                }
-            }
-        }
+        // if !recipients.is_empty() {
+        //     if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+        //         for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+        //             let _ = self
+        //                 .message_command
+        //                 .clone()
+        //                 .send(MessageCommand::InsertMessage {
+        //                     peer_id,
+        //                     conversation_id: channel_id,
+        //                     recipients: recipients.iter().cloned().collect(),
+        //                     message_id,
+        //                     message_cid,
+        //                 })
+        //                 .await;
+        //         }
+        //     }
+        // }
 
         let event = CommunityMessagingEvents::Pin {
             community_id: self.community_id,
@@ -3320,7 +3318,7 @@ impl CommunityTask {
 
         let keystore = pubkey_or_keystore(&*self)?;
 
-        let recipients = self.document.participants();
+        // let recipients = self.document.participants();
 
         let channel = match self.document.channels.get_mut(&channel_id.to_string()) {
             Some(c) => c,
@@ -3419,23 +3417,25 @@ impl CommunityTask {
             emoji,
         };
 
-        if !recipients.is_empty() {
-            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
-                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                    let _ = self
-                        .message_command
-                        .clone()
-                        .send(MessageCommand::InsertMessage {
-                            peer_id,
-                            conversation_id: channel_id,
-                            recipients: recipients.iter().cloned().collect(),
-                            message_id,
-                            message_cid,
-                        })
-                        .await;
-                }
-            }
-        }
+        _ = message_cid;
+
+        // if !recipients.is_empty() {
+        //     if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+        //         for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+        //             let _ = self
+        //                 .message_command
+        //                 .clone()
+        //                 .send(MessageCommand::InsertMessage {
+        //                     peer_id,
+        //                     conversation_id: channel_id,
+        //                     recipients: recipients.iter().cloned().collect(),
+        //                     message_id,
+        //                     message_cid,
+        //                 })
+        //                 .await;
+        //         }
+        //     }
+        // }
 
         self.publish(None, event, true, vec![]).await
     }
@@ -3615,11 +3615,11 @@ impl CommunityTask {
             None => return Err(Error::CommunityChannelDoesntExist),
         };
 
-        let message_cid = channel
+        let _message_cid = channel
             .insert_message_document(&self.ipfs, &message)
             .await?;
 
-        let recipients = self.document.participants().clone();
+        // let recipients = self.document.participants().clone();
 
         self.set_document().await?;
 
@@ -3639,23 +3639,23 @@ impl CommunityTask {
             message,
         };
 
-        if !recipients.is_empty() {
-            if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
-                for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
-                    let _ = self
-                        .message_command
-                        .clone()
-                        .send(MessageCommand::InsertMessage {
-                            peer_id,
-                            conversation_id: channel_id,
-                            recipients: recipients.iter().cloned().collect(),
-                            message_id,
-                            message_cid,
-                        })
-                        .await;
-                }
-            }
-        }
+        // if !recipients.is_empty() {
+        //     if let config::Discovery::Shuttle { addresses } = self.discovery.discovery_config() {
+        //         for peer_id in addresses.iter().filter_map(|addr| addr.peer_id()) {
+        //             let _ = self
+        //                 .message_command
+        //                 .clone()
+        //                 .send(MessageCommand::InsertMessage {
+        //                     peer_id,
+        //                     conversation_id: channel_id,
+        //                     recipients: recipients.iter().cloned().collect(),
+        //                     message_id,
+        //                     message_cid,
+        //                 })
+        //                 .await;
+        //         }
+        //     }
+        // }
 
         self.publish(Some(message_id), event, true, vec![]).await
     }
@@ -3705,7 +3705,7 @@ impl CommunityTask {
                                 message_id,
                                 peer_id,
                                 self.document.topic(),
-                                payload.message().to_vec(),
+                                payload.message(None)?.to_vec(),
                             ),
                         )
                         .await;
@@ -4526,7 +4526,7 @@ async fn process_request_response_event(
 
     let sender = payload.sender().to_did()?;
 
-    let data = ecdh_decrypt(keypair, Some(&sender), payload.message())?;
+    let data = ecdh_decrypt(keypair, Some(&sender), payload.message(None)?)?;
 
     let event = serde_json::from_slice::<ConversationRequestResponse>(&data)?;
 
@@ -4596,7 +4596,12 @@ async fn process_request_response_event(
                     // TODO
                     this.queue_event(
                         sender.clone(),
-                        QueueItem::direct(None, peer_id, topic.clone(), payload.message().to_vec()),
+                        QueueItem::direct(
+                            None,
+                            peer_id,
+                            topic.clone(),
+                            payload.message(None)?.to_vec(),
+                        ),
                     )
                     .await;
                 }
@@ -4691,7 +4696,7 @@ async fn process_community_event(this: &mut CommunityTask, message: Message) -> 
 
     let key = this.community_key(Some(&sender))?;
 
-    let data = Cipher::direct_decrypt(payload.message(), &key)?;
+    let data = Cipher::direct_decrypt(&payload.message(None)?, &key)?;
 
     let event = match serde_json::from_slice::<CommunityMessagingEvents>(&data)? {
         event @ CommunityMessagingEvents::Event { .. } => event,

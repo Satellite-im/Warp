@@ -84,10 +84,6 @@ impl AttachmentStream {
     }
 
     pub fn set_lines(mut self, lines: Vec<String>) -> Result<Self, Error> {
-        if lines.is_empty() {
-            return Ok(self);
-        }
-
         let lines_value_length: usize = lines
             .iter()
             .filter(|s| !s.is_empty())
@@ -95,18 +91,8 @@ impl AttachmentStream {
             .map(|s| s.chars().count())
             .sum();
 
-        if lines_value_length < MIN_MESSAGE_SIZE {
-            tracing::error!(
-                current_size = lines_value_length,
-                min = MIN_MESSAGE_SIZE,
-                "length of message is invalid"
-            );
-            return Err(Error::InvalidLength {
-                context: "message".into(),
-                current: lines_value_length,
-                minimum: None,
-                maximum: Some(MIN_MESSAGE_SIZE),
-            });
+        if lines.is_empty() || lines_value_length < MIN_MESSAGE_SIZE {
+            return Ok(self);
         }
 
         if lines_value_length > MAX_MESSAGE_SIZE {
