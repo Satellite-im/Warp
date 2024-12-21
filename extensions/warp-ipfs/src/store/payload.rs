@@ -397,6 +397,7 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadMessage<M> {
         }
     }
 
+    /// Returns the original message from the payload by decrypting it with a known key.
     pub fn message_from_key(&self, key: &[u8]) -> Result<M, Error> {
         match &self.message {
             PayloadSelectMessage::Clear { .. } => Err(Error::PrivateKeyInvalid),
