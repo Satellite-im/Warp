@@ -375,7 +375,7 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadMessage<M> {
 
         match &self.message {
             PayloadSelectMessage::Clear { message } => Ok(message.clone()),
-            PayloadSelectMessage::Encrypted { bytes: message } => {
+            PayloadSelectMessage::Encrypted { .. } => {
                 let keypair = match keypair.into() {
                     Some(kp) => kp,
                     None => return Err(Error::PublicKeyInvalid),
@@ -392,7 +392,17 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadMessage<M> {
 
                 let raw_key = ecdh_decrypt(keypair, Some(&sender_did), encrypted_key)?;
 
-                let message_bytes = Cipher::direct_decrypt(message, &raw_key)?;
+                self.message_from_key(&raw_key)
+            }
+        }
+    }
+
+    /// Returns the original message from the payload by decrypting it with a known key.
+    pub fn message_from_key(&self, key: &[u8]) -> Result<M, Error> {
+        match &self.message {
+            PayloadSelectMessage::Clear { .. } => Err(Error::PrivateKeyInvalid),
+            PayloadSelectMessage::Encrypted { bytes: message } => {
+                let message_bytes = Cipher::direct_decrypt(message, key)?;
 
                 let message =
                     cbor4ii::serde::from_slice(&message_bytes).map_err(std::io::Error::other)?;
@@ -532,6 +542,37 @@ mod test {
         let key = keys.choose(&mut rng).expect("valid entry");
 
         assert_eq!(de_payload.message(key)?, "Request");
+
+        Ok(())
+    }
+
+    #[test]
+    fn payload_single_recipients_with_custom_key_decryption() -> anyhow::Result<()> {
+        let data = String::from("Request");
+        let key = generate::<32>().to_vec();
+
+        let keypair = Keypair::generate_ed25519();
+
+        let keys = vec![Keypair::generate_ed25519()];
+
+        let pub_keys = keys
+            .into_iter()
+            .map(|k| k.public().to_peer_id())
+            .filter_map(|k| k.to_did().ok())
+            .collect::<Vec<_>>();
+
+        let payload = PayloadBuilder::new(&keypair, data)
+            .add_recipients(pub_keys)?
+            .set_key(key.clone())
+            .build()?;
+
+        assert_eq!(payload.sender(), &keypair.public().to_peer_id());
+        payload.verify().expect("valid payload");
+
+        let bytes = payload.to_bytes()?;
+        let de_payload: PayloadMessage<String> = PayloadMessage::from_bytes(&bytes)?;
+
+        assert_eq!(de_payload.message_from_key(&key)?, "Request");
 
         Ok(())
     }
