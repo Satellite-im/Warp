@@ -632,8 +632,13 @@ impl WarpIpfs {
             }
         }
 
-        let discovery =
-            Discovery::new(&ipfs, &self.inner.config.store_setting().discovery, &relays);
+        let discovery = Discovery::new(
+            &ipfs,
+            &keypair,
+            &self.inner.config.store_setting().discovery,
+            &relays,
+        )
+        .await;
 
         let phonebook = PhoneBook::new(discovery.clone(), pb_tx);
 
