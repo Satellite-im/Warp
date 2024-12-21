@@ -2244,12 +2244,12 @@ impl ConversationInner {
         //     return Err(Error::ConversationLimitReached);
         // }
 
-        let conversation =
+        let mut conversation =
             ConversationDocument::new_direct(self.root.keypair(), [own_did.clone(), did.clone()])?;
 
         let convo_id = conversation.id();
 
-        self.set_document(conversation.clone()).await?;
+        self.set_document(&mut conversation).await?;
 
         self.create_conversation_task(convo_id).await?;
 
@@ -2289,7 +2289,7 @@ impl ConversationInner {
             })
             .await;
 
-        Ok(Conversation::from(&conversation))
+        Ok(Conversation::from(conversation))
     }
 
     pub async fn create_group_conversation<P: Into<GroupPermissionOpt> + Send + Sync>(
@@ -2406,7 +2406,7 @@ impl ConversationInner {
             .emit(RayGunEventKind::ConversationCreated { conversation_id })
             .await;
 
-        Ok(Conversation::from(&conversation))
+        Ok(Conversation::from(conversation))
     }
 
     async fn get(&self, id: Uuid) -> Result<ConversationDocument, Error> {
