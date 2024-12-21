@@ -93,26 +93,16 @@ mod test {
             }
         );
 
-        let invite_list = instance_b.list_communities_invited_to().await?;
-        assert_eq!(invite_list.len(), 1);
+        instance_b.request_join_community(community.id()).await?;
+        assert_eq!(
+            next_event(&mut stream_a, Duration::from_secs(60)).await?,
+            MessageEventKind::CommunityJoined {
+                community_id: community.id(),
+                user: did_b.clone(),
+            }
+        );
 
         let mut stream_b = instance_b.get_community_stream(community.id()).await?;
-        for (community_id, invite) in invite_list {
-            instance_b
-                .accept_community_invite(community_id, invite.id())
-                .await?;
-        }
-        assert_next_msg_event(
-            vec![&mut stream_a, &mut stream_b],
-            Duration::from_secs(60),
-            MessageEventKind::AcceptedCommunityInvite {
-                community_id: community.id(),
-                invite_id: invite.id(),
-                user: did_b.clone(),
-            },
-        )
-        .await?;
-
         let mut rg_stream_c = instance_c.raygun_subscribe().await?;
         let invite = instance_a
             .create_community_invite(community.id(), Some(did_c.clone()), None)
@@ -134,21 +124,13 @@ mod test {
             }
         );
 
-        let invite_list = instance_c.list_communities_invited_to().await?;
-        assert_eq!(invite_list.len(), 1);
+        instance_c.request_join_community(community.id()).await?;
 
-        let mut stream_c = instance_c.get_community_stream(community.id()).await?;
-        for (community_id, invite) in invite_list {
-            instance_c
-                .accept_community_invite(community_id, invite.id())
-                .await?;
-        }
         assert_next_msg_event(
-            vec![&mut stream_a, &mut stream_b, &mut stream_c],
+            vec![&mut stream_a, &mut stream_b],
             Duration::from_secs(60),
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_c.clone(),
             },
         )
@@ -198,15 +180,18 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
+            }
+        );
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityJoined {
+                community_id: community.id()
             }
         );
 
@@ -255,14 +240,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -333,8 +315,11 @@ mod test {
             }
         );
 
-        let got_community = instance_b.get_community(community.id()).await?;
-        assert!(got_community.invites().contains(&invite.id()));
+        let result = instance_b.get_community(community.id()).await;
+        assert_eq!(
+            format!("{:?}", result),
+            format!("{:?}", Err::<Community, Error>(Error::InvalidCommunity)),
+        );
         Ok(())
     }
     #[async_test]
@@ -358,9 +343,7 @@ mod test {
             }
         );
 
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
 
         let got_community = instance_b.get_community(community.id()).await?;
         assert!(got_community.members().contains(&did_b.clone()));
@@ -388,9 +371,7 @@ mod test {
             }
         );
 
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
 
         let list = instance_b.list_communities_joined().await?;
         assert!(list.len() == 1);
@@ -399,7 +380,7 @@ mod test {
     }
 
     #[async_test]
-    async fn list_community_invited_to() -> anyhow::Result<()> {
+    async fn list_communites_invited_to() -> anyhow::Result<()> {
         let context = Some("test::list_communites_invited_to".into());
         let acc = (None, None, context);
         let accounts = create_accounts(vec![acc.clone(), acc]).await?;
@@ -456,14 +437,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -508,14 +486,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -566,14 +541,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -618,14 +590,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -679,14 +648,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -734,15 +700,18 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite_for_b.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite_for_b.id(),
                 user: did_b.clone()
+            }
+        );
+        assert_eq!(
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityJoined {
+                community_id: community.id()
             }
         );
 
@@ -780,15 +749,18 @@ mod test {
             }
         );
 
-        instance_c
-            .accept_community_invite(community.id(), invite_for_c.id())
-            .await?;
+        instance_c.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite_for_c.id(),
                 user: did_c.clone()
+            }
+        );
+        assert_eq!(
+            next_event(&mut rg_stream_c, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityJoined {
+                community_id: community.id()
             }
         );
         Ok(())
@@ -815,14 +787,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite_for_b.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite_for_b.id(),
                 user: did_b.clone()
             }
         );
@@ -863,14 +832,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite_for_b.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite_for_b.id(),
                 user: did_b.clone()
             }
         );
@@ -921,7 +887,7 @@ mod test {
             }
         );
 
-        let got_invite = instance_b
+        let got_invite = instance_a
             .get_community_invite(community.id(), invite.id())
             .await?;
         assert_eq!(invite, got_invite);
@@ -949,14 +915,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite_for_b.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite_for_b.id(),
                 user: did_b.clone()
             }
         );
@@ -996,14 +959,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite_for_b.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite_for_b.id(),
                 user: did_b.clone()
             }
         );
@@ -1054,14 +1014,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite_for_b.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite_for_b.id(),
                 user: did_b.clone()
             }
         );
@@ -1089,12 +1046,13 @@ mod test {
             }
         );
 
-        let result = instance_b
-            .accept_community_invite(community.id(), invite_for_b.id())
-            .await;
+        let mut rg_stream_b = instance_b.raygun_subscribe().await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
-            format!("{:?}", result),
-            format!("{:?}", Err::<Community, Error>(Error::InvalidCommunity))
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityJoinRejected {
+                community_id: community.id(),
+            }
         );
         Ok(())
     }
@@ -1123,15 +1081,12 @@ mod test {
             }
         );
 
-        let result = instance_b
-            .accept_community_invite(community.id(), invite_for_b.id())
-            .await;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
-            format!("{:?}", result),
-            format!(
-                "{:?}",
-                Err::<Community, Error>(Error::CommunityInviteExpired)
-            )
+            next_event(&mut rg_stream_b, Duration::from_secs(60)).await?,
+            RayGunEventKind::CommunityJoinRejected {
+                community_id: community.id(),
+            }
         );
         Ok(())
     }
@@ -1169,14 +1124,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -1216,14 +1168,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -1257,14 +1206,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -1300,14 +1246,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -1359,14 +1302,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -1405,14 +1345,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -1467,14 +1404,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -1510,14 +1444,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -1562,14 +1493,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -1605,14 +1533,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -1683,14 +1608,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -1726,14 +1648,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -1784,14 +1703,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -1827,14 +1743,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -1887,14 +1800,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -1912,14 +1822,11 @@ mod test {
         );
 
         let mut stream_b = instance_b.get_community_stream(community.id()).await?;
-        instance_c
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_c.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_b, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_c.clone()
             }
         );
@@ -1967,14 +1874,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -2015,15 +1919,12 @@ mod test {
             }
         );
 
-        instance_c
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_c.request_join_community(community.id()).await?;
         assert_next_msg_event(
             vec![&mut stream_a, &mut stream_b],
             Duration::from_secs(60),
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_c.clone(),
             },
         )
@@ -2072,14 +1973,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -2119,14 +2017,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -2182,14 +2077,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -2233,14 +2125,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -2311,14 +2200,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -2369,14 +2255,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -2446,14 +2329,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -2525,14 +2405,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -2610,14 +2487,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -2689,14 +2563,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -2781,14 +2652,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -2860,14 +2728,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -2943,14 +2808,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -3022,14 +2884,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -3107,14 +2966,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -3190,14 +3046,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -3281,14 +3134,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -3328,14 +3178,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -3408,14 +3255,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -3491,14 +3335,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -3565,14 +3406,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -3665,14 +3503,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -3757,14 +3592,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -3857,14 +3689,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -3972,14 +3801,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -4053,14 +3879,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -4147,14 +3970,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -4246,14 +4066,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -4342,14 +4159,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -4448,14 +4262,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -4544,14 +4355,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -4625,14 +4433,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -4680,14 +4485,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -4789,14 +4591,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -4908,14 +4707,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );
@@ -5017,14 +4813,11 @@ mod test {
         );
 
         let mut stream_a = instance_a.get_community_stream(community.id()).await?;
-        instance_b
-            .accept_community_invite(community.id(), invite.id())
-            .await?;
+        instance_b.request_join_community(community.id()).await?;
         assert_eq!(
             next_event(&mut stream_a, Duration::from_secs(60)).await?,
-            MessageEventKind::AcceptedCommunityInvite {
+            MessageEventKind::CommunityJoined {
                 community_id: community.id(),
-                invite_id: invite.id(),
                 user: did_b.clone()
             }
         );

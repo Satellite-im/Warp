@@ -33,6 +33,8 @@ pub enum Error {
     InvalidConversion,
     #[error("Attempted community is invalid")]
     InvalidCommunity,
+    #[error("Attempted community invite is invalid")]
+    InvalidCommunityInvite,
     #[error("Path supplied is invalid")]
     InvalidPath,
     #[error("Directory already exist")]
@@ -163,10 +165,14 @@ pub enum Error {
     InvalidGroupId,
     #[error("Invalid Group Member")]
     InvalidGroupMember,
+    #[error("Already Community Member")]
+    AlreadyCommunityMember,
     #[error("Invalid Community Member")]
     InvalidCommunityMember,
     #[error("Invite is invalid")]
     InvalidInvite,
+    #[error("No valid Community invite")]
+    NoValidCommunityInvite,
     #[error("Invite is targeting a different user")]
     CommunityInviteIncorrectUser,
     #[error("Invite is expired")]
