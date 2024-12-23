@@ -248,6 +248,10 @@ impl HotspotUser {
 
 impl HotspotUser {
     pub fn update_identity_document(&mut self, identity_document: IdentityDocument) {
+        if self.identity.modified > identity_document.modified {
+            tracing::warn!(identity = %self.identity.did, "identity is older than previous entry. Ignoring.");
+            return;
+        }
         self.identity = identity_document;
         self.last_seen = Utc::now();
         self.last_seen_timer = Delay::new(Duration::from_secs(2 * 60));
