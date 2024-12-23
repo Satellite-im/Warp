@@ -35,7 +35,6 @@ use super::{document::root::RootDocumentMap, ds_key::DataStoreKey, PeerIdExt};
 use crate::store::{
     conversation::ConversationDocument,
     discovery::Discovery,
-    ecdh_encrypt,
     event_subscription::EventSubscription,
     files::FileStore,
     generate_shared_topic,
@@ -2638,9 +2637,8 @@ impl ConversationInner {
 
         let keypair = self.root.keypair();
 
-        let bytes = ecdh_encrypt(keypair, Some(did), serde_json::to_vec(&request)?)?;
-
-        let payload = PayloadBuilder::new(keypair, bytes)
+        let payload = PayloadBuilder::new(keypair, request)
+            .add_recipient(did)?
             .from_ipfs(&self.ipfs)
             .await?;
 
@@ -2659,7 +2657,7 @@ impl ConversationInner {
             tracing::warn!(%community_id, "Unable to publish to topic");
             self.queue_event(
                 did.clone(),
-                Queue::direct(peer_id, topic.clone(), payload.message(None)?.to_vec()),
+                Queue::direct(peer_id, topic.clone(), payload.to_bytes()?),
             )
             .await;
         }
@@ -2965,19 +2963,18 @@ impl ConversationInner {
             .filter_map(|(a, b)| b.to_peer_id().map(|pk| (a, pk)).ok())
             .collect::<Vec<_>>();
 
-        let event = serde_json::to_vec(&ConversationEvents::DeleteCommunity {
+        let event = ConversationEvents::DeleteCommunity {
             community_id: doc.id(),
-        })?;
+        };
+
+        let keypair = self.root.keypair();
+        let payload = PayloadBuilder::new(keypair, event)
+            .add_recipients(peer_id_list.iter().map(|(did, _)| did))?
+            .from_ipfs(&self.ipfs)
+            .await?;
 
         let main_timer = Instant::now();
         for (recipient, peer_id) in peer_id_list {
-            let keypair = self.root.keypair();
-            let bytes = ecdh_encrypt(keypair, Some(&recipient), &event)?;
-
-            let payload = PayloadBuilder::new(keypair, bytes)
-                .from_ipfs(&self.ipfs)
-                .await?;
-
             let peers = self.ipfs.pubsub_peers(Some(recipient.messaging())).await?;
             let timer = Instant::now();
             let mut time = true;
@@ -2996,11 +2993,7 @@ impl ConversationInner {
                 //      For now we will queue the message if we hit an error
                 self.queue_event(
                     recipient.clone(),
-                    Queue::direct(
-                        peer_id,
-                        recipient.messaging(),
-                        payload.message(None)?.to_vec(),
-                    ),
+                    Queue::direct(peer_id, recipient.messaging(), payload.to_bytes()?),
                 )
                 .await;
                 time = false;
