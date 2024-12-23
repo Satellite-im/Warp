@@ -281,11 +281,11 @@ impl QueueEntry {
 
                         let res = async move {
                             let kp = &entry.keypair;
-                            let payload_bytes = serde_json::to_vec(&entry.item)?;
 
-                            let bytes = ecdh_encrypt(kp, Some(&recipient), payload_bytes)?;
-
-                            let message = PayloadBuilder::new(kp, bytes).build()?;
+                            let message = PayloadBuilder::new(kp, entry.item)
+                                .add_recipient(&recipient)?
+                                .from_ipfs(&entry.ipfs)
+                                .await?;
 
                             let message_bytes = message.to_bytes()?;
 
