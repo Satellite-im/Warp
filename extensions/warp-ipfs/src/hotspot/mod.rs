@@ -140,23 +140,18 @@ impl HotspotTask {
 
         let document = payload.message(None)?;
 
-        let document_did = &document.did;
-
         document.verify()?;
 
-        let user = match self.valid_identities.get_mut(document_did) {
-            Some(fut) => fut,
+        match self.valid_identities.get_mut(&document.did) {
+            Some(fut) => {
+                fut.update_identity_document(document);
+            }
             None => {
-                let user = HotspotUser::new(&self.ipfs, document.clone());
-                self.valid_identities.insert(document_did.clone(), user);
-                self.valid_identities
-                    .get_mut(document_did)
-                    .expect("identity exist due to previous insertion")
+                let document_did = document.did.clone();
+                let user = HotspotUser::new(&self.ipfs, document);
+                self.valid_identities.insert(document_did, user);
             }
         };
-
-        // TODO: Maybe perform in match condition to prevent nesdless update if the document entry is new?
-        user.update_identity_document(document.clone());
 
         // TODO: manually propagate initial message to mesh network
 
