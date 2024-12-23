@@ -219,7 +219,7 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadMessage<M> {
             co_signature: None,
         };
 
-        if !recipients.is_empty() {
+        if !recipients.is_empty() || key.is_some() {
             let keypair = cosigner.unwrap_or(keypair);
             let new_key = generate::<64>();
 
@@ -242,10 +242,6 @@ impl<M: Serialize + DeserializeOwned + Clone> PayloadMessage<M> {
                 };
 
                 new_map.insert(recipient, key_set);
-            }
-
-            if new_map.is_empty() {
-                return Err(Error::EmptyMessage); // TODO: error for arb message being empty
             }
 
             let sender = payload.sender();
