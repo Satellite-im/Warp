@@ -41,7 +41,7 @@ use super::{
         cache::IdentityCache, identity::IdentityDocument, image_dag::get_image,
         root::RootDocumentMap, ResolvedRootDocument, RootDocument,
     },
-    ecdh_decrypt, ecdh_encrypt,
+    ecdh_encrypt,
     event_subscription::EventSubscription,
     payload::PayloadMessage,
     phonebook::PhoneBook,
@@ -530,12 +530,18 @@ impl IdentityStore {
 
                             tracing::info!("Received event from {in_did}");
 
-                            let event = match ecdh_decrypt(store.root_document().keypair(), Some(&in_did), &message.data).and_then(|bytes| {
-                                serde_json::from_slice::<IdentityEvent>(&bytes).map_err(Error::from)
-                            }) {
-                                Ok(e) => e,
+                            let payload: PayloadMessage<IdentityEvent> = match PayloadMessage::from_bytes(&message.data) {
+                                Ok(p) => p,
                                 Err(e) => {
-                                   tracing::error!("Failed to decrypt payload from {in_did}: {e}");
+                                    tracing::error!(error = %e, from = %in_did, "failed to process payload");
+                                    continue;
+                                }
+                            };
+
+                            let event = match payload.message(store.root_document().keypair()) {
+                                Ok(event) => event,
+                                Err(e) => {
+                                    tracing::error!("Failed to decrypt payload from {in_did}: {e}");
                                     continue;
                                 }
                             };
@@ -545,11 +551,9 @@ impl IdentityStore {
                             if let Err(e) = store.process_message(&in_did, event, false).await {
                                tracing::error!("Failed to process identity message from {in_did}: {e}");
                             }
-
-
                         }
                         Some(event) = friend_stream.next() => {
-                            let payload = match PayloadMessage::<Vec<u8>>::from_bytes(&event.data) {
+                            let payload = match PayloadMessage::<RequestResponsePayload>::from_bytes(&event.data) {
                                 Ok(p) => p,
                                 Err(_e) => {
                                     continue;
@@ -568,17 +572,8 @@ impl IdentityStore {
 
                             tracing::info!("Received event from {did}");
 
-                            let msg = match payload.message(None) {
+                            let data = match payload.message(store.root_document.keypair()) {
                                 Ok(m) => m,
-                                Err(_) => {
-                                    continue;
-                                }
-                            };
-
-                            let data = match ecdh_decrypt(store.root_document().keypair(), Some(&did), msg).and_then(|bytes| {
-                                serde_json::from_slice::<RequestResponsePayload>(&bytes).map_err(Error::from)
-                            }) {
-                                Ok(pl) => pl,
                                 Err(e) => {
                                     if let Some(tx) = signal {
                                         let _ = tx.send(Err(e));
@@ -916,9 +911,11 @@ impl IdentityStore {
 
         let event = IdentityEvent::Request { option };
 
-        let payload_bytes = serde_json::to_vec(&event)?;
+        let payload = PayloadBuilder::new(pk_did, event.clone())
+            .add_recipient(out_did)?
+            .await?;
 
-        let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
+        let bytes = payload.to_bytes()?;
 
         tracing::info!(to = %out_did, event = ?event, payload_size = bytes.len(), "Sending event");
 
@@ -941,8 +938,6 @@ impl IdentityStore {
     #[tracing::instrument(skip(self))]
     pub async fn push(&self, out_did: &DID) -> Result<(), Error> {
         let out_peer_id = out_did.to_peer_id()?;
-
-        let pk_did = self.root_document.keypair();
 
         let mut identity = self.own_identity_document().await?;
 
@@ -972,9 +967,11 @@ impl IdentityStore {
             option: ResponseOption::Identity { identity: payload },
         };
 
-        let payload_bytes = serde_json::to_vec(&event)?;
+        let payload = PayloadBuilder::new(kp_did, event.clone())
+            .add_recipient(out_did)?
+            .await?;
 
-        let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
+        let bytes = payload.to_bytes()?;
 
         tracing::info!(to = %out_did, event = ?event, payload_size = bytes.len(), "Sending event");
 
@@ -1027,9 +1024,11 @@ impl IdentityStore {
             },
         };
 
-        let payload_bytes = serde_json::to_vec(&event)?;
+        let payload = PayloadBuilder::new(pk_did, event.clone())
+            .add_recipient(out_did)?
+            .await?;
 
-        let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
+        let bytes = payload.to_bytes()?;
 
         tracing::info!(to = %out_did, event = ?event, payload_size = bytes.len(), "Sending event");
 
@@ -1104,9 +1103,11 @@ impl IdentityStore {
             option: ResponseOption::Metadata { data: metadata },
         };
 
-        let payload_bytes = serde_json::to_vec(&event)?;
+        let payload = PayloadBuilder::new(pk_did, event.clone())
+            .add_recipient(out_did)?
+            .await?;
 
-        let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
+        let bytes = payload.to_bytes()?;
 
         tracing::info!(to = %out_did, event = ?event, payload_size = bytes.len(), "Sending event");
 
@@ -2952,10 +2953,10 @@ impl IdentityStore {
 
         let kp = self.root_document.keypair();
 
-        let payload_bytes = serde_json::to_vec(&payload)?;
-
-        let bytes = ecdh_encrypt(kp, Some(recipient), payload_bytes)?;
-        let message = PayloadBuilder::new(kp, bytes).build()?;
+        let message = PayloadBuilder::new(kp, payload.clone())
+            .add_recipient(recipient)?
+            .from_ipfs(&self.ipfs)
+            .await?;
 
         let message_bytes = message.to_bytes()?;
 
