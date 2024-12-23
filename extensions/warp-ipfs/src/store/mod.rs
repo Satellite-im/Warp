@@ -128,7 +128,6 @@ pub(super) mod topics {
 }
 
 pub(super) mod ds_key {
-
     use rust_ipfs::{Ipfs, Keypair, PeerId, PublicKey};
 
     pub trait DataStoreKey {
@@ -255,6 +254,20 @@ impl DidExt for DID {
         let libp2p_keypair = Keypair::ed25519_from_bytes(bytes)?;
 
         Ok(libp2p_keypair)
+    }
+}
+
+impl DidExt for &DID {
+    fn to_public_key(&self) -> Result<PublicKey, anyhow::Error> {
+        (*self).to_public_key()
+    }
+
+    fn to_peer_id(&self) -> Result<PeerId, anyhow::Error> {
+        (*self).to_peer_id()
+    }
+
+    fn to_keypair(&self) -> Result<Keypair, anyhow::Error> {
+        (*self).to_keypair()
     }
 }
 
