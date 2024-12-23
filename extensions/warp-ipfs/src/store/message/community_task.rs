@@ -1226,30 +1226,32 @@ impl CommunityTask {
         let event = match self.keystore.get_latest(keypair, &sender) {
             Ok(key) => data.message_from_key(&key)?,
             Err(Error::PublicKeyDoesntExist) => {
-                match data.message(keypair) {
-                    Ok(message) => message,
-                    _ => {
-                        // If we are not able to get the latest key from the store, this is because we are still awaiting on the response from the key exchange
-                        // So what we should so instead is set aside the payload until we receive the key exchange then attempt to process it again
+                // match data.message(keypair) {
+                //     Ok(message) => {
+                //         message
+                //     }
+                //     _ => {
+                // If we are not able to get the latest key from the store, this is because we are still awaiting on the response from the key exchange
+                // So what we should so instead is set aside the payload until we receive the key exchange then attempt to process it again
 
-                        // Note: We can set aside the data without the payload being owned directly due to the data already been verified
-                        //       so we can own the data directly without worrying about the lifetime
-                        //       however, we may want to eventually validate the data to ensure it havent been tampered in some way
-                        //       while waiting for the response.
-                        let bytes = data.to_bytes()?;
-                        self.pending_key_exchange
-                            .entry(sender)
-                            .or_default()
-                            .push((bytes, false));
+                // Note: We can set aside the data without the payload being owned directly due to the data already been verified
+                //       so we can own the data directly without worrying about the lifetime
+                //       however, we may want to eventually validate the data to ensure it havent been tampered in some way
+                //       while waiting for the response.
+                let bytes = data.to_bytes()?;
+                self.pending_key_exchange
+                    .entry(sender)
+                    .or_default()
+                    .push((bytes, false));
 
-                        // Maybe send a request? Although we could, we should check to determine if one was previously sent or queued first,
-                        // but for now we can leave this commented until the queue is removed and refactored.
-                        // _ = self.request_key(id, &data.sender()).await;
+                // Maybe send a request? Although we could, we should check to determine if one was previously sent or queued first,
+                // but for now we can leave this commented until the queue is removed and refactored.
+                // _ = self.request_key(id, &data.sender()).await;
 
-                        // Note: We will mark this as `Ok` since this is pending request to be resolved
-                        return Ok(());
-                    }
-                }
+                // Note: We will mark this as `Ok` since this is pending request to be resolved
+                return Ok(());
+                //     }
+                // }
             }
             Err(e) => {
                 tracing::warn!(id = %id, sender = %data.sender(), error = %e, "Failed to obtain key");
