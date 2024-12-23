@@ -935,9 +935,8 @@ impl ConversationTask {
 
         let topic = self.document.exchange_topic(identity);
 
-        let bytes = ecdh_encrypt(keypair, Some(identity), serde_json::to_vec(&request)?)?;
-
-        let payload = PayloadBuilder::new(keypair, bytes)
+        let payload = PayloadBuilder::new(keypair, request)
+            .add_recipient(identity)?
             .from_ipfs(&self.ipfs)
             .await?;
 
@@ -3495,9 +3494,8 @@ async fn process_request_response_event(
 
                 let topic = this.document.exchange_topic(&sender);
 
-                let bytes = ecdh_encrypt(keypair, Some(&sender), serde_json::to_vec(&response)?)?;
-
-                let payload = PayloadBuilder::new(keypair, bytes)
+                let payload = PayloadBuilder::new(keypair, response)
+                    .add_recipient(&sender)?
                     .from_ipfs(&this.ipfs)
                     .await?;
 
