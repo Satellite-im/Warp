@@ -28,7 +28,7 @@ use warp::raygun::{
     RayGunEventKind,
 };
 use warp::{
-    crypto::{cipher::Cipher, generate},
+    crypto::generate,
     error::Error,
     raygun::{
         ConversationType, GroupPermission, ImplGroupPermissions, MessageEventKind, PinState,
@@ -233,7 +233,7 @@ pub struct ConversationTask {
     file: FileStore,
     identity: IdentityStore,
     discovery: Discovery,
-    pending_key_exchange: IndexMap<DID, Vec<(Vec<u8>, bool)>>,
+    pending_key_exchange: IndexMap<DID, Vec<(Bytes, bool)>>,
     document: ConversationDocument,
     keystore: Keystore,
 
@@ -916,15 +916,14 @@ impl ConversationTask {
         did_key: &DID,
         event: ConversationEvents,
     ) -> Result<(), Error> {
-        let event = serde_json::to_vec(&event)?;
-
         let keypair = self.root.keypair();
 
-        let bytes = ecdh_encrypt(keypair, Some(did_key), &event)?;
-
-        let payload = PayloadBuilder::new(keypair, bytes)
+        let payload = PayloadBuilder::new(keypair, event)
+            .add_recipient(did_key)?
             .from_ipfs(&self.ipfs)
             .await?;
+
+        let bytes = payload.to_bytes()?;
 
         let peer_id = did_key.to_peer_id()?;
         let peers = self.ipfs.pubsub_peers(Some(did_key.messaging())).await?;
@@ -935,19 +934,14 @@ impl ConversationTask {
             || (peers.contains(&peer_id)
                 && self
                     .ipfs
-                    .pubsub_publish(did_key.messaging(), payload.to_bytes()?)
+                    .pubsub_publish(did_key.messaging(), bytes.clone())
                     .await
                     .is_err())
         {
             tracing::warn!(id=%&self.conversation_id, "Unable to publish to topic. Queuing event");
             self.queue_event(
                 did_key.clone(),
-                QueueItem::direct(
-                    None,
-                    peer_id,
-                    did_key.messaging(),
-                    payload.message(None)?.to_vec(),
-                ),
+                QueueItem::direct(None, peer_id, did_key.messaging(), bytes),
             )
             .await;
             time = false;
@@ -1043,7 +1037,7 @@ impl ConversationTask {
     }
 
     async fn process_msg_event(&mut self, msg: Message) -> Result<(), Error> {
-        let data = PayloadMessage::<Vec<u8>>::from_bytes(&msg.data)?;
+        let data = PayloadMessage::<MessagingEvents>::from_bytes(&msg.data)?;
         let sender = data.sender().to_did()?;
 
         let keypair = self.root.keypair();
@@ -1052,7 +1046,7 @@ impl ConversationTask {
 
         let id = self.conversation_id;
 
-        let bytes = match self.document.conversation_type() {
+        let event = match self.document.conversation_type() {
             ConversationType::Direct => {
                 let list = self.document.recipients();
 
@@ -1066,46 +1060,51 @@ impl ConversationTask {
                     return Err(Error::IdentityDoesntExist);
                 };
 
-                ecdh_decrypt(keypair, Some(member), data.message(None)?)?
+                if &sender != *member {
+                    return Err(Error::IdentityDoesntExist);
+                }
+
+                data.message(keypair)?
             }
             ConversationType::Group => {
-                let key = match self.keystore.get_latest(keypair, &sender) {
-                    Ok(key) => key,
+                let bytes = data.to_bytes()?;
+                match self.keystore.get_latest(keypair, &sender) {
+                    Ok(key) => data.message_from_key(&key)?,
                     Err(Error::PublicKeyDoesntExist) => {
-                        // If we are not able to get the latest key from the store, this is because we are still awaiting on the response from the key exchange
-                        // So what we should so instead is set aside the payload until we receive the key exchange then attempt to process it again
+                        // Lets first try to get the message from the payload. If we are not apart of the list of recipients, we will then
+                        // queue the payload itself.
+                        match data.message(keypair) {
+                            Ok(message) => message,
+                            _ => {
+                                // If we are not able to get the latest key from the store, this is because we are still awaiting on the response from the key exchange
+                                // So what we should so instead is set aside the payload until we receive the key exchange then attempt to process it again
 
-                        // Note: We can set aside the data without the payload being owned directly due to the data already been verified
-                        //       so we can own the data directly without worrying about the lifetime
-                        //       however, we may want to eventually validate the data to ensure it havent been tampered in some way
-                        //       while waiting for the response.
+                                // Note: We can set aside the data without the payload being owned directly due to the data already been verified
+                                //       so we can own the data directly without worrying about the lifetime
+                                //       however, we may want to eventually validate the data to ensure it havent been tampered in some way
+                                //       while waiting for the response.
 
-                        self.pending_key_exchange
-                            .entry(sender)
-                            .or_default()
-                            .push((data.message(None)?, false));
+                                self.pending_key_exchange
+                                    .entry(sender)
+                                    .or_default()
+                                    .push((bytes, false));
 
-                        // Maybe send a request? Although we could, we should check to determine if one was previously sent or queued first,
-                        // but for now we can leave this commented until the queue is removed and refactored.
-                        // _ = self.request_key(id, &data.sender()).await;
+                                // Maybe send a request? Although we could, we should check to determine if one was previously sent or queued first,
+                                // but for now we can leave this commented until the queue is removed and refactored.
+                                // _ = self.request_key(id, &data.sender()).await;
 
-                        // Note: We will mark this as `Ok` since this is pending request to be resolved
-                        return Ok(());
+                                // Note: We will mark this as `Ok` since this is pending request to be resolved
+                                return Ok(());
+                            }
+                        }
                     }
                     Err(e) => {
                         tracing::warn!(id = %id, sender = %data.sender(), error = %e, "Failed to obtain key");
                         return Err(e);
                     }
-                };
-
-                Cipher::direct_decrypt(&data.message(None)?, &key)?
+                }
             }
         };
-
-        let event = serde_json::from_slice::<MessagingEvents>(&bytes).map_err(|e| {
-            tracing::warn!(id = %id, sender = %data.sender(), error = %e, "Failed to deserialize message");
-            e
-        })?;
 
         message_event(self, &sender, event).await?;
 
@@ -1211,11 +1210,12 @@ impl ConversationTask {
 
         let keypair = self.root.keypair();
 
-        let bytes = ecdh_encrypt(keypair, Some(did), serde_json::to_vec(&request)?)?;
-
-        let payload = PayloadBuilder::new(keypair, bytes)
+        let payload = PayloadBuilder::new(keypair, request)
+            .add_recipient(did)?
             .from_ipfs(&self.ipfs)
             .await?;
+
+        let bytes = payload.to_bytes()?;
 
         let topic = conversation.exchange_topic(did);
 
@@ -1225,14 +1225,14 @@ impl ConversationTask {
             || (peers.contains(&peer_id)
                 && self
                     .ipfs
-                    .pubsub_publish(topic.clone(), payload.to_bytes()?)
+                    .pubsub_publish(topic.clone(), bytes.clone())
                     .await
                     .is_err())
         {
             tracing::warn!(id = %self.conversation_id, "Unable to publish to topic");
             self.queue_event(
                 did.clone(),
-                QueueItem::direct(None, peer_id, topic.clone(), payload.message(None)?),
+                QueueItem::direct(None, peer_id, topic.clone(), bytes),
             )
             .await;
         }
@@ -1850,14 +1850,14 @@ impl ConversationTask {
     }
 
     pub async fn send_message_event(&self, event: MessagingEvents) -> Result<(), Error> {
-        let event = serde_json::to_vec(&event)?;
-
         let key = self.conversation_key(None)?;
 
-        let bytes = Cipher::direct_encrypt(&event, &key)?;
+        let recipients = self.document.recipients();
 
-        let payload = PayloadBuilder::new(self.root.keypair(), bytes)
+        let payload = PayloadBuilder::new(self.root.keypair(), event)
+            .set_key(key)
             .from_ipfs(&self.ipfs)
+            .add_recipients(recipients)?
             .await?;
 
         let peers = self
@@ -2581,28 +2581,34 @@ impl ConversationTask {
         event: MessagingEvents,
         queue: bool,
     ) -> Result<(), Error> {
-        let event = serde_json::to_vec(&event)?;
         let keypair = self.root.keypair();
         let own_did = self.identity.did_key();
 
+        let recipients = self.document.recipients();
+
+        let participants = recipients
+            .iter()
+            .filter(|did| own_did.ne(did))
+            .collect::<Vec<_>>();
+
         let key = self.conversation_key(None)?;
 
-        let bytes = Cipher::direct_encrypt(&event, &key)?;
-
-        let payload = PayloadBuilder::new(keypair, bytes)
+        let payload = PayloadBuilder::new(keypair, event)
+            .add_recipients(participants)?
+            // Note: We should probably not use the conversation key here but have each payload message be encrypted with a unique key while the underlining message
+            //       could be encrypted with the conversation key
+            // TODO: Determine if we should use the conversation key at the payload level.
+            .set_key(key)
             .from_ipfs(&self.ipfs)
             .await?;
+
+        let payload_bytes = payload.to_bytes()?;
 
         let peers = self.ipfs.pubsub_peers(Some(self.document.topic())).await?;
 
         let mut can_publish = false;
 
-        for recipient in self
-            .document
-            .recipients()
-            .iter()
-            .filter(|did| own_did.ne(did))
-        {
+        for recipient in recipients.iter().filter(|did| own_did.ne(did)) {
             let peer_id = recipient.to_peer_id()?;
 
             // We want to confirm that there is atleast one peer subscribed before attempting to send a message
@@ -2618,7 +2624,7 @@ impl ConversationTask {
                                 message_id,
                                 peer_id,
                                 self.document.topic(),
-                                payload.message(None)?,
+                                payload_bytes.clone(),
                             ),
                         )
                         .await;
@@ -3340,13 +3346,11 @@ async fn process_request_response_event(
     let keypair = &this.root.keypair().clone();
     let own_did = this.identity.did_key();
 
-    let payload = PayloadMessage::<Vec<u8>>::from_bytes(&req.data)?;
+    let payload = PayloadMessage::<ConversationRequestResponse>::from_bytes(&req.data)?;
 
     let sender = payload.sender().to_did()?;
 
-    let data = ecdh_decrypt(keypair, Some(&sender), payload.message(None)?)?;
-
-    let event = serde_json::from_slice::<ConversationRequestResponse>(&data)?;
+    let event = payload.message(keypair)?;
 
     tracing::debug!(id=%this.conversation_id, ?event, "Event received");
     match event {
@@ -3391,9 +3395,8 @@ async fn process_request_response_event(
 
                 let topic = this.document.exchange_topic(&sender);
 
-                let bytes = ecdh_encrypt(keypair, Some(&sender), serde_json::to_vec(&response)?)?;
-
-                let payload = PayloadBuilder::new(keypair, bytes)
+                let payload = PayloadBuilder::new(keypair, response)
+                    .add_recipient(&sender)?
                     .from_ipfs(&this.ipfs)
                     .await?;
 
@@ -3411,7 +3414,7 @@ async fn process_request_response_event(
                     || (peers.contains(&peer_id)
                         && this
                             .ipfs
-                            .pubsub_publish(topic.clone(), bytes)
+                            .pubsub_publish(topic.clone(), bytes.clone())
                             .await
                             .is_err())
                 {
@@ -3419,7 +3422,7 @@ async fn process_request_response_event(
                     // TODO
                     this.queue_event(
                         sender.clone(),
-                        QueueItem::direct(None, peer_id, topic.clone(), payload.message(None)?),
+                        QueueItem::direct(None, peer_id, topic.clone(), bytes.clone()),
                     )
                     .await;
                 }
@@ -3495,8 +3498,8 @@ async fn process_pending_payload(this: &mut ConversationTask) {
         let event_fn = || {
             let keypair = root.keypair();
             let key = store.get_latest(keypair, &sender)?;
-            let data = Cipher::direct_decrypt(&data, &key)?;
-            let event = serde_json::from_slice(&data)?;
+            let payload = PayloadMessage::<MessagingEvents>::from_bytes(&data)?;
+            let event = payload.message_from_key(&key)?;
             Ok::<_, Error>(event)
         };
 
@@ -3518,14 +3521,12 @@ async fn process_conversation_event(
     this: &mut ConversationTask,
     message: Message,
 ) -> Result<(), Error> {
-    let payload = PayloadMessage::<Vec<u8>>::from_bytes(&message.data)?;
+    let payload = PayloadMessage::<MessagingEvents>::from_bytes(&message.data)?;
     let sender = payload.sender().to_did()?;
 
     let key = this.conversation_key(Some(&sender))?;
 
-    let data = Cipher::direct_decrypt(&payload.message(None)?, &key)?;
-
-    let event = match serde_json::from_slice::<MessagingEvents>(&data)? {
+    let event = match payload.message_from_key(&key)? {
         event @ MessagingEvents::Event { .. } => event,
         _ => return Err(Error::Other),
     };
@@ -3563,12 +3564,13 @@ struct QueueItem {
     m_id: Option<Uuid>,
     peer: PeerId,
     topic: String,
-    data: Vec<u8>,
+    data: Bytes,
     sent: bool,
 }
 
 impl QueueItem {
-    pub fn direct(m_id: Option<Uuid>, peer: PeerId, topic: String, data: Vec<u8>) -> Self {
+    pub fn direct(m_id: Option<Uuid>, peer: PeerId, topic: String, data: impl Into<Bytes>) -> Self {
+        let data = data.into();
         QueueItem {
             m_id,
             peer,
@@ -3582,7 +3584,6 @@ impl QueueItem {
 //TODO: Replace
 async fn process_queue(this: &mut ConversationTask) {
     let mut changed = false;
-    let keypair = &this.root.keypair().clone();
     for (did, items) in this.queue.iter_mut() {
         let Ok(peer_id) = did.to_peer_id() else {
             continue;
@@ -3616,22 +3617,7 @@ async fn process_queue(this: &mut ConversationTask) {
                 continue;
             }
 
-            let payload = match PayloadBuilder::<_>::new(keypair, data.clone())
-                .from_ipfs(&this.ipfs)
-                .await
-            {
-                Ok(p) => p,
-                Err(_e) => {
-                    // tracing::warn!(error = %_e, "unable to build payload")
-                    continue;
-                }
-            };
-
-            let Ok(bytes) = payload.to_bytes() else {
-                continue;
-            };
-
-            if let Err(e) = this.ipfs.pubsub_publish(topic.clone(), bytes).await {
+            if let Err(e) = this.ipfs.pubsub_publish(topic.clone(), data.clone()).await {
                 tracing::error!("Error publishing to topic: {e}");
                 continue;
             }
