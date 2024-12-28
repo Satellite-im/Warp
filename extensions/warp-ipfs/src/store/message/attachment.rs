@@ -9,7 +9,7 @@ use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 use futures::stream::SelectAll;
 use futures::{stream, FutureExt, SinkExt, Stream, StreamExt};
-use rust_ipfs::{Ipfs, Keypair};
+use rust_ipfs::Keypair;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -24,7 +24,6 @@ use warp::raygun::{AttachmentKind, Location, LocationKind, MessageType};
 type AOneShot = (MessageDocument, oneshot::Sender<Result<(), Error>>);
 type ProgressedStream = BoxStream<'static, (LocationKind, Progression, Option<File>)>;
 pub struct AttachmentStream {
-    ipfs: Ipfs,
     keypair: Keypair,
     local_did: DID,
     attachment_tx: futures::channel::mpsc::Sender<AOneShot>,
@@ -52,7 +51,6 @@ enum AttachmentState {
 
 impl AttachmentStream {
     pub fn new(
-        ipfs: &Ipfs,
         keypair: &Keypair,
         local_did: &DID,
         file_store: &FileStore,
@@ -61,7 +59,6 @@ impl AttachmentStream {
         attachment_tx: futures::channel::mpsc::Sender<AOneShot>,
     ) -> Self {
         Self {
-            ipfs: ipfs.clone(),
             keypair: keypair.clone(),
             local_did: local_did.clone(),
             file_store: file_store.clone(),
@@ -455,7 +452,6 @@ impl Stream for AttachmentStream {
                             let reply_id = this.reply_to;
                             let message_id = this.message_id;
                             let local_did = this.local_did.clone();
-                            let ipfs = this.ipfs.clone();
                             let keystore = this.keystore.clone();
                             let keypair = this.keypair.clone();
                             let mut atx = this.attachment_tx.clone();
@@ -471,13 +467,8 @@ impl Stream for AttachmentStream {
                                 }
                                 message.set_replied(reply_id);
 
-                                let message = MessageDocument::new(
-                                    &ipfs,
-                                    &keypair,
-                                    message,
-                                    keystore.as_ref(),
-                                )
-                                .await?;
+                                let message =
+                                    MessageDocument::new(&keypair, message, keystore.as_ref())?;
 
                                 let (tx, rx) = oneshot::channel();
                                 _ = atx.send((message, tx)).await;
