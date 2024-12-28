@@ -20,14 +20,13 @@ use std::{
 use futures::Stream;
 use std::io::{self, Cursor};
 
+use async_rt::AbortableJoinHandle;
 #[allow(unused_imports)]
 use std::{io::ErrorKind, path::Path};
-
 use tokio::sync::Mutex;
 use warp::{constellation::file::FileType, error::Error};
 use web_time::Instant;
 
-use crate::rt::{Executor, LocalExecutor};
 use crate::utils::ByteCollection;
 use crate::{store::document::image_dag::ImageDag, utils::ExtensionType};
 
@@ -56,13 +55,12 @@ impl Default for ThumbnailId {
 }
 
 type TaskMap =
-    BTreeMap<ThumbnailId, crate::rt::JoinHandle<Result<(ExtensionType, IpfsPath, Bytes), Error>>>;
+    BTreeMap<ThumbnailId, AbortableJoinHandle<Result<(ExtensionType, IpfsPath, Bytes), Error>>>;
 
 #[derive(Clone)]
 pub struct ThumbnailGenerator {
     ipfs: Ipfs,
     tasks: Arc<Mutex<TaskMap>>,
-    executor: LocalExecutor,
 }
 
 impl ThumbnailGenerator {
@@ -70,7 +68,6 @@ impl ThumbnailGenerator {
         Self {
             ipfs: ipfs.clone(),
             tasks: Arc::default(),
-            executor: LocalExecutor,
         }
     }
 
@@ -92,7 +89,7 @@ impl ThumbnailGenerator {
 
         let ipfs = self.ipfs.clone();
 
-        let handle = self.executor.spawn(async move {
+        let handle = async_rt::task::spawn_abortable(async move {
             let instance = Instant::now();
             //TODO: Read file header to determine real file type for anything like images, videos and documents.
             let extension = own_path
@@ -175,7 +172,7 @@ impl ThumbnailGenerator {
 
         let ipfs = self.ipfs.clone();
 
-        let handle = self.executor.spawn(async move {
+        let handle = async_rt::task::spawn_abortable(async move {
             let instant = Instant::now();
 
             let extension = name
@@ -248,7 +245,7 @@ impl ThumbnailGenerator {
 
         let ipfs = self.ipfs.clone();
 
-        let handle = self.executor.spawn(async move {
+        let handle = async_rt::task::spawn_abortable(async move {
             let instance = Instant::now();
 
             let extension = name

@@ -1,4 +1,4 @@
-use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
+use async_rt::AbortableJoinHandle;
 use futures::{
     channel::{
         mpsc::{channel, Receiver, Sender},
@@ -31,7 +31,6 @@ pub struct EventSubscription<T: Clone + Debug + Send + 'static> {
 impl<T: Clone + Debug + Send + 'static> EventSubscription<T> {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        let executor = LocalExecutor;
         let (tx, rx) = futures::channel::mpsc::channel(0);
 
         let mut task = EventSubscriptionTask {
@@ -41,7 +40,7 @@ impl<T: Clone + Debug + Send + 'static> EventSubscription<T> {
             rx,
         };
 
-        let _handle = executor.spawn_abortable(async move { task.run().await });
+        let _handle = async_rt::task::spawn_abortable(async move { task.run().await });
 
         Self { tx, _handle }
     }
