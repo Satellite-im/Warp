@@ -1,3 +1,4 @@
+use async_rt::AbortableJoinHandle;
 use chrono::Utc;
 use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{future::BoxFuture, FutureExt, StreamExt};
@@ -26,7 +27,6 @@ use super::{
     },
     subscription_stream::Subscriptions,
 };
-use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
 use crate::store::topics::IDENTITY_ANNOUNCEMENT;
 use crate::store::{
     document::identity::IdentityDocument,
@@ -94,7 +94,6 @@ impl ShuttleServer {
         gc_trigger: Option<GCTrigger>,
         ext: bool,
     ) -> anyhow::Result<Self> {
-        let executor = LocalExecutor;
         let path = path.map(|p| p.as_ref().to_path_buf());
 
         let local_peer_id = keypair.public().to_peer_id();
@@ -242,7 +241,7 @@ impl ShuttleServer {
             identity_announcement,
         };
 
-        let _handle = executor.spawn_abortable(async move {
+        let _handle = async_rt::task::spawn_abortable(async move {
             server_event.run().await;
         });
 

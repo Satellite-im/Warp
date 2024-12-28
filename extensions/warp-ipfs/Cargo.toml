@@ -38,6 +38,8 @@ image = { workspace = true }
 derive_more.workspace = true
 mediatype.workspace = true
 
+async-rt = "0.1.2"
+
 bincode.workspace = true
 bytes.workspace = true
 
