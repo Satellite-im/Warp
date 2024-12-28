@@ -58,18 +58,10 @@ impl DirectoryDocument {
 
         document.items = Some(cid);
 
-        if let Some(cid) = root
+        document.thumbnail = root
             .thumbnail_reference()
             .and_then(|refs| refs.parse::<IpfsPath>().ok())
-            .and_then(|path| path.root().cid().copied())
-        {
-            document.thumbnail = ipfs
-                .repo()
-                .contains(&cid)
-                .await
-                .unwrap_or_default()
-                .then_some(cid)
-        }
+            .and_then(|path| path.root().cid().copied());
 
         Ok(document)
     }
@@ -141,7 +133,7 @@ impl ItemDocument {
     pub async fn new(ipfs: &Ipfs, item: &Item) -> Result<ItemDocument, Error> {
         let document = match item {
             Item::File(file) => {
-                let document = FileDocument::new(ipfs, file).await?;
+                let document = FileDocument::new(file);
                 let cid = ipfs.put_dag(document).await?;
                 ItemDocument::File(cid)
             }
@@ -198,7 +190,7 @@ pub struct FileDocument {
 }
 
 impl FileDocument {
-    pub async fn new(ipfs: &Ipfs, file: &File) -> Result<FileDocument, Error> {
+    pub fn new(file: &File) -> FileDocument {
         let mut document = FileDocument {
             name: file.name(),
             size: file.size(),
@@ -212,33 +204,18 @@ impl FileDocument {
             thumbnail: None,
         };
 
-        if let Some(cid) = file
+        document.reference = file
             .reference()
             .and_then(|refs| refs.parse::<IpfsPath>().ok())
             .and_then(|path| path.root().cid().copied())
-        {
-            document.reference = ipfs
-                .repo()
-                .contains(&cid)
-                .await
-                .unwrap_or_default()
-                .then(|| cid.to_string())
-        }
+            .map(|cid| cid.to_string());
 
-        if let Some(cid) = file
+        document.thumbnail = file
             .thumbnail_reference()
             .and_then(|refs| refs.parse::<IpfsPath>().ok())
-            .and_then(|path| path.root().cid().copied())
-        {
-            document.thumbnail = ipfs
-                .repo()
-                .contains(&cid)
-                .await
-                .unwrap_or_default()
-                .then_some(cid)
-        }
+            .and_then(|path| path.root().cid().copied());
 
-        Ok(document)
+        document
     }
 
     pub fn to_attachment(&self) -> Result<FileAttachmentDocument, Error> {
