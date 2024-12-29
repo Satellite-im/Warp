@@ -1,5 +1,4 @@
 use bytes::Bytes;
-use chrono::Utc;
 use either::Either;
 use futures::channel::oneshot;
 use futures::stream::BoxStream;
@@ -39,7 +38,7 @@ use web_time::Instant;
 
 // use crate::config;
 // use crate::shuttle::message::client::MessageCommand;
-use crate::store::conversation::message::MessageDocument;
+use crate::store::conversation::message::{MessageDocument, MessageDocumentBuilder};
 use crate::store::discovery::Discovery;
 use crate::store::document::files::FileDocument;
 use crate::store::document::image_dag::ImageDag;
@@ -64,7 +63,7 @@ use crate::{
         payload::{PayloadBuilder, PayloadMessage},
         ConversationRequestKind, ConversationRequestResponse, ConversationResponseKind,
         ConversationUpdateKind, DidExt, MessagingEvents, PeerIdExt, MAX_CONVERSATION_DESCRIPTION,
-        MAX_MESSAGE_SIZE, MAX_REACTIONS, MIN_MESSAGE_SIZE,
+        MAX_MESSAGE_SIZE, MIN_MESSAGE_SIZE,
     },
 };
 
@@ -1319,15 +1318,15 @@ impl ConversationTask {
         let keypair = self.root.keypair();
         let own_did = self.identity.did_key();
 
-        let mut message = warp::raygun::Message::default();
-        message.set_conversation_id(self.conversation_id);
-        message.set_sender(own_did.clone());
-        message.set_lines(messages.clone());
-
-        let message_id = message.id();
         let keystore = pubkey_or_keystore(&*self)?;
 
-        let message = MessageDocument::new(keypair, message, keystore.as_ref())?;
+        let message = MessageDocumentBuilder::new(keypair, keystore.as_ref())
+            .set_conversation_id(self.conversation_id)
+            .set_sender(own_did.clone())
+            .set_message(messages.clone())?
+            .build()?;
+
+        let message_id = message.id;
 
         let _message_cid = self
             .document
@@ -1415,24 +1414,11 @@ impl ConversationTask {
             .get_message_document(&self.ipfs, message_id)
             .await?;
 
-        let mut message = message_document
-            .resolve(&self.ipfs, keypair, true, keystore.as_ref())
-            .await?;
-
-        let sender = message.sender();
-
-        let own_did = &self.identity.did_key();
-
-        if sender.ne(own_did) {
+        if message_document.sender() != self.identity.did_key() {
             return Err(Error::InvalidMessage);
         }
 
-        message.lines_mut().clone_from(&messages);
-        message.set_modified(Utc::now());
-
-        message_document
-            .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
-            .await?;
+        message_document = message_document.set_message(keypair, keystore.as_ref(), &messages)?;
 
         let nonce = message_document.nonce_from_message()?;
         let signature = message_document.signature.expect("message to be signed");
@@ -1517,15 +1503,14 @@ impl ConversationTask {
 
         let own_did = self.identity.did_key();
 
-        let mut message = warp::raygun::Message::default();
-        message.set_conversation_id(self.conversation_id);
-        message.set_sender(own_did.clone());
-        message.set_lines(messages);
-        message.set_replied(Some(message_id));
-
         let keystore = pubkey_or_keystore(&*self)?;
 
-        let message = MessageDocument::new(keypair, message, keystore.as_ref())?;
+        let message = MessageDocumentBuilder::new(keypair, keystore.as_ref())
+            .set_conversation_id(self.conversation_id)
+            .set_sender(own_did.clone())
+            .set_replied(message_id)
+            .set_message(messages)?
+            .build()?;
 
         let message_id = message.id;
 
@@ -1612,47 +1597,34 @@ impl ConversationTask {
 
     pub async fn pin_message(&mut self, message_id: Uuid, state: PinState) -> Result<(), Error> {
         let tx = self.event_broadcast.clone();
-
-        let keypair = self.root.keypair();
         let own_did = self.identity.did_key();
-
-        let keystore = pubkey_or_keystore(&*self)?;
-
         let mut message_document = self
             .document
             .get_message_document(&self.ipfs, message_id)
             .await?;
 
-        let mut message = message_document
-            .resolve(&self.ipfs, keypair, true, keystore.as_ref())
-            .await?;
-
         let event = match state {
             PinState::Pin => {
-                if message.pinned() {
+                if message_document.pinned() {
                     return Ok(());
                 }
-                *message.pinned_mut() = true;
+                message_document = message_document.set_pin(true);
                 MessageEventKind::MessagePinned {
                     conversation_id: self.conversation_id,
                     message_id,
                 }
             }
             PinState::Unpin => {
-                if !message.pinned() {
+                if !message_document.pinned() {
                     return Ok(());
                 }
-                *message.pinned_mut() = false;
+                message_document = message_document.set_pin(false);
                 MessageEventKind::MessageUnpinned {
                     conversation_id: self.conversation_id,
                     message_id,
                 }
             }
         };
-
-        message_document
-            .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
-            .await?;
 
         let _message_cid = self
             .document
@@ -1701,54 +1673,26 @@ impl ConversationTask {
     ) -> Result<(), Error> {
         let tx = self.event_broadcast.clone();
 
-        let keypair = self.root.keypair();
-
         let own_did = self.identity.did_key();
-
-        let keystore = pubkey_or_keystore(&*self)?;
 
         let mut message_document = self
             .document
             .get_message_document(&self.ipfs, message_id)
             .await?;
 
-        let mut message = message_document
-            .resolve(&self.ipfs, keypair, true, keystore.as_ref())
-            .await?;
-
         // let recipients = self.document.recipients();
-
-        let reactions = message.reactions_mut();
 
         let _message_cid;
 
         match state {
             ReactionState::Add => {
-                if reactions.len() >= MAX_REACTIONS {
-                    return Err(Error::InvalidLength {
-                        context: "reactions".into(),
-                        current: reactions.len(),
-                        minimum: None,
-                        maximum: Some(MAX_REACTIONS),
-                    });
-                }
-
-                let entry = reactions.entry(emoji.clone()).or_default();
-
-                if entry.contains(&own_did) {
-                    return Err(Error::ReactionExist);
-                }
-
-                entry.push(own_did.clone());
-
-                message_document
-                    .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
-                    .await?;
+                message_document = message_document.add_reaction(&emoji, own_did.clone())?;
 
                 _message_cid = self
                     .document
                     .update_message_document(&self.ipfs, &message_document)
                     .await?;
+
                 self.set_document().await?;
 
                 _ = tx.send(MessageEventKind::MessageReactionAdded {
@@ -1759,25 +1703,7 @@ impl ConversationTask {
                 });
             }
             ReactionState::Remove => {
-                match reactions.entry(emoji.clone()) {
-                    indexmap::map::Entry::Occupied(mut e) => {
-                        let list = e.get_mut();
-
-                        if !list.contains(&own_did) {
-                            return Err(Error::ReactionDoesntExist);
-                        }
-
-                        list.retain(|did| did != &own_did);
-                        if list.is_empty() {
-                            e.swap_remove();
-                        }
-                    }
-                    indexmap::map::Entry::Vacant(_) => return Err(Error::ReactionDoesntExist),
-                };
-
-                message_document
-                    .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
-                    .await?;
+                message_document = message_document.remove_reaction(&emoji, own_did.clone())?;
 
                 _message_cid = self
                     .document
@@ -2533,7 +2459,6 @@ impl ConversationTask {
 
         let attachment = message
             .attachments()
-            .iter()
             .find(|attachment| attachment.name == file)
             .ok_or(Error::FileNotFound)?;
 
@@ -2565,7 +2490,6 @@ impl ConversationTask {
 
         let attachment = message
             .attachments()
-            .iter()
             .find(|attachment| attachment.name == file)
             .ok_or(Error::FileNotFound)?;
 
@@ -2776,9 +2700,7 @@ async fn message_event(
 
     match events {
         MessagingEvents::New { message } => {
-            if !message.verify() {
-                return Err(Error::InvalidMessage);
-            }
+            message.verify()?;
 
             if this.document.id != message.conversation_id {
                 return Err(Error::InvalidConversation);
@@ -2854,9 +2776,7 @@ async fn message_event(
                 .get_message_document(&this.ipfs, message_id)
                 .await?;
 
-            let mut message = message_document
-                .resolve(&this.ipfs, keypair, true, keystore.as_ref())
-                .await?;
+            message_document.verify()?;
 
             let lines_value_length: usize = lines
                 .iter()
@@ -2879,21 +2799,14 @@ async fn message_event(
                 });
             }
 
-            *message.lines_mut() = lines;
-            message.set_modified(modified);
-
-            let sender = message.sender().to_owned();
-
-            message_document
-                .update(
-                    &this.ipfs,
-                    keypair,
-                    message,
-                    (!signature.is_empty() && sender.ne(&own_did)).then_some(signature),
-                    keystore.as_ref(),
-                    Some(nonce.as_slice()),
-                )
-                .await?;
+            message_document = message_document.set_message_with_nonce(
+                keypair,
+                keystore.as_ref(),
+                modified,
+                lines,
+                (!signature.is_empty() && sender.ne(&own_did)).then_some(signature),
+                Some(nonce.as_slice()),
+            )?;
 
             this.document
                 .update_message_document(&this.ipfs, &message_document)
@@ -2948,36 +2861,28 @@ async fn message_event(
                 .get_message_document(&this.ipfs, message_id)
                 .await?;
 
-            let mut message = message_document
-                .resolve(&this.ipfs, keypair, true, keystore.as_ref())
-                .await?;
-
             let event = match state {
                 PinState::Pin => {
-                    if message.pinned() {
+                    if message_document.pinned() {
                         return Ok(());
                     }
-                    *message.pinned_mut() = true;
+                    message_document = message_document.set_pin(true);
                     MessageEventKind::MessagePinned {
                         conversation_id,
                         message_id,
                     }
                 }
                 PinState::Unpin => {
-                    if !message.pinned() {
+                    if !message_document.pinned() {
                         return Ok(());
                     }
-                    *message.pinned_mut() = false;
+                    message_document = message_document.set_pin(false);
                     MessageEventKind::MessageUnpinned {
                         conversation_id,
                         message_id,
                     }
                 }
             };
-
-            message_document
-                .update(&this.ipfs, keypair, message, None, keystore.as_ref(), None)
-                .await?;
 
             this.document
                 .update_message_document(&this.ipfs, &message_document)
@@ -3001,34 +2906,9 @@ async fn message_event(
                 .get_message_document(&this.ipfs, message_id)
                 .await?;
 
-            let mut message = message_document
-                .resolve(&this.ipfs, keypair, true, keystore.as_ref())
-                .await?;
-
-            let reactions = message.reactions_mut();
-
             match state {
                 ReactionState::Add => {
-                    if reactions.len() >= MAX_REACTIONS {
-                        return Err(Error::InvalidLength {
-                            context: "reactions".into(),
-                            current: reactions.len(),
-                            minimum: None,
-                            maximum: Some(MAX_REACTIONS),
-                        });
-                    }
-
-                    let entry = reactions.entry(emoji.clone()).or_default();
-
-                    if entry.contains(&reactor) {
-                        return Err(Error::ReactionExist);
-                    }
-
-                    entry.push(reactor.clone());
-
-                    message_document
-                        .update(&this.ipfs, keypair, message, None, keystore.as_ref(), None)
-                        .await?;
+                    message_document = message_document.add_reaction(&emoji, reactor.clone())?;
 
                     this.document
                         .update_message_document(&this.ipfs, &message_document)
@@ -3049,25 +2929,7 @@ async fn message_event(
                     }
                 }
                 ReactionState::Remove => {
-                    match reactions.entry(emoji.clone()) {
-                        indexmap::map::Entry::Occupied(mut e) => {
-                            let list = e.get_mut();
-
-                            if !list.contains(&reactor) {
-                                return Err(Error::ReactionDoesntExist);
-                            }
-
-                            list.retain(|did| did != &reactor);
-                            if list.is_empty() {
-                                e.swap_remove();
-                            }
-                        }
-                        indexmap::map::Entry::Vacant(_) => return Err(Error::ReactionDoesntExist),
-                    };
-
-                    message_document
-                        .update(&this.ipfs, keypair, message, None, keystore.as_ref(), None)
-                        .await?;
+                    message_document = message_document.remove_reaction(&emoji, own_did.clone())?;
 
                     this.document
                         .update_message_document(&this.ipfs, &message_document)
