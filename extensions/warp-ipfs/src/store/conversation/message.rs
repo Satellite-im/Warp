@@ -275,97 +275,6 @@ impl<'a> MessageDocumentBuilder<'a> {
 }
 
 impl MessageDocument {
-    // pub fn new(
-    //     keypair: &Keypair,
-    //     message: Message,
-    //     key: Either<&DID, &Keystore>,
-    // ) -> Result<Self, Error> {
-    //     let id = message.id();
-    //     let message_type = message.message_type();
-    //     let conversation_id = message.conversation_id();
-    //     let date = message.date();
-    //     let sender = message.sender();
-    //     let pinned = message.pinned();
-    //     let modified = message.modified();
-    //     let replied = message.replied();
-    //     let lines = message.lines();
-    //     let reactions = message.reactions().to_owned();
-    //     let attachments = message.attachments();
-    //
-    //     if attachments.len() > MAX_ATTACHMENT {
-    //         return Err(Error::InvalidLength {
-    //             context: "attachments".into(),
-    //             current: attachments.len(),
-    //             minimum: None,
-    //             maximum: Some(MAX_ATTACHMENT),
-    //         });
-    //     }
-    //
-    //     if reactions.len() > MAX_REACTIONS {
-    //         return Err(Error::InvalidLength {
-    //             context: "reactions".into(),
-    //             current: reactions.len(),
-    //             minimum: None,
-    //             maximum: Some(MAX_REACTIONS),
-    //         });
-    //     }
-    //
-    //     let attachments = attachments
-    //         .iter()
-    //         .filter_map(|file| FileAttachmentDocument::new(file).ok())
-    //         .collect::<Vec<_>>();
-    //
-    //     if !lines.is_empty() {
-    //         let lines_value_length: usize = lines
-    //             .iter()
-    //             .filter(|s| !s.is_empty())
-    //             .map(|s| s.trim())
-    //             .map(|s| s.chars().count())
-    //             .sum();
-    //
-    //         if lines_value_length > MAX_MESSAGE_SIZE {
-    //             return Err(Error::InvalidLength {
-    //                 context: "message".into(),
-    //                 current: lines_value_length,
-    //                 minimum: None,
-    //                 maximum: Some(MAX_MESSAGE_SIZE),
-    //             });
-    //         }
-    //     }
-    //
-    //     let bytes = serde_json::to_vec(&lines)?;
-    //
-    //     let data = match key {
-    //         Either::Right(keystore) => {
-    //             let key = keystore.get_latest(keypair, sender)?;
-    //             Cipher::direct_encrypt(&bytes, &key)?.into()
-    //         }
-    //         Either::Left(key) => ecdh_encrypt(keypair, Some(key), &bytes)?.into(),
-    //     };
-    //
-    //     let message = Some(data);
-    //
-    //     let sender = DIDEd25519Reference::from_did(sender);
-    //
-    //     let document = MessageDocument {
-    //         id,
-    //         message_type,
-    //         sender,
-    //         conversation_id,
-    //         version: MessageVersion::default(),
-    //         date,
-    //         reactions,
-    //         attachments,
-    //         message,
-    //         pinned,
-    //         modified,
-    //         replied,
-    //         signature: None,
-    //     };
-    //
-    //     document.sign(keypair)
-    // }
-
     pub fn set_message_type(mut self, message_type: MessageType) -> Self {
         self.message_type = message_type;
         self
@@ -516,37 +425,6 @@ impl MessageDocument {
         let sender = self.sender.to_did();
 
         self.modified = Some(modified);
-
-        //
-        // if !message.is_empty() {
-        //     let lines_value_length: usize = message
-        //         .iter()
-        //         .filter(|s| !s.is_empty())
-        //         .map(|s| s.trim())
-        //         .map(|s| s.chars().count())
-        //         .sum();
-        //
-        //     if lines_value_length > MAX_MESSAGE_SIZE {
-        //         return Err(Error::InvalidLength {
-        //             context: "message".into(),
-        //             current: lines_value_length,
-        //             minimum: None,
-        //             maximum: Some(MAX_MESSAGE_SIZE),
-        //         });
-        //     }
-        // }
-        //
-        // let bytes = serde_json::to_vec(&message)?;
-        //
-        // let data = match keystore {
-        //     Either::Right(keystore) => {
-        //         let key = keystore.get_latest(keypair, &sender)?;
-        //         Cipher::direct_encrypt(&bytes, &key)?.into()
-        //     }
-        //     Either::Left(key) => ecdh_encrypt(keypair, Some(key), &bytes)?.into(),
-        // };
-        //
-        // self.message = Some(data);
 
         if !message.is_empty() {
             let lines_value_length: usize = message
