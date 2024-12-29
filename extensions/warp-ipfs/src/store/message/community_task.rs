@@ -3194,7 +3194,7 @@ impl CommunityTask {
                 if message_document.pinned() {
                     return Ok(());
                 }
-                message_document = message_document.set_pin(true);
+                message_document.set_pin(true);
                 MessageEventKind::CommunityMessagePinned {
                     community_id: self.community_id,
                     channel_id,
@@ -3205,7 +3205,7 @@ impl CommunityTask {
                 if !message_document.pinned() {
                     return Ok(());
                 }
-                message_document = message_document.set_pin(false);
+                message_document.set_pin(false);
                 MessageEventKind::CommunityMessageUnpinned {
                     community_id: self.community_id,
                     channel_id,
@@ -3285,7 +3285,7 @@ impl CommunityTask {
 
         match state {
             ReactionState::Add => {
-                message_document = message_document.add_reaction(&emoji, own_did.clone())?;
+                message_document.add_reaction(&emoji, own_did.clone())?;
 
                 message_cid = channel
                     .update_message_document(&self.ipfs, &message_document)
@@ -3301,7 +3301,7 @@ impl CommunityTask {
                 });
             }
             ReactionState::Remove => {
-                message_document = message_document.remove_reaction(&emoji, own_did.clone())?;
+                message_document.remove_reaction(&emoji, own_did.clone())?;
 
                 message_cid = channel
                     .update_message_document(&self.ipfs, &message_document)
@@ -3901,7 +3901,7 @@ async fn message_event(
                     if message_document.pinned() {
                         return Ok(());
                     }
-                    message_document = message_document.set_pin(true);
+                    message_document.set_pin(true);
                     MessageEventKind::CommunityMessagePinned {
                         community_id,
                         channel_id,
@@ -3912,7 +3912,7 @@ async fn message_event(
                     if !message_document.pinned() {
                         return Ok(());
                     }
-                    message_document = message_document.set_pin(false);
+                    message_document.set_pin(false);
                     MessageEventKind::CommunityMessageUnpinned {
                         community_id,
                         channel_id,
@@ -3948,7 +3948,7 @@ async fn message_event(
 
             match state {
                 ReactionState::Add => {
-                    message_document = message_document.add_reaction(&emoji, reactor.clone())?;
+                    message_document.add_reaction(&emoji, reactor.clone())?;
 
                     channel
                         .update_message_document(&this.ipfs, &message_document)
@@ -3970,7 +3970,7 @@ async fn message_event(
                     }
                 }
                 ReactionState::Remove => {
-                    message_document = message_document.remove_reaction(&emoji, own_did.clone())?;
+                    message_document.remove_reaction(&emoji, own_did.clone())?;
 
                     channel
                         .update_message_document(&this.ipfs, &message_document)

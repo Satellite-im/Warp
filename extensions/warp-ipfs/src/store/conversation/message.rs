@@ -275,32 +275,19 @@ impl<'a> MessageDocumentBuilder<'a> {
 }
 
 impl MessageDocument {
-    pub fn set_message_type(mut self, message_type: MessageType) -> Self {
-        self.message_type = message_type;
-        self
-    }
-
-    pub fn set_sender(mut self, sender: DID) -> Self {
-        self.sender = DIDEd25519Reference::from_did(&sender);
-        self
-    }
-
-    pub fn set_pin(mut self, pinned: bool) -> Self {
+    pub fn set_pin(&mut self, pinned: bool) {
         self.pinned = pinned;
-        self
     }
 
-    pub fn set_replied(mut self, replied: Uuid) -> Self {
+    pub fn set_replied(&mut self, replied: Uuid) {
         self.replied = Some(replied);
-        self
     }
 
-    pub fn set_modified(mut self, modified: DateTime<Utc>) -> Self {
+    pub fn set_modified(&mut self, modified: DateTime<Utc>) {
         self.modified = Some(modified);
-        self
     }
 
-    pub fn add_attachment(mut self, attachment: impl Into<FileDocument>) -> Result<Self, Error> {
+    pub fn add_attachment(&mut self, attachment: impl Into<FileDocument>) -> Result<(), Error> {
         let amount = self.attachments.len();
         if amount > MAX_ATTACHMENT {
             return Err(Error::InvalidLength {
@@ -312,16 +299,18 @@ impl MessageDocument {
         }
         let attachment = FileAttachmentDocument::new(attachment)?;
         self.attachments.insert(attachment);
-        Ok(self)
+        Ok(())
     }
 
-    pub fn remove_attachment(mut self, file_id: Uuid) -> Self {
+    pub fn remove_attachment(&mut self, file_id: Uuid) -> bool {
         self.attachments
             .retain(|attachment| attachment.id != file_id);
-        self
+        self.attachments
+            .iter()
+            .any(|attachment| attachment.id == file_id)
     }
 
-    pub fn add_reaction(mut self, emoji: impl Into<String>, reactor: DID) -> Result<Self, Error> {
+    pub fn add_reaction(&mut self, emoji: impl Into<String>, reactor: DID) -> Result<(), Error> {
         let emoji = emoji.into();
         let size = self.reactions.len();
         match self.reactions.entry(emoji) {
@@ -346,14 +335,10 @@ impl MessageDocument {
             }
         }
 
-        Ok(self)
+        Ok(())
     }
 
-    pub fn remove_reaction(
-        mut self,
-        emoji: impl Into<String>,
-        reactor: DID,
-    ) -> Result<Self, Error> {
+    pub fn remove_reaction(&mut self, emoji: impl Into<String>, reactor: DID) -> Result<(), Error> {
         let emoji = emoji.into();
         if !self.reactions.contains_key(&emoji) {
             return Err(Error::ReactionDoesntExist);
@@ -369,7 +354,7 @@ impl MessageDocument {
                 entry.shift_remove();
             }
         }
-        Ok(self)
+        Ok(())
     }
 
     pub fn set_message(

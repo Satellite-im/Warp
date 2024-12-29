@@ -1608,7 +1608,7 @@ impl ConversationTask {
                 if message_document.pinned() {
                     return Ok(());
                 }
-                message_document = message_document.set_pin(true);
+                message_document.set_pin(true);
                 MessageEventKind::MessagePinned {
                     conversation_id: self.conversation_id,
                     message_id,
@@ -1618,7 +1618,7 @@ impl ConversationTask {
                 if !message_document.pinned() {
                     return Ok(());
                 }
-                message_document = message_document.set_pin(false);
+                message_document.set_pin(false);
                 MessageEventKind::MessageUnpinned {
                     conversation_id: self.conversation_id,
                     message_id,
@@ -1686,7 +1686,7 @@ impl ConversationTask {
 
         match state {
             ReactionState::Add => {
-                message_document = message_document.add_reaction(&emoji, own_did.clone())?;
+                message_document.add_reaction(&emoji, own_did.clone())?;
 
                 _message_cid = self
                     .document
@@ -1703,7 +1703,7 @@ impl ConversationTask {
                 });
             }
             ReactionState::Remove => {
-                message_document = message_document.remove_reaction(&emoji, own_did.clone())?;
+                message_document.remove_reaction(&emoji, own_did.clone())?;
 
                 _message_cid = self
                     .document
@@ -2866,7 +2866,7 @@ async fn message_event(
                     if message_document.pinned() {
                         return Ok(());
                     }
-                    message_document = message_document.set_pin(true);
+                    message_document.set_pin(true);
                     MessageEventKind::MessagePinned {
                         conversation_id,
                         message_id,
@@ -2876,7 +2876,7 @@ async fn message_event(
                     if !message_document.pinned() {
                         return Ok(());
                     }
-                    message_document = message_document.set_pin(false);
+                    message_document.set_pin(false);
                     MessageEventKind::MessageUnpinned {
                         conversation_id,
                         message_id,
@@ -2908,7 +2908,7 @@ async fn message_event(
 
             match state {
                 ReactionState::Add => {
-                    message_document = message_document.add_reaction(&emoji, reactor.clone())?;
+                    message_document.add_reaction(&emoji, reactor.clone())?;
 
                     this.document
                         .update_message_document(&this.ipfs, &message_document)
@@ -2929,7 +2929,7 @@ async fn message_event(
                     }
                 }
                 ReactionState::Remove => {
-                    message_document = message_document.remove_reaction(&emoji, reactor.clone())?;
+                    message_document.remove_reaction(&emoji, reactor.clone())?;
 
                     this.document
                         .update_message_document(&this.ipfs, &message_document)
