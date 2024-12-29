@@ -734,7 +734,6 @@ impl MessageDocument {
     ) -> Result<Message, Error> {
         self.verify()?;
 
-        let lines = self.message(keypair, key)?;
         let mut message = Message::default();
         message.set_id(self.id);
         message.set_message_type(self.message_type);
@@ -764,7 +763,13 @@ impl MessageDocument {
 
         message.set_reactions(self.reactions.clone());
 
-        message.set_lines(lines);
+        match self.message(keypair, key) {
+            Ok(lines) => {
+                message.set_lines(lines);
+            }
+            Err(_) if self.message_type == MessageType::Attachment => {}
+            Err(e) => return Err(e),
+        }
 
         Ok(message)
     }
