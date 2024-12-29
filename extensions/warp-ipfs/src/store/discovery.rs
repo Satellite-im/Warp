@@ -3,12 +3,11 @@ use std::{collections::HashSet, fmt::Debug, hash::Hash, sync::Arc, time::Duratio
 use futures::StreamExt;
 use rust_ipfs::{libp2p::swarm::dial_opts::DialOpts, Ipfs, Multiaddr, PeerId};
 
+use async_rt::AbortableJoinHandle;
 use std::collections::{hash_map::Entry, HashMap};
 use tokio::sync::{broadcast, RwLock};
 
 use rust_ipfs::p2p::MultiaddrExt;
-
-use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
 
 use warp::{crypto::DID, error::Error};
 
@@ -27,10 +26,9 @@ pub struct Discovery {
     ipfs: Ipfs,
     config: DiscoveryConfig,
     entries: Arc<RwLock<HashSet<DiscoveryEntry>>>,
-    task: Arc<RwLock<Option<AbortableJoinHandle<()>>>>,
+    task: AbortableJoinHandle<()>,
     events: broadcast::Sender<DID>,
     relays: Vec<Multiaddr>,
-    executor: LocalExecutor,
 }
 
 impl Discovery {
@@ -40,10 +38,9 @@ impl Discovery {
             ipfs: ipfs.clone(),
             config: config.clone(),
             entries: Arc::default(),
-            task: Arc::default(),
+            task: AbortableJoinHandle::empty(),
             events,
             relays: relays.to_vec(),
-            executor: LocalExecutor,
         }
     }
 
@@ -58,7 +55,7 @@ impl Discovery {
                 let namespace = namespace.clone().unwrap_or_else(|| "warp-mp-ipfs".into());
                 let cid = self.ipfs.put_dag(format!("discovery:{namespace}")).await?;
 
-                let task = self.executor.spawn_abortable({
+                let task = async_rt::task::spawn_abortable({
                     let discovery = self.clone();
                     async move {
                         let mut cached = HashSet::new();
@@ -99,7 +96,10 @@ impl Discovery {
                     }
                 });
 
-                *self.task.write().await = Some(task);
+                unsafe {
+                    let mut st_task = self.task.clone();
+                    st_task.replace(task);
+                }
             }
             DiscoveryConfig::Namespace {
                 discovery_type: DiscoveryType::RzPoint { addresses },
@@ -141,76 +141,76 @@ impl Discovery {
                     ));
                 }
 
-                let task = self.executor.spawn_abortable({
-                        let discovery = self.clone();
-                        let register_id = register_id;
-                        async move {
-                            let mut meshed_map: HashMap<PeerId, HashSet<Multiaddr>> =
-                                HashMap::new();
+                let task = async_rt::task::spawn_abortable({
+                    let discovery = self.clone();
+                    let register_id = register_id;
+                    async move {
+                        let mut meshed_map: HashMap<PeerId, HashSet<Multiaddr>> = HashMap::new();
 
-                            loop {
-                                for peer_id in &register_id {
-                                    let map = match discovery
-                                        .ipfs
-                                        .rendezvous_namespace_discovery(
-                                            namespace.clone(),
-                                            None,
-                                            *peer_id,
-                                        )
-                                        .await
-                                    {
-                                        Ok(map) => map,
-                                        Err(e) => {
-                                            tracing::error!(namespace = %namespace, error = %e, "failed to perform discovery over given namespace");
-                                            continue;
+                        loop {
+                            for peer_id in &register_id {
+                                let map = match discovery
+                                    .ipfs
+                                    .rendezvous_namespace_discovery(
+                                        namespace.clone(),
+                                        None,
+                                        *peer_id,
+                                    )
+                                    .await
+                                {
+                                    Ok(map) => map,
+                                    Err(e) => {
+                                        tracing::error!(namespace = %namespace, error = %e, "failed to perform discovery over given namespace");
+                                        continue;
+                                    }
+                                };
+
+                                for (peer_id, addrs) in map {
+                                    match meshed_map.entry(peer_id) {
+                                        Entry::Occupied(mut entry) => {
+                                            entry.get_mut().extend(addrs);
                                         }
-                                    };
+                                        Entry::Vacant(entry) => {
+                                            entry.insert(HashSet::from_iter(addrs.iter().cloned()));
+                                            if !discovery
+                                                .ipfs
+                                                .is_connected(peer_id)
+                                                .await
+                                                .unwrap_or_default()
+                                                && discovery.ipfs.connect(peer_id).await.is_ok()
+                                                && !discovery.contains(peer_id).await
+                                            {
+                                                let entry = DiscoveryEntry::new(
+                                                    &discovery.ipfs,
+                                                    peer_id,
+                                                    discovery.config.clone(),
+                                                    discovery.events.clone(),
+                                                    discovery.relays.clone(),
+                                                )
+                                                .await;
 
-                                    for (peer_id, addrs) in map {
-                                        match meshed_map.entry(peer_id) {
-                                            Entry::Occupied(mut entry) => {
-                                                entry.get_mut().extend(addrs);
-                                            }
-                                            Entry::Vacant(entry) => {
-                                                entry.insert(HashSet::from_iter(
-                                                    addrs.iter().cloned(),
-                                                ));
-                                                if !discovery
-                                                    .ipfs
-                                                    .is_connected(peer_id)
+                                                if discovery
+                                                    .entries
+                                                    .write()
                                                     .await
-                                                    .unwrap_or_default()
-                                                    && discovery.ipfs.connect(peer_id).await.is_ok()
-                                                    && !discovery.contains(peer_id).await
+                                                    .insert(entry.clone())
                                                 {
-                                                    let entry = DiscoveryEntry::new(
-                                                        &discovery.ipfs,
-                                                        peer_id,
-                                                        discovery.config.clone(),
-                                                        discovery.events.clone(),
-                                                        discovery.relays.clone(),
-                                                    )
-                                                    .await;
-
-                                                    if discovery
-                                                        .entries
-                                                        .write()
-                                                        .await
-                                                        .insert(entry.clone())
-                                                    {
-                                                        entry.start().await;
-                                                    }
+                                                    entry.start().await;
                                                 }
                                             }
                                         }
                                     }
                                 }
-                                futures_timer::Delay::new(Duration::from_secs(5)).await;
                             }
+                            futures_timer::Delay::new(Duration::from_secs(5)).await;
                         }
-                    });
+                    }
+                });
 
-                *self.task.write().await = Some(task);
+                unsafe {
+                    let mut st_task = self.task.clone();
+                    st_task.replace(task);
+                }
             }
             DiscoveryConfig::Shuttle { addresses: _ } => {}
             _ => {}
@@ -321,7 +321,6 @@ pub struct DiscoveryEntry {
     drop_guard: Arc<RwLock<Option<AbortableJoinHandle<()>>>>,
     sender: broadcast::Sender<DID>,
     relays: Vec<Multiaddr>,
-    executor: LocalExecutor,
 }
 
 impl PartialEq for DiscoveryEntry {
@@ -353,7 +352,6 @@ impl DiscoveryEntry {
             drop_guard: Arc::default(),
             sender,
             relays,
-            executor: LocalExecutor,
         }
     }
 
@@ -442,7 +440,7 @@ impl DiscoveryEntry {
             }
         };
 
-        let guard = self.executor.spawn_abortable(fut);
+        let guard = async_rt::task::spawn_abortable(fut);
 
         *holder = Some(guard);
     }

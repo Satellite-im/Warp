@@ -1327,7 +1327,7 @@ impl ConversationTask {
         let message_id = message.id();
         let keystore = pubkey_or_keystore(&*self)?;
 
-        let message = MessageDocument::new(&self.ipfs, keypair, message, keystore.as_ref()).await?;
+        let message = MessageDocument::new(keypair, message, keystore.as_ref())?;
 
         let _message_cid = self
             .document
@@ -1525,7 +1525,7 @@ impl ConversationTask {
 
         let keystore = pubkey_or_keystore(&*self)?;
 
-        let message = MessageDocument::new(&self.ipfs, keypair, message, keystore.as_ref()).await?;
+        let message = MessageDocument::new(keypair, message, keystore.as_ref())?;
 
         let message_id = message.id;
 
@@ -2225,7 +2225,7 @@ impl ConversationTask {
                     });
                 }
 
-                let document = FileDocument::new(&self.ipfs, &file).await?;
+                let document = FileDocument::new(&file);
                 let cid = document
                     .reference
                     .as_ref()
@@ -2448,7 +2448,6 @@ impl ConversationTask {
         let keystore = pubkey_or_keystore(&*self)?;
 
         let stream = AttachmentStream::new(
-            &self.ipfs,
             self.root.keypair(),
             &self.identity.did_key(),
             &self.file,
