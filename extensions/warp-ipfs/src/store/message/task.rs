@@ -2929,7 +2929,7 @@ async fn message_event(
                     }
                 }
                 ReactionState::Remove => {
-                    message_document = message_document.remove_reaction(&emoji, own_did.clone())?;
+                    message_document = message_document.remove_reaction(&emoji, reactor.clone())?;
 
                     this.document
                         .update_message_document(&this.ipfs, &message_document)
