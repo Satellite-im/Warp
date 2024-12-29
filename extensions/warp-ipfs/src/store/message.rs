@@ -6,6 +6,7 @@ use community_task::CommunityTaskCommand;
 use futures_timer::Delay;
 use task::ConversationTaskCommand;
 
+use async_rt::AbortableJoinHandle;
 use bytes::Bytes;
 use std::borrow::BorrowMut;
 use std::path::PathBuf;
@@ -46,8 +47,6 @@ use crate::store::{
     ConversationEvents, ConversationRequestKind, ConversationRequestResponse, DidExt,
 };
 
-use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
-
 use crate::store::community::CommunityDocument;
 use crate::store::conversation::document::{GroupConversationDocument, InnerDocument};
 use chrono::{DateTime, Utc};
@@ -86,7 +85,6 @@ impl MessageStore {
         event: EventSubscription<RayGunEventKind>,
         identity: &IdentityStore,
     ) -> Self {
-        let executor = LocalExecutor;
         tracing::info!("Initializing MessageStore");
 
         let root = identity.root_document().clone();
@@ -101,7 +99,6 @@ impl MessageStore {
             file: file.clone(),
             event,
             queue: Default::default(),
-            executor,
         };
 
         if let Err(e) = inner.migrate().await {
@@ -118,7 +115,7 @@ impl MessageStore {
             identity: identity.clone(),
         };
 
-        let _handle = executor.spawn_abortable(task.run());
+        let _handle = async_rt::task::spawn_abortable(task.run());
 
         Self { inner, _handle }
     }
@@ -2117,7 +2114,6 @@ struct ConversationInner {
 
     // Note: Temporary
     queue: HashMap<DID, Vec<Queue>>,
-    executor: LocalExecutor,
 }
 
 impl ConversationInner {
@@ -2182,7 +2178,7 @@ impl ConversationInner {
         )
         .await?;
 
-        let handle = self.executor.spawn_abortable(task.run());
+        let handle = async_rt::task::spawn_abortable(task.run());
 
         tracing::info!(%conversation_id, "started conversation");
 
@@ -2865,7 +2861,7 @@ impl ConversationInner {
         )
         .await?;
 
-        let handle = self.executor.spawn_abortable(task.run());
+        let handle = async_rt::task::spawn_abortable(task.run());
 
         tracing::info!(%community_id, "started community");
 
