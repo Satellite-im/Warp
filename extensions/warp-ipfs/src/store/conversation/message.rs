@@ -358,11 +358,11 @@ impl MessageDocument {
     }
 
     pub fn set_message(
-        mut self,
+        &mut self,
         keypair: &Keypair,
         keystore: Either<&DID, &Keystore>,
         message: &[String],
-    ) -> Result<Self, Error> {
+    ) -> Result<(), Error> {
         let sender = self.sender.to_did();
 
         if !message.is_empty() {
@@ -394,18 +394,18 @@ impl MessageDocument {
         };
 
         self.message = Some(data);
-        self.sign(keypair)
+        self.sign_in_place(keypair)
     }
 
     pub fn set_message_with_nonce(
-        mut self,
+        &mut self,
         keypair: &Keypair,
         keystore: Either<&DID, &Keystore>,
         modified: DateTime<Utc>,
         message: Vec<String>,
         signature: Option<Vec<u8>>,
         nonce: Option<&[u8]>,
-    ) -> Result<Self, Error> {
+    ) -> Result<(), Error> {
         let own_did = keypair.to_did()?;
         let sender = self.sender.to_did();
 
@@ -460,7 +460,7 @@ impl MessageDocument {
 
         match (sender.eq(&own_did), signature) {
             (true, None) => {
-                self = self.sign(keypair)?;
+                self.sign_in_place(keypair)?;
             }
             (false, None) | (true, Some(_)) => return Err(Error::InvalidMessage),
             (false, Some(sig)) => {
@@ -470,7 +470,7 @@ impl MessageDocument {
             }
         };
 
-        Ok(self)
+        Ok(())
     }
 }
 
@@ -638,6 +638,11 @@ impl MessageDocument {
     }
 
     fn sign(mut self, keypair: &Keypair) -> Result<MessageDocument, Error> {
+        self.sign_in_place(keypair)?;
+        Ok(self)
+    }
+
+    fn sign_in_place(&mut self, keypair: &Keypair) -> Result<(), Error> {
         let did = &keypair.to_did()?;
         let sender = self.sender.to_did();
 
@@ -674,7 +679,7 @@ impl MessageDocument {
         let signature = keypair.sign(&hash).expect("not RSA");
 
         self.signature = Some(MessageSignature::try_from(signature)?);
-        Ok(self)
+        Ok(())
     }
 }
 

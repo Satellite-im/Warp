@@ -2955,7 +2955,7 @@ impl CommunityTask {
         if message_document.sender() != self.identity.did_key() {
             return Err(Error::InvalidMessage);
         }
-        message_document = message_document.set_message(keypair, keystore.as_ref(), &messages)?;
+        message_document.set_message(keypair, keystore.as_ref(), &messages)?;
 
         let nonce = message_document.nonce_from_message()?;
         let signature = message_document.signature.expect("message to be signed");
@@ -3817,7 +3817,7 @@ async fn message_event(
                 });
             }
 
-            message_document = message_document.set_message_with_nonce(
+            message_document.set_message_with_nonce(
                 keypair,
                 keystore.as_ref(),
                 modified,
