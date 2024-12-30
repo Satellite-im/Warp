@@ -41,7 +41,7 @@ use super::{
         cache::IdentityCache, identity::IdentityDocument, image_dag::get_image,
         root::RootDocumentMap, ResolvedRootDocument, RootDocument,
     },
-    ecdh_decrypt, ecdh_encrypt,
+    ecdh_encrypt,
     event_subscription::EventSubscription,
     payload::PayloadMessage,
     phonebook::PhoneBook,
@@ -50,7 +50,6 @@ use super::{
     topics::IDENTITY_ANNOUNCEMENT,
     MAX_IMAGE_SIZE, MAX_METADATA_ENTRIES, MAX_METADATA_KEY_LENGTH, MAX_METADATA_VALUE_LENGTH,
 };
-use crate::rt::{Executor, LocalExecutor};
 use crate::shuttle::identity::protocol::{
     LookupResponse, MailboxResponse, RegisterResponse, Response, SynchronizedResponse,
 };
@@ -87,8 +86,6 @@ pub struct IdentityStore {
     span: Span,
 
     event: EventSubscription<MultiPassEventKind>,
-
-    executor: LocalExecutor,
 }
 
 #[derive(Debug, Clone, Eq, Serialize, Deserialize)]
@@ -361,12 +358,11 @@ impl IdentityStore {
             phonebook: phonebook.clone(),
             signal,
             span: span.clone(),
-            executor: LocalExecutor,
         };
 
         // Move shuttle logic logic into its own task
         // TODO: Maybe push into a joinset or futureunordered and poll?
-        store.executor.dispatch({
+        async_rt::task::dispatch({
             let mut store = store.clone();
             async move {
                 if let Ok(ident) = store.own_identity().await {
@@ -416,7 +412,7 @@ impl IdentityStore {
             }
         }
 
-        store.executor.dispatch({
+        async_rt::task::dispatch({
             let mut store = store.clone();
             async move {
                 let event_stream = store
@@ -530,12 +526,18 @@ impl IdentityStore {
 
                             tracing::info!("Received event from {in_did}");
 
-                            let event = match ecdh_decrypt(store.root_document().keypair(), Some(&in_did), &message.data).and_then(|bytes| {
-                                serde_json::from_slice::<IdentityEvent>(&bytes).map_err(Error::from)
-                            }) {
-                                Ok(e) => e,
+                            let payload: PayloadMessage<IdentityEvent> = match PayloadMessage::from_bytes(&message.data) {
+                                Ok(p) => p,
                                 Err(e) => {
-                                   tracing::error!("Failed to decrypt payload from {in_did}: {e}");
+                                    tracing::error!(error = %e, from = %in_did, "failed to process payload");
+                                    continue;
+                                }
+                            };
+
+                            let event = match payload.message(store.root_document().keypair()) {
+                                Ok(event) => event,
+                                Err(e) => {
+                                    tracing::error!("Failed to decrypt payload from {in_did}: {e}");
                                     continue;
                                 }
                             };
@@ -545,11 +547,9 @@ impl IdentityStore {
                             if let Err(e) = store.process_message(&in_did, event, false).await {
                                tracing::error!("Failed to process identity message from {in_did}: {e}");
                             }
-
-
                         }
                         Some(event) = friend_stream.next() => {
-                            let payload = match PayloadMessage::<Vec<u8>>::from_bytes(&event.data) {
+                            let payload = match PayloadMessage::<RequestResponsePayload>::from_bytes(&event.data) {
                                 Ok(p) => p,
                                 Err(_e) => {
                                     continue;
@@ -568,17 +568,8 @@ impl IdentityStore {
 
                             tracing::info!("Received event from {did}");
 
-                            let msg = match payload.message(None) {
+                            let data = match payload.message(store.root_document.keypair()) {
                                 Ok(m) => m,
-                                Err(_) => {
-                                    continue;
-                                }
-                            };
-
-                            let data = match ecdh_decrypt(store.root_document().keypair(), Some(&did), msg).and_then(|bytes| {
-                                serde_json::from_slice::<RequestResponsePayload>(&bytes).map_err(Error::from)
-                            }) {
-                                Ok(pl) => pl,
                                 Err(e) => {
                                     if let Some(tx) = signal {
                                         let _ = tx.send(Err(e));
@@ -920,9 +911,11 @@ impl IdentityStore {
 
         let event = IdentityEvent::Request { option };
 
-        let payload_bytes = serde_json::to_vec(&event)?;
+        let payload = PayloadBuilder::new(pk_did, event.clone())
+            .add_recipient(out_did)?
+            .await?;
 
-        let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
+        let bytes = payload.to_bytes()?;
 
         tracing::info!(to = %out_did, event = ?event, payload_size = bytes.len(), "Sending event");
 
@@ -949,8 +942,6 @@ impl IdentityStore {
         if !self.ipfs.is_connected(out_peer_id).await? {
             return Err(Error::IdentityDoesntExist);
         }
-
-        let pk_did = self.root_document.keypair();
 
         let mut identity = self.own_identity_document().await?;
 
@@ -980,9 +971,11 @@ impl IdentityStore {
             option: ResponseOption::Identity { identity: payload },
         };
 
-        let payload_bytes = serde_json::to_vec(&event)?;
+        let payload = PayloadBuilder::new(kp_did, event.clone())
+            .add_recipient(out_did)?
+            .await?;
 
-        let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
+        let bytes = payload.to_bytes()?;
 
         tracing::info!(to = %out_did, event = ?event, payload_size = bytes.len(), "Sending event");
 
@@ -1035,9 +1028,11 @@ impl IdentityStore {
             },
         };
 
-        let payload_bytes = serde_json::to_vec(&event)?;
+        let payload = PayloadBuilder::new(pk_did, event.clone())
+            .add_recipient(out_did)?
+            .await?;
 
-        let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
+        let bytes = payload.to_bytes()?;
 
         tracing::info!(to = %out_did, event = ?event, payload_size = bytes.len(), "Sending event");
 
@@ -1112,9 +1107,11 @@ impl IdentityStore {
             option: ResponseOption::Metadata { data: metadata },
         };
 
-        let payload_bytes = serde_json::to_vec(&event)?;
+        let payload = PayloadBuilder::new(pk_did, event.clone())
+            .add_recipient(out_did)?
+            .await?;
 
-        let bytes = ecdh_encrypt(pk_did, Some(out_did), payload_bytes)?;
+        let bytes = payload.to_bytes()?;
 
         tracing::info!(to = %out_did, event = ?event, payload_size = bytes.len(), "Sending event");
 
@@ -1267,7 +1264,7 @@ impl IdentityStore {
                                     } else {
                                         let identity_meta_cid =
                                             identity.metadata.arb_data.expect("Cid is provided");
-                                        self.executor.spawn({
+                                        async_rt::task::spawn({
                                             let ipfs = self.ipfs.clone();
                                             let store = self.clone();
                                             let did = in_did.clone();
@@ -1317,7 +1314,7 @@ impl IdentityStore {
                                             .metadata
                                             .profile_picture
                                             .expect("Cid is provided");
-                                        self.executor.spawn({
+                                        async_rt::task::spawn({
                                             let ipfs = self.ipfs.clone();
                                             let store = self.clone();
                                             let did = in_did.clone();
@@ -1330,21 +1327,19 @@ impl IdentityStore {
                                                     false,
                                                     Some(MAX_IMAGE_SIZE),
                                                 )
-                                                    .await
-                                                    .map_err(|e| {
-                                                        tracing::error!(
-                                                            "Error fetching image from {did}: {e}"
-                                                        );
-                                                        e
-                                                    })?;
+                                                .await
+                                                .map_err(|e| {
+                                                    tracing::error!(
+                                                        "Error fetching image from {did}: {e}"
+                                                    );
+                                                    e
+                                                })?;
 
                                                 tracing::trace!("Image pointed to {identity_profile_picture} for {did} downloaded");
 
                                                 store
                                                     .emit_event(
-                                                        MultiPassEventKind::IdentityUpdate {
-                                                            did,
-                                                        },
+                                                        MultiPassEventKind::IdentityUpdate { did },
                                                     )
                                                     .await;
 
@@ -1382,7 +1377,7 @@ impl IdentityStore {
                                             .metadata
                                             .profile_banner
                                             .expect("Cid is provided");
-                                        self.executor.dispatch({
+                                        async_rt::task::dispatch({
                                             let ipfs = self.ipfs.clone();
                                             let did = in_did.clone();
                                             let store = self.clone();
@@ -1396,21 +1391,19 @@ impl IdentityStore {
                                                     false,
                                                     Some(MAX_IMAGE_SIZE),
                                                 )
-                                                    .await
-                                                    .map_err(|e| {
-                                                        tracing::error!(
-                                                            "Error fetching image from {did}: {e}"
-                                                        );
-                                                        e
-                                                    })?;
+                                                .await
+                                                .map_err(|e| {
+                                                    tracing::error!(
+                                                        "Error fetching image from {did}: {e}"
+                                                    );
+                                                    e
+                                                })?;
 
                                                 tracing::trace!("Image pointed to {identity_profile_banner} for {did} downloaded");
 
                                                 store
                                                     .emit_event(
-                                                        MultiPassEventKind::IdentityUpdate {
-                                                            did,
-                                                        },
+                                                        MultiPassEventKind::IdentityUpdate { did },
                                                     )
                                                     .await;
 
@@ -1442,35 +1435,32 @@ impl IdentityStore {
                                         .await?;
                                 } else {
                                     if let Some(picture) = picture {
-                                        self.executor.dispatch({
+                                        async_rt::task::dispatch({
                                             let ipfs = self.ipfs.clone();
                                             let did = in_did.clone();
                                             let store = self.clone();
                                             async move {
                                                 let peer_id = vec![did.to_peer_id()?];
-                                                let _ =
-                                                    super::document::image_dag::get_image(
-                                                        &ipfs,
-                                                        picture,
-                                                        &peer_id,
-                                                        false,
-                                                        Some(MAX_IMAGE_SIZE),
-                                                    )
-                                                        .await
-                                                        .map_err(|e| {
-                                                            tracing::error!(
-                                                            "Error fetching image from {did}: {e}"
-                                                        );
-                                                            e
-                                                        })?;
+                                                let _ = super::document::image_dag::get_image(
+                                                    &ipfs,
+                                                    picture,
+                                                    &peer_id,
+                                                    false,
+                                                    Some(MAX_IMAGE_SIZE),
+                                                )
+                                                .await
+                                                .map_err(|e| {
+                                                    tracing::error!(
+                                                        "Error fetching image from {did}: {e}"
+                                                    );
+                                                    e
+                                                })?;
 
                                                 tracing::trace!("Image pointed to {picture} for {did} downloaded");
 
                                                 store
                                                     .emit_event(
-                                                        MultiPassEventKind::IdentityUpdate {
-                                                            did,
-                                                        },
+                                                        MultiPassEventKind::IdentityUpdate { did },
                                                     )
                                                     .await;
 
@@ -1479,36 +1469,33 @@ impl IdentityStore {
                                         });
                                     }
                                     if let Some(banner) = banner {
-                                        self.executor.dispatch({
+                                        async_rt::task::dispatch({
                                             let store = self.clone();
                                             let ipfs = self.ipfs.clone();
 
                                             let did = in_did.clone();
                                             async move {
                                                 let peer_id = vec![did.to_peer_id()?];
-                                                let _ =
-                                                    super::document::image_dag::get_image(
-                                                        &ipfs,
-                                                        banner,
-                                                        &peer_id,
-                                                        false,
-                                                        Some(MAX_IMAGE_SIZE),
-                                                    )
-                                                        .await
-                                                        .map_err(|e| {
-                                                            tracing::error!(
-                                                            "Error fetching image from {did}: {e}"
-                                                        );
-                                                            e
-                                                        })?;
+                                                let _ = super::document::image_dag::get_image(
+                                                    &ipfs,
+                                                    banner,
+                                                    &peer_id,
+                                                    false,
+                                                    Some(MAX_IMAGE_SIZE),
+                                                )
+                                                .await
+                                                .map_err(|e| {
+                                                    tracing::error!(
+                                                        "Error fetching image from {did}: {e}"
+                                                    );
+                                                    e
+                                                })?;
 
                                                 tracing::trace!("Image pointed to {banner} for {did} downloaded");
 
                                                 store
                                                     .emit_event(
-                                                        MultiPassEventKind::IdentityUpdate {
-                                                            did,
-                                                        },
+                                                        MultiPassEventKind::IdentityUpdate { did },
                                                     )
                                                     .await;
 
@@ -1531,7 +1518,7 @@ impl IdentityStore {
                 if cache.metadata.profile_picture == Some(cid)
                     || cache.metadata.profile_banner == Some(cid)
                 {
-                    self.executor.dispatch({
+                    async_rt::task::dispatch({
                         let store = self.clone();
                         let did = in_did.clone();
                         async move {
@@ -2960,10 +2947,10 @@ impl IdentityStore {
 
         let kp = self.root_document.keypair();
 
-        let payload_bytes = serde_json::to_vec(&payload)?;
-
-        let bytes = ecdh_encrypt(kp, Some(recipient), payload_bytes)?;
-        let message = PayloadBuilder::new(kp, bytes).build()?;
+        let message = PayloadBuilder::new(kp, payload.clone())
+            .add_recipient(recipient)?
+            .from_ipfs(&self.ipfs)
+            .await?;
 
         let message_bytes = message.to_bytes()?;
 

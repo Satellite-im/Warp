@@ -1,9 +1,9 @@
 use futures::{channel::mpsc, StreamExt, TryFutureExt};
 
-use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
 use crate::store::{
     ds_key::DataStoreKey, ecdh_encrypt, payload::PayloadBuilder, topics::PeerTopic, PeerIdExt,
 };
+use async_rt::AbortableJoinHandle;
 use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, Keypair};
 use std::{collections::HashMap, sync::Arc, time::Duration};
@@ -23,7 +23,6 @@ pub struct Queue {
     removal: mpsc::UnboundedSender<DID>,
     keypair: Keypair,
     discovery: Discovery,
-    executor: LocalExecutor,
 }
 
 impl Queue {
@@ -36,10 +35,9 @@ impl Queue {
             removal: tx,
             keypair,
             discovery,
-            executor: LocalExecutor,
         };
 
-        queue.executor.dispatch({
+        async_rt::task::dispatch({
             let queue = queue.clone();
 
             async move {
@@ -78,7 +76,7 @@ impl Queue {
         let entry = self.entries.write().await.insert(did.clone(), entry);
 
         if let Some(entry) = entry {
-            entry.cancel().await;
+            entry.cancel();
         }
     }
 
@@ -101,7 +99,7 @@ impl Queue {
         let entry = self.entries.write().await.remove(did).clone();
 
         if let Some(entry) = entry {
-            entry.cancel().await;
+            entry.cancel();
             self.save().await;
             return Some(entry.event());
         }
@@ -227,8 +225,7 @@ pub struct QueueEntry {
     recipient: DID,
     keypair: Keypair,
     item: RequestResponsePayload,
-    drop_guard: Arc<RwLock<Option<AbortableJoinHandle<()>>>>,
-    executor: LocalExecutor,
+    drop_guard: AbortableJoinHandle<()>,
 }
 
 impl QueueEntry {
@@ -239,13 +236,12 @@ impl QueueEntry {
         keypair: &Keypair,
         tx: mpsc::UnboundedSender<DID>,
     ) -> QueueEntry {
-        let entry = QueueEntry {
+        let mut entry = QueueEntry {
             ipfs,
             recipient,
             keypair: keypair.clone(),
             item,
-            drop_guard: Default::default(),
-            executor: LocalExecutor,
+            drop_guard: AbortableJoinHandle::empty(),
         };
 
         let fut = {
@@ -281,11 +277,11 @@ impl QueueEntry {
 
                         let res = async move {
                             let kp = &entry.keypair;
-                            let payload_bytes = serde_json::to_vec(&entry.item)?;
 
-                            let bytes = ecdh_encrypt(kp, Some(&recipient), payload_bytes)?;
-
-                            let message = PayloadBuilder::new(kp, bytes).build()?;
+                            let message = PayloadBuilder::new(kp, entry.item)
+                                .add_recipient(&recipient)?
+                                .from_ipfs(&entry.ipfs)
+                                .await?;
 
                             let message_bytes = message.to_bytes()?;
 
@@ -328,10 +324,10 @@ impl QueueEntry {
             }
         };
 
-        let _handle = entry.executor.spawn_abortable(fut);
-
-        *entry.drop_guard.write().await = Some(_handle);
-
+        let _handle = async_rt::task::spawn_abortable(fut);
+        unsafe {
+            entry.drop_guard.replace(_handle);
+        }
         entry
     }
 
@@ -339,9 +335,7 @@ impl QueueEntry {
         self.item.clone()
     }
 
-    pub async fn cancel(&self) {
-        if let Some(guard) = std::mem::take(&mut *self.drop_guard.write().await) {
-            drop(guard)
-        }
+    pub fn cancel(&self) {
+        self.drop_guard.abort();
     }
 }

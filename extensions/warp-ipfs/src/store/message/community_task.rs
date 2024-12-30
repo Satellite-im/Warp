@@ -31,17 +31,13 @@ use warp::raygun::{
     MessageReference, MessageStatus, MessageType, Messages, MessagesType, PinState,
     RayGunEventKind, ReactionState,
 };
-use warp::{
-    crypto::{cipher::Cipher, generate},
-    error::Error,
-    raygun::MessageEventKind,
-};
+use warp::{crypto::generate, error::Error, raygun::MessageEventKind};
 use web_time::Instant;
 
 use crate::store::community::{
     CommunityChannelDocument, CommunityDocument, CommunityInviteDocument, CommunityRoleDocument,
 };
-use crate::store::conversation::message::MessageDocument;
+use crate::store::conversation::message::{MessageDocument, MessageDocumentBuilder};
 use crate::store::discovery::Discovery;
 use crate::store::document::files::FileDocument;
 use crate::store::document::image_dag::ImageDag;
@@ -51,7 +47,7 @@ use crate::store::topics::PeerTopic;
 use crate::store::{
     CommunityUpdateKind, ConversationEvents, ConversationImageType, MAX_COMMUNITY_CHANNELS,
     MAX_COMMUNITY_DESCRIPTION, MAX_CONVERSATION_BANNER_SIZE, MAX_CONVERSATION_ICON_SIZE,
-    MAX_MESSAGE_SIZE, MAX_REACTIONS, MIN_MESSAGE_SIZE,
+    MAX_MESSAGE_SIZE, MIN_MESSAGE_SIZE,
 };
 use crate::utils::{ByteCollection, ExtensionType};
 use crate::{
@@ -326,7 +322,7 @@ pub struct CommunityTask {
     file: FileStore,
     identity: IdentityStore,
     discovery: Discovery,
-    pending_key_exchange: IndexMap<DID, Vec<(Vec<u8>, bool)>>,
+    pending_key_exchange: IndexMap<DID, Vec<(Bytes, bool)>>,
     document: CommunityDocument,
     keystore: Keystore,
 
@@ -1180,15 +1176,14 @@ impl CommunityTask {
         did_key: &DID,
         event: ConversationEvents,
     ) -> Result<(), Error> {
-        let event = serde_json::to_vec(&event)?;
-
         let keypair = self.root.keypair();
 
-        let bytes = ecdh_encrypt(keypair, Some(did_key), &event)?;
-
-        let payload = PayloadBuilder::new(keypair, bytes)
+        let payload = PayloadBuilder::new(keypair, event)
+            .add_recipient(did_key)?
             .from_ipfs(&self.ipfs)
             .await?;
+
+        let bytes = payload.to_bytes()?;
 
         let peer_id = did_key.to_peer_id()?;
         let peers = self.ipfs.pubsub_peers(Some(did_key.messaging())).await?;
@@ -1199,19 +1194,14 @@ impl CommunityTask {
             || (peers.contains(&peer_id)
                 && self
                     .ipfs
-                    .pubsub_publish(did_key.messaging(), payload.to_bytes()?)
+                    .pubsub_publish(did_key.messaging(), bytes.clone())
                     .await
                     .is_err())
         {
             tracing::warn!(id=%&self.community_id, "Unable to publish to topic. Queuing event");
             self.queue_event(
                 did_key.clone(),
-                QueueItem::direct(
-                    None,
-                    peer_id,
-                    did_key.messaging(),
-                    payload.message(None)?.to_vec(),
-                ),
+                QueueItem::direct(None, peer_id, did_key.messaging(), bytes.clone()),
             )
             .await;
             time = false;
@@ -1226,50 +1216,48 @@ impl CommunityTask {
     }
 
     async fn process_msg_event(&mut self, msg: Message) -> Result<(), Error> {
-        let data = PayloadMessage::<Vec<u8>>::from_bytes(&msg.data)?;
+        let data = PayloadMessage::<CommunityMessagingEvents>::from_bytes(&msg.data)?;
         let sender = data.sender().to_did()?;
 
         let keypair = self.root.keypair();
 
         let id = self.community_id;
 
-        let bytes = {
-            let key = match self.keystore.get_latest(keypair, &sender) {
-                Ok(key) => key,
-                Err(Error::PublicKeyDoesntExist) => {
-                    // If we are not able to get the latest key from the store, this is because we are still awaiting on the response from the key exchange
-                    // So what we should so instead is set aside the payload until we receive the key exchange then attempt to process it again
+        let event = match self.keystore.get_latest(keypair, &sender) {
+            Ok(key) => data.message_from_key(&key)?,
+            Err(Error::PublicKeyDoesntExist) => {
+                // match data.message(keypair) {
+                //     Ok(message) => {
+                //         message
+                //     }
+                //     _ => {
+                // If we are not able to get the latest key from the store, this is because we are still awaiting on the response from the key exchange
+                // So what we should so instead is set aside the payload until we receive the key exchange then attempt to process it again
 
-                    // Note: We can set aside the data without the payload being owned directly due to the data already been verified
-                    //       so we can own the data directly without worrying about the lifetime
-                    //       however, we may want to eventually validate the data to ensure it havent been tampered in some way
-                    //       while waiting for the response.
+                // Note: We can set aside the data without the payload being owned directly due to the data already been verified
+                //       so we can own the data directly without worrying about the lifetime
+                //       however, we may want to eventually validate the data to ensure it havent been tampered in some way
+                //       while waiting for the response.
+                let bytes = data.to_bytes()?;
+                self.pending_key_exchange
+                    .entry(sender)
+                    .or_default()
+                    .push((bytes, false));
 
-                    self.pending_key_exchange
-                        .entry(sender)
-                        .or_default()
-                        .push((data.message(None)?, false));
+                // Maybe send a request? Although we could, we should check to determine if one was previously sent or queued first,
+                // but for now we can leave this commented until the queue is removed and refactored.
+                // _ = self.request_key(id, &data.sender()).await;
 
-                    // Maybe send a request? Although we could, we should check to determine if one was previously sent or queued first,
-                    // but for now we can leave this commented until the queue is removed and refactored.
-                    // _ = self.request_key(id, &data.sender()).await;
-
-                    // Note: We will mark this as `Ok` since this is pending request to be resolved
-                    return Ok(());
-                }
-                Err(e) => {
-                    tracing::warn!(id = %id, sender = %data.sender(), error = %e, "Failed to obtain key");
-                    return Err(e);
-                }
-            };
-
-            Cipher::direct_decrypt(&data.message(None)?, &key)?
+                // Note: We will mark this as `Ok` since this is pending request to be resolved
+                return Ok(());
+                //     }
+                // }
+            }
+            Err(e) => {
+                tracing::warn!(id = %id, sender = %data.sender(), error = %e, "Failed to obtain key");
+                return Err(e);
+            }
         };
-
-        let event = serde_json::from_slice::<CommunityMessagingEvents>(&bytes).map_err(|e| {
-            tracing::warn!(id = %id, sender = %data.sender(), error = %e, "Failed to deserialize message");
-            e
-        })?;
 
         message_event(self, &sender, event).await?;
 
@@ -1300,11 +1288,12 @@ impl CommunityTask {
 
         let keypair = self.root.keypair();
 
-        let bytes = ecdh_encrypt(keypair, Some(did), serde_json::to_vec(&request)?)?;
-
-        let payload = PayloadBuilder::new(keypair, bytes)
+        let payload = PayloadBuilder::new(keypair, request)
+            .add_recipient(did)?
             .from_ipfs(&self.ipfs)
             .await?;
+
+        let bytes = payload.to_bytes()?;
 
         let topic = community.exchange_topic(did);
 
@@ -1314,19 +1303,14 @@ impl CommunityTask {
             || (peers.contains(&peer_id)
                 && self
                     .ipfs
-                    .pubsub_publish(topic.clone(), payload.to_bytes()?)
+                    .pubsub_publish(topic.clone(), bytes.clone())
                     .await
                     .is_err())
         {
             tracing::warn!(id = %self.community_id, "Unable to publish to topic");
             self.queue_event(
                 did.clone(),
-                QueueItem::direct(
-                    None,
-                    peer_id,
-                    topic.clone(),
-                    payload.message(None)?.to_vec(),
-                ),
+                QueueItem::direct(None, peer_id, topic.clone(), bytes),
             )
             .await;
         }
@@ -1337,13 +1321,13 @@ impl CommunityTask {
     }
 
     pub async fn send_message_event(&self, event: CommunityMessagingEvents) -> Result<(), Error> {
-        let event = serde_json::to_vec(&event)?;
-
         let key = self.community_key(None)?;
 
-        let bytes = Cipher::direct_encrypt(&event, &key)?;
+        let recipients = self.document.participants();
 
-        let payload = PayloadBuilder::new(self.root.keypair(), bytes)
+        let payload = PayloadBuilder::new(self.root.keypair(), event)
+            .add_recipients(recipients)?
+            .set_key(key)
             .from_ipfs(&self.ipfs)
             .await?;
 
@@ -1472,7 +1456,7 @@ impl CommunityTask {
                     });
                 }
 
-                let document = FileDocument::new(&self.ipfs, &file).await?;
+                let document = FileDocument::new(&file);
                 let cid = document
                     .reference
                     .as_ref()
@@ -2852,15 +2836,15 @@ impl CommunityTask {
         let keypair = self.root.keypair();
         let own_did = self.identity.did_key();
 
-        let mut message = warp::raygun::Message::default();
-        message.set_conversation_id(channel_id);
-        message.set_sender(own_did.clone());
-        message.set_lines(messages.clone());
-
-        let message_id = message.id();
         let keystore = pubkey_or_keystore(&*self)?;
 
-        let message = MessageDocument::new(&self.ipfs, keypair, message, keystore.as_ref()).await?;
+        let message = MessageDocumentBuilder::new(keypair, keystore.as_ref())
+            .set_conversation_id(channel_id)
+            .set_sender(own_did.clone())
+            .set_message(messages.clone())?
+            .build()?;
+
+        let message_id = message.id;
 
         let channel = match self.document.channels.get_mut(&channel_id.to_string()) {
             Some(c) => c,
@@ -2968,24 +2952,10 @@ impl CommunityTask {
 
         let mut message_document = channel.get_message_document(&self.ipfs, message_id).await?;
 
-        let mut message = message_document
-            .resolve(&self.ipfs, keypair, true, keystore.as_ref())
-            .await?;
-
-        let sender = message.sender();
-
-        let own_did = &self.identity.did_key();
-
-        if sender.ne(own_did) {
+        if message_document.sender() != self.identity.did_key() {
             return Err(Error::InvalidMessage);
         }
-
-        message.lines_mut().clone_from(&messages);
-        message.set_modified(Utc::now());
-
-        message_document
-            .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
-            .await?;
+        message_document.set_message(keypair, keystore.as_ref(), &messages)?;
 
         let nonce = message_document.nonce_from_message()?;
         let signature = message_document.signature.expect("message to be signed");
@@ -3080,15 +3050,14 @@ impl CommunityTask {
 
         let own_did = self.identity.did_key();
 
-        let mut message = warp::raygun::Message::default();
-        message.set_conversation_id(channel_id);
-        message.set_sender(own_did.clone());
-        message.set_lines(messages);
-        message.set_replied(Some(message_id));
-
         let keystore = pubkey_or_keystore(&*self)?;
 
-        let message = MessageDocument::new(&self.ipfs, keypair, message, keystore.as_ref()).await?;
+        let message = MessageDocumentBuilder::new(keypair, keystore.as_ref())
+            .set_conversation_id(channel_id)
+            .set_sender(own_did.clone())
+            .set_replied(message_id)
+            .set_message(messages)?
+            .build()?;
 
         let message_id = message.id;
 
@@ -3211,10 +3180,7 @@ impl CommunityTask {
 
         let tx = self.event_broadcast.clone();
 
-        let keypair = self.root.keypair();
         let own_did = self.identity.did_key();
-
-        let keystore = pubkey_or_keystore(&*self)?;
 
         let channel = match self.document.channels.get_mut(&channel_id.to_string()) {
             Some(c) => c,
@@ -3223,16 +3189,12 @@ impl CommunityTask {
 
         let mut message_document = channel.get_message_document(&self.ipfs, message_id).await?;
 
-        let mut message = message_document
-            .resolve(&self.ipfs, keypair, true, keystore.as_ref())
-            .await?;
-
         let event = match state {
             PinState::Pin => {
-                if message.pinned() {
+                if message_document.pinned() {
                     return Ok(());
                 }
-                *message.pinned_mut() = true;
+                message_document.set_pin(true);
                 MessageEventKind::CommunityMessagePinned {
                     community_id: self.community_id,
                     channel_id,
@@ -3240,10 +3202,10 @@ impl CommunityTask {
                 }
             }
             PinState::Unpin => {
-                if !message.pinned() {
+                if !message_document.pinned() {
                     return Ok(());
                 }
-                *message.pinned_mut() = false;
+                message_document.set_pin(false);
                 MessageEventKind::CommunityMessageUnpinned {
                     community_id: self.community_id,
                     channel_id,
@@ -3251,10 +3213,6 @@ impl CommunityTask {
                 }
             }
         };
-
-        message_document
-            .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
-            .await?;
 
         let _message_cid = channel
             .update_message_document(&self.ipfs, &message_document)
@@ -3312,11 +3270,7 @@ impl CommunityTask {
 
         let tx = self.event_broadcast.clone();
 
-        let keypair = self.root.keypair();
-
         let own_did = self.identity.did_key();
-
-        let keystore = pubkey_or_keystore(&*self)?;
 
         // let recipients = self.document.participants();
 
@@ -3327,36 +3281,11 @@ impl CommunityTask {
 
         let mut message_document = channel.get_message_document(&self.ipfs, message_id).await?;
 
-        let mut message = message_document
-            .resolve(&self.ipfs, keypair, true, keystore.as_ref())
-            .await?;
-
-        let reactions = message.reactions_mut();
-
         let message_cid;
 
         match state {
             ReactionState::Add => {
-                if reactions.len() >= MAX_REACTIONS {
-                    return Err(Error::InvalidLength {
-                        context: "reactions".into(),
-                        current: reactions.len(),
-                        minimum: None,
-                        maximum: Some(MAX_REACTIONS),
-                    });
-                }
-
-                let entry = reactions.entry(emoji.clone()).or_default();
-
-                if entry.contains(&own_did) {
-                    return Err(Error::ReactionExist);
-                }
-
-                entry.push(own_did.clone());
-
-                message_document
-                    .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
-                    .await?;
+                message_document.add_reaction(&emoji, own_did.clone())?;
 
                 message_cid = channel
                     .update_message_document(&self.ipfs, &message_document)
@@ -3372,25 +3301,7 @@ impl CommunityTask {
                 });
             }
             ReactionState::Remove => {
-                match reactions.entry(emoji.clone()) {
-                    indexmap::map::Entry::Occupied(mut e) => {
-                        let list = e.get_mut();
-
-                        if !list.contains(&own_did) {
-                            return Err(Error::ReactionDoesntExist);
-                        }
-
-                        list.retain(|did| did != &own_did);
-                        if list.is_empty() {
-                            e.swap_remove();
-                        }
-                    }
-                    indexmap::map::Entry::Vacant(_) => return Err(Error::ReactionDoesntExist),
-                };
-
-                message_document
-                    .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
-                    .await?;
+                message_document.remove_reaction(&emoji, own_did.clone())?;
 
                 message_cid = channel
                     .update_message_document(&self.ipfs, &message_document)
@@ -3502,7 +3413,6 @@ impl CommunityTask {
         let keystore = pubkey_or_keystore(&*self)?;
 
         let stream = AttachmentStream::new(
-            &self.ipfs,
             self.root.keypair(),
             &self.identity.did_key(),
             &self.file,
@@ -3554,7 +3464,6 @@ impl CommunityTask {
 
         let attachment = message
             .attachments()
-            .iter()
             .find(|attachment| attachment.name == file)
             .ok_or(Error::FileNotFound)?;
 
@@ -3597,7 +3506,6 @@ impl CommunityTask {
 
         let attachment = message
             .attachments()
-            .iter()
             .find(|attachment| attachment.name == file)
             .ok_or(Error::FileNotFound)?;
 
@@ -3667,15 +3575,21 @@ impl CommunityTask {
         queue: bool,
         exclude: Vec<DID>,
     ) -> Result<(), Error> {
-        let event = serde_json::to_vec(&event)?;
         let keypair = self.root.keypair();
         let own_did = self.identity.did_key();
 
         let key = self.community_key(None)?;
 
-        let bytes = Cipher::direct_encrypt(&event, &key)?;
+        let recipients = self.document.participants();
 
-        let payload = PayloadBuilder::new(keypair, bytes)
+        let payload = PayloadBuilder::new(keypair, event)
+            .add_recipients(
+                recipients
+                    .iter()
+                    .filter(|did| own_did.ne(did))
+                    .filter(|did| !exclude.contains(did)),
+            )?
+            .set_key(key)
             .from_ipfs(&self.ipfs)
             .await?;
 
@@ -3684,6 +3598,8 @@ impl CommunityTask {
         let mut can_publish = false;
 
         let recipients = self.document.participants().clone();
+
+        let bytes = payload.to_bytes()?;
 
         for recipient in recipients
             .iter()
@@ -3705,7 +3621,7 @@ impl CommunityTask {
                                 message_id,
                                 peer_id,
                                 self.document.topic(),
-                                payload.message(None)?.to_vec(),
+                                bytes.clone(),
                             ),
                         )
                         .await;
@@ -3715,7 +3631,6 @@ impl CommunityTask {
         }
 
         if can_publish {
-            let bytes = payload.to_bytes()?;
             tracing::trace!(id = %self.community_id, "Payload size: {} bytes", bytes.len());
             let timer = Instant::now();
             let mut time = true;
@@ -3784,7 +3699,7 @@ impl CommunityTask {
 
 async fn message_event(
     this: &mut CommunityTask,
-    _sender: &DID,
+    sender: &DID,
     events: CommunityMessagingEvents,
 ) -> Result<(), Error> {
     let community_id = this.community_id;
@@ -3800,9 +3715,7 @@ async fn message_event(
             channel_id,
             message,
         } => {
-            if !message.verify() {
-                return Err(Error::InvalidMessage);
-            }
+            message.verify()?;
 
             let message_id = message.id;
 
@@ -3881,9 +3794,7 @@ async fn message_event(
 
             let mut message_document = channel.get_message_document(&this.ipfs, message_id).await?;
 
-            let mut message = message_document
-                .resolve(&this.ipfs, keypair, true, keystore.as_ref())
-                .await?;
+            message_document.verify()?;
 
             let lines_value_length: usize = lines
                 .iter()
@@ -3906,21 +3817,14 @@ async fn message_event(
                 });
             }
 
-            *message.lines_mut() = lines;
-            message.set_modified(modified);
-
-            let sender = message.sender().to_owned();
-
-            message_document
-                .update(
-                    &this.ipfs,
-                    keypair,
-                    message,
-                    (!signature.is_empty() && sender.ne(&own_did)).then_some(signature),
-                    keystore.as_ref(),
-                    Some(nonce.as_slice()),
-                )
-                .await?;
+            message_document.set_message_with_nonce(
+                keypair,
+                keystore.as_ref(),
+                modified,
+                lines,
+                (!signature.is_empty() && sender.ne(&own_did)).then_some(signature),
+                Some(nonce.as_slice()),
+            )?;
 
             channel
                 .update_message_document(&this.ipfs, &message_document)
@@ -3992,16 +3896,12 @@ async fn message_event(
 
             let mut message_document = channel.get_message_document(&this.ipfs, message_id).await?;
 
-            let mut message = message_document
-                .resolve(&this.ipfs, keypair, true, keystore.as_ref())
-                .await?;
-
             let event = match state {
                 PinState::Pin => {
-                    if message.pinned() {
+                    if message_document.pinned() {
                         return Ok(());
                     }
-                    *message.pinned_mut() = true;
+                    message_document.set_pin(true);
                     MessageEventKind::CommunityMessagePinned {
                         community_id,
                         channel_id,
@@ -4009,10 +3909,10 @@ async fn message_event(
                     }
                 }
                 PinState::Unpin => {
-                    if !message.pinned() {
+                    if !message_document.pinned() {
                         return Ok(());
                     }
-                    *message.pinned_mut() = false;
+                    message_document.set_pin(false);
                     MessageEventKind::CommunityMessageUnpinned {
                         community_id,
                         channel_id,
@@ -4020,10 +3920,6 @@ async fn message_event(
                     }
                 }
             };
-
-            message_document
-                .update(&this.ipfs, keypair, message, None, keystore.as_ref(), None)
-                .await?;
 
             channel
                 .update_message_document(&this.ipfs, &message_document)
@@ -4050,34 +3946,9 @@ async fn message_event(
 
             let mut message_document = channel.get_message_document(&this.ipfs, message_id).await?;
 
-            let mut message = message_document
-                .resolve(&this.ipfs, keypair, true, keystore.as_ref())
-                .await?;
-
-            let reactions = message.reactions_mut();
-
             match state {
                 ReactionState::Add => {
-                    if reactions.len() >= MAX_REACTIONS {
-                        return Err(Error::InvalidLength {
-                            context: "reactions".into(),
-                            current: reactions.len(),
-                            minimum: None,
-                            maximum: Some(MAX_REACTIONS),
-                        });
-                    }
-
-                    let entry = reactions.entry(emoji.clone()).or_default();
-
-                    if entry.contains(&reactor) {
-                        return Err(Error::ReactionExist);
-                    }
-
-                    entry.push(reactor.clone());
-
-                    message_document
-                        .update(&this.ipfs, keypair, message, None, keystore.as_ref(), None)
-                        .await?;
+                    message_document.add_reaction(&emoji, reactor.clone())?;
 
                     channel
                         .update_message_document(&this.ipfs, &message_document)
@@ -4099,25 +3970,7 @@ async fn message_event(
                     }
                 }
                 ReactionState::Remove => {
-                    match reactions.entry(emoji.clone()) {
-                        indexmap::map::Entry::Occupied(mut e) => {
-                            let list = e.get_mut();
-
-                            if !list.contains(&reactor) {
-                                return Err(Error::ReactionDoesntExist);
-                            }
-
-                            list.retain(|did| did != &reactor);
-                            if list.is_empty() {
-                                e.swap_remove();
-                            }
-                        }
-                        indexmap::map::Entry::Vacant(_) => return Err(Error::ReactionDoesntExist),
-                    };
-
-                    message_document
-                        .update(&this.ipfs, keypair, message, None, keystore.as_ref(), None)
-                        .await?;
+                    message_document.remove_reaction(&emoji, own_did.clone())?;
 
                     channel
                         .update_message_document(&this.ipfs, &message_document)
@@ -4522,13 +4375,11 @@ async fn process_request_response_event(
     let keypair = &this.root.keypair().clone();
     let own_did = this.identity.did_key();
 
-    let payload = PayloadMessage::<Vec<u8>>::from_bytes(&req.data)?;
+    let payload = PayloadMessage::<ConversationRequestResponse>::from_bytes(&req.data)?;
 
     let sender = payload.sender().to_did()?;
 
-    let data = ecdh_decrypt(keypair, Some(&sender), payload.message(None)?)?;
-
-    let event = serde_json::from_slice::<ConversationRequestResponse>(&data)?;
+    let event = payload.message(keypair)?;
 
     tracing::debug!(id=%this.community_id, ?event, "Event received");
     match event {
@@ -4568,9 +4419,8 @@ async fn process_request_response_event(
 
                 let topic = this.document.exchange_topic(&sender);
 
-                let bytes = ecdh_encrypt(keypair, Some(&sender), serde_json::to_vec(&response)?)?;
-
-                let payload = PayloadBuilder::new(keypair, bytes)
+                let payload = PayloadBuilder::new(keypair, response)
+                    .add_recipient(&sender)?
                     .from_ipfs(&this.ipfs)
                     .await?;
 
@@ -4588,7 +4438,7 @@ async fn process_request_response_event(
                     || (peers.contains(&peer_id)
                         && this
                             .ipfs
-                            .pubsub_publish(topic.clone(), bytes)
+                            .pubsub_publish(topic.clone(), bytes.clone())
                             .await
                             .is_err())
                 {
@@ -4596,12 +4446,7 @@ async fn process_request_response_event(
                     // TODO
                     this.queue_event(
                         sender.clone(),
-                        QueueItem::direct(
-                            None,
-                            peer_id,
-                            topic.clone(),
-                            payload.message(None)?.to_vec(),
-                        ),
+                        QueueItem::direct(None, peer_id, topic.clone(), bytes.clone()),
                     )
                     .await;
                 }
@@ -4671,8 +4516,8 @@ async fn process_pending_payload(this: &mut CommunityTask) {
         let event_fn = || {
             let keypair = root.keypair();
             let key = store.get_latest(keypair, &sender)?;
-            let data = Cipher::direct_decrypt(&data, &key)?;
-            let event = serde_json::from_slice(&data)?;
+            let payload = PayloadMessage::<_>::from_bytes(&data)?;
+            let event = payload.message_from_key(&key)?;
             Ok::<_, Error>(event)
         };
 
@@ -4691,14 +4536,12 @@ async fn process_pending_payload(this: &mut CommunityTask) {
 }
 
 async fn process_community_event(this: &mut CommunityTask, message: Message) -> Result<(), Error> {
-    let payload = PayloadMessage::<Vec<u8>>::from_bytes(&message.data)?;
+    let payload = PayloadMessage::<CommunityMessagingEvents>::from_bytes(&message.data)?;
     let sender = payload.sender().to_did()?;
 
     let key = this.community_key(Some(&sender))?;
 
-    let data = Cipher::direct_decrypt(&payload.message(None)?, &key)?;
-
-    let event = match serde_json::from_slice::<CommunityMessagingEvents>(&data)? {
+    let event = match payload.message_from_key(&key)? {
         event @ CommunityMessagingEvents::Event { .. } => event,
         _ => return Err(Error::Other),
     };
@@ -4739,12 +4582,13 @@ struct QueueItem {
     m_id: Option<Uuid>,
     peer: PeerId,
     topic: String,
-    data: Vec<u8>,
+    data: Bytes,
     sent: bool,
 }
 
 impl QueueItem {
-    pub fn direct(m_id: Option<Uuid>, peer: PeerId, topic: String, data: Vec<u8>) -> Self {
+    pub fn direct(m_id: Option<Uuid>, peer: PeerId, topic: String, data: impl Into<Bytes>) -> Self {
+        let data = data.into();
         QueueItem {
             m_id,
             peer,
@@ -4758,7 +4602,6 @@ impl QueueItem {
 //TODO: Replace
 async fn process_queue(this: &mut CommunityTask) {
     let mut changed = false;
-    let keypair = &this.root.keypair().clone();
     for (did, items) in this.queue.iter_mut() {
         let Ok(peer_id) = did.to_peer_id() else {
             continue;
@@ -4792,22 +4635,7 @@ async fn process_queue(this: &mut CommunityTask) {
                 continue;
             }
 
-            let payload = match PayloadBuilder::<_>::new(keypair, data.clone())
-                .from_ipfs(&this.ipfs)
-                .await
-            {
-                Ok(p) => p,
-                Err(_e) => {
-                    // tracing::warn!(error = %_e, "unable to build payload")
-                    continue;
-                }
-            };
-
-            let Ok(bytes) = payload.to_bytes() else {
-                continue;
-            };
-
-            if let Err(e) = this.ipfs.pubsub_publish(topic.clone(), bytes).await {
+            if let Err(e) = this.ipfs.pubsub_publish(topic.clone(), data.clone()).await {
                 tracing::error!("Error publishing to topic: {e}");
                 continue;
             }

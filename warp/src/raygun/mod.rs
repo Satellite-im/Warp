@@ -1099,7 +1099,7 @@ pub struct Message {
     pinned: bool,
 
     /// List of the reactions for the `Message`
-    reactions: IndexMap<String, Vec<DID>>,
+    reactions: IndexMap<String, IndexSet<DID>>,
 
     /// List of users public keys mentioned in this message
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1188,7 +1188,7 @@ impl Message {
         self.pinned
     }
 
-    pub fn reactions(&self) -> &IndexMap<String, Vec<DID>> {
+    pub fn reactions(&self) -> &IndexMap<String, IndexSet<DID>> {
         &self.reactions
     }
 
@@ -1242,7 +1242,7 @@ impl Message {
         self.pinned = pin
     }
 
-    pub fn set_reactions(&mut self, reaction: IndexMap<String, Vec<DID>>) {
+    pub fn set_reactions(&mut self, reaction: IndexMap<String, IndexSet<DID>>) {
         self.reactions = reaction
     }
 
@@ -1273,7 +1273,7 @@ impl Message {
         &mut self.pinned
     }
 
-    pub fn reactions_mut(&mut self) -> &mut IndexMap<String, Vec<DID>> {
+    pub fn reactions_mut(&mut self) -> &mut IndexMap<String, IndexSet<DID>> {
         &mut self.reactions
     }
 

@@ -1,4 +1,4 @@
-use crate::store::conversation::message::MessageDocument;
+use crate::store::conversation::message::{MessageDocument, MessageDocumentBuilder};
 use crate::store::files::FileStore;
 use crate::store::keystore::Keystore;
 use crate::store::message::CHAT_DIRECTORY;
@@ -9,7 +9,7 @@ use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 use futures::stream::SelectAll;
 use futures::{stream, FutureExt, SinkExt, Stream, StreamExt};
-use rust_ipfs::{Ipfs, Keypair};
+use rust_ipfs::Keypair;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -24,7 +24,6 @@ use warp::raygun::{AttachmentKind, Location, LocationKind, MessageType};
 type AOneShot = (MessageDocument, oneshot::Sender<Result<(), Error>>);
 type ProgressedStream = BoxStream<'static, (LocationKind, Progression, Option<File>)>;
 pub struct AttachmentStream {
-    ipfs: Ipfs,
     keypair: Keypair,
     local_did: DID,
     attachment_tx: futures::channel::mpsc::Sender<AOneShot>,
@@ -52,7 +51,6 @@ enum AttachmentState {
 
 impl AttachmentStream {
     pub fn new(
-        ipfs: &Ipfs,
         keypair: &Keypair,
         local_did: &DID,
         file_store: &FileStore,
@@ -61,7 +59,6 @@ impl AttachmentStream {
         attachment_tx: futures::channel::mpsc::Sender<AOneShot>,
     ) -> Self {
         Self {
-            ipfs: ipfs.clone(),
             keypair: keypair.clone(),
             local_did: local_did.clone(),
             file_store: file_store.clone(),
@@ -455,29 +452,27 @@ impl Stream for AttachmentStream {
                             let reply_id = this.reply_to;
                             let message_id = this.message_id;
                             let local_did = this.local_did.clone();
-                            let ipfs = this.ipfs.clone();
                             let keystore = this.keystore.clone();
                             let keypair = this.keypair.clone();
                             let mut atx = this.attachment_tx.clone();
                             let final_fut = async move {
-                                let mut message = warp::raygun::Message::default();
-                                message.set_id(message_id);
-                                message.set_message_type(MessageType::Attachment);
-                                message.set_conversation_id(conversation_id);
-                                message.set_sender(local_did);
-                                message.set_attachment(attachments);
-                                if let Some(messages) = messages {
-                                    message.set_lines(messages);
-                                }
-                                message.set_replied(reply_id);
+                                let mut message_builder =
+                                    MessageDocumentBuilder::new(&keypair, keystore.as_ref())
+                                        .set_message_id(message_id)
+                                        .set_message_type(MessageType::Attachment)
+                                        .set_conversation_id(conversation_id)
+                                        .set_sender(local_did)
+                                        .set_replied(reply_id);
 
-                                let message = MessageDocument::new(
-                                    &ipfs,
-                                    &keypair,
-                                    message,
-                                    keystore.as_ref(),
-                                )
-                                .await?;
+                                if let Some(messages) = messages {
+                                    message_builder = message_builder.set_message(messages)?;
+                                }
+
+                                for file in attachments {
+                                    message_builder = message_builder.add_attachment(file)?;
+                                }
+
+                                let message = message_builder.build()?;
 
                                 let (tx, rx) = oneshot::channel();
                                 _ = atx.send((message, tx)).await;
