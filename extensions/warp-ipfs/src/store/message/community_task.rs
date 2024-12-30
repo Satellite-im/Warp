@@ -37,7 +37,7 @@ use web_time::Instant;
 use crate::store::community::{
     CommunityChannelDocument, CommunityDocument, CommunityInviteDocument, CommunityRoleDocument,
 };
-use crate::store::conversation::message::MessageDocument;
+use crate::store::conversation::message::{MessageDocument, MessageDocumentBuilder};
 use crate::store::discovery::Discovery;
 use crate::store::document::files::FileDocument;
 use crate::store::document::image_dag::ImageDag;
@@ -47,7 +47,7 @@ use crate::store::topics::PeerTopic;
 use crate::store::{
     CommunityJoinEvents, CommunityUpdateKind, ConversationEvents, ConversationImageType,
     MAX_COMMUNITY_CHANNELS, MAX_COMMUNITY_DESCRIPTION, MAX_CONVERSATION_BANNER_SIZE,
-    MAX_CONVERSATION_ICON_SIZE, MAX_MESSAGE_SIZE, MAX_REACTIONS, MIN_MESSAGE_SIZE,
+    MAX_CONVERSATION_ICON_SIZE, MAX_MESSAGE_SIZE, MIN_MESSAGE_SIZE,
 };
 use crate::utils::{ByteCollection, ExtensionType};
 use crate::{
@@ -2891,15 +2891,15 @@ impl CommunityTask {
         let keypair = self.root.keypair();
         let own_did = self.identity.did_key();
 
-        let mut message = warp::raygun::Message::default();
-        message.set_conversation_id(channel_id);
-        message.set_sender(own_did.clone());
-        message.set_lines(messages.clone());
-
-        let message_id = message.id();
         let keystore = pubkey_or_keystore(&*self)?;
 
-        let message = MessageDocument::new(keypair, message, keystore.as_ref())?;
+        let message = MessageDocumentBuilder::new(keypair, keystore.as_ref())
+            .set_conversation_id(channel_id)
+            .set_sender(own_did.clone())
+            .set_message(messages.clone())?
+            .build()?;
+
+        let message_id = message.id;
 
         let channel = match self.document.channels.get_mut(&channel_id.to_string()) {
             Some(c) => c,
@@ -3007,24 +3007,10 @@ impl CommunityTask {
 
         let mut message_document = channel.get_message_document(&self.ipfs, message_id).await?;
 
-        let mut message = message_document
-            .resolve(&self.ipfs, keypair, true, keystore.as_ref())
-            .await?;
-
-        let sender = message.sender();
-
-        let own_did = &self.identity.did_key();
-
-        if sender.ne(own_did) {
+        if message_document.sender() != self.identity.did_key() {
             return Err(Error::InvalidMessage);
         }
-
-        message.lines_mut().clone_from(&messages);
-        message.set_modified(Utc::now());
-
-        message_document
-            .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
-            .await?;
+        message_document.set_message(keypair, keystore.as_ref(), &messages)?;
 
         let nonce = message_document.nonce_from_message()?;
         let signature = message_document.signature.expect("message to be signed");
@@ -3119,15 +3105,14 @@ impl CommunityTask {
 
         let own_did = self.identity.did_key();
 
-        let mut message = warp::raygun::Message::default();
-        message.set_conversation_id(channel_id);
-        message.set_sender(own_did.clone());
-        message.set_lines(messages);
-        message.set_replied(Some(message_id));
-
         let keystore = pubkey_or_keystore(&*self)?;
 
-        let message = MessageDocument::new(keypair, message, keystore.as_ref())?;
+        let message = MessageDocumentBuilder::new(keypair, keystore.as_ref())
+            .set_conversation_id(channel_id)
+            .set_sender(own_did.clone())
+            .set_replied(message_id)
+            .set_message(messages)?
+            .build()?;
 
         let message_id = message.id;
 
@@ -3250,10 +3235,7 @@ impl CommunityTask {
 
         let tx = self.event_broadcast.clone();
 
-        let keypair = self.root.keypair();
         let own_did = self.identity.did_key();
-
-        let keystore = pubkey_or_keystore(&*self)?;
 
         let channel = match self.document.channels.get_mut(&channel_id.to_string()) {
             Some(c) => c,
@@ -3262,16 +3244,12 @@ impl CommunityTask {
 
         let mut message_document = channel.get_message_document(&self.ipfs, message_id).await?;
 
-        let mut message = message_document
-            .resolve(&self.ipfs, keypair, true, keystore.as_ref())
-            .await?;
-
         let event = match state {
             PinState::Pin => {
-                if message.pinned() {
+                if message_document.pinned() {
                     return Ok(());
                 }
-                *message.pinned_mut() = true;
+                message_document.set_pin(true);
                 MessageEventKind::CommunityMessagePinned {
                     community_id: self.community_id,
                     channel_id,
@@ -3279,10 +3257,10 @@ impl CommunityTask {
                 }
             }
             PinState::Unpin => {
-                if !message.pinned() {
+                if !message_document.pinned() {
                     return Ok(());
                 }
-                *message.pinned_mut() = false;
+                message_document.set_pin(false);
                 MessageEventKind::CommunityMessageUnpinned {
                     community_id: self.community_id,
                     channel_id,
@@ -3290,10 +3268,6 @@ impl CommunityTask {
                 }
             }
         };
-
-        message_document
-            .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
-            .await?;
 
         let _message_cid = channel
             .update_message_document(&self.ipfs, &message_document)
@@ -3351,11 +3325,7 @@ impl CommunityTask {
 
         let tx = self.event_broadcast.clone();
 
-        let keypair = self.root.keypair();
-
         let own_did = self.identity.did_key();
-
-        let keystore = pubkey_or_keystore(&*self)?;
 
         // let recipients = self.document.participants();
 
@@ -3366,36 +3336,11 @@ impl CommunityTask {
 
         let mut message_document = channel.get_message_document(&self.ipfs, message_id).await?;
 
-        let mut message = message_document
-            .resolve(&self.ipfs, keypair, true, keystore.as_ref())
-            .await?;
-
-        let reactions = message.reactions_mut();
-
         let message_cid;
 
         match state {
             ReactionState::Add => {
-                if reactions.len() >= MAX_REACTIONS {
-                    return Err(Error::InvalidLength {
-                        context: "reactions".into(),
-                        current: reactions.len(),
-                        minimum: None,
-                        maximum: Some(MAX_REACTIONS),
-                    });
-                }
-
-                let entry = reactions.entry(emoji.clone()).or_default();
-
-                if entry.contains(&own_did) {
-                    return Err(Error::ReactionExist);
-                }
-
-                entry.push(own_did.clone());
-
-                message_document
-                    .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
-                    .await?;
+                message_document.add_reaction(&emoji, own_did.clone())?;
 
                 message_cid = channel
                     .update_message_document(&self.ipfs, &message_document)
@@ -3411,25 +3356,7 @@ impl CommunityTask {
                 });
             }
             ReactionState::Remove => {
-                match reactions.entry(emoji.clone()) {
-                    indexmap::map::Entry::Occupied(mut e) => {
-                        let list = e.get_mut();
-
-                        if !list.contains(&own_did) {
-                            return Err(Error::ReactionDoesntExist);
-                        }
-
-                        list.retain(|did| did != &own_did);
-                        if list.is_empty() {
-                            e.swap_remove();
-                        }
-                    }
-                    indexmap::map::Entry::Vacant(_) => return Err(Error::ReactionDoesntExist),
-                };
-
-                message_document
-                    .update(&self.ipfs, keypair, message, None, keystore.as_ref(), None)
-                    .await?;
+                message_document.remove_reaction(&emoji, own_did.clone())?;
 
                 message_cid = channel
                     .update_message_document(&self.ipfs, &message_document)
@@ -3592,7 +3519,6 @@ impl CommunityTask {
 
         let attachment = message
             .attachments()
-            .iter()
             .find(|attachment| attachment.name == file)
             .ok_or(Error::FileNotFound)?;
 
@@ -3635,7 +3561,6 @@ impl CommunityTask {
 
         let attachment = message
             .attachments()
-            .iter()
             .find(|attachment| attachment.name == file)
             .ok_or(Error::FileNotFound)?;
 
@@ -3819,7 +3744,7 @@ impl CommunityTask {
 
 async fn message_event(
     this: &mut CommunityTask,
-    _sender: &DID,
+    sender: &DID,
     events: CommunityMessagingEvents,
 ) -> Result<(), Error> {
     let community_id = this.community_id;
@@ -3835,9 +3760,7 @@ async fn message_event(
             channel_id,
             message,
         } => {
-            if !message.verify() {
-                return Err(Error::InvalidMessage);
-            }
+            message.verify()?;
 
             let message_id = message.id;
 
@@ -3916,9 +3839,7 @@ async fn message_event(
 
             let mut message_document = channel.get_message_document(&this.ipfs, message_id).await?;
 
-            let mut message = message_document
-                .resolve(&this.ipfs, keypair, true, keystore.as_ref())
-                .await?;
+            message_document.verify()?;
 
             let lines_value_length: usize = lines
                 .iter()
@@ -3941,21 +3862,14 @@ async fn message_event(
                 });
             }
 
-            *message.lines_mut() = lines;
-            message.set_modified(modified);
-
-            let sender = message.sender().to_owned();
-
-            message_document
-                .update(
-                    &this.ipfs,
-                    keypair,
-                    message,
-                    (!signature.is_empty() && sender.ne(&own_did)).then_some(signature),
-                    keystore.as_ref(),
-                    Some(nonce.as_slice()),
-                )
-                .await?;
+            message_document.set_message_with_nonce(
+                keypair,
+                keystore.as_ref(),
+                modified,
+                lines,
+                (!signature.is_empty() && sender.ne(&own_did)).then_some(signature),
+                Some(nonce.as_slice()),
+            )?;
 
             channel
                 .update_message_document(&this.ipfs, &message_document)
@@ -4027,16 +3941,12 @@ async fn message_event(
 
             let mut message_document = channel.get_message_document(&this.ipfs, message_id).await?;
 
-            let mut message = message_document
-                .resolve(&this.ipfs, keypair, true, keystore.as_ref())
-                .await?;
-
             let event = match state {
                 PinState::Pin => {
-                    if message.pinned() {
+                    if message_document.pinned() {
                         return Ok(());
                     }
-                    *message.pinned_mut() = true;
+                    message_document.set_pin(true);
                     MessageEventKind::CommunityMessagePinned {
                         community_id,
                         channel_id,
@@ -4044,10 +3954,10 @@ async fn message_event(
                     }
                 }
                 PinState::Unpin => {
-                    if !message.pinned() {
+                    if !message_document.pinned() {
                         return Ok(());
                     }
-                    *message.pinned_mut() = false;
+                    message_document.set_pin(false);
                     MessageEventKind::CommunityMessageUnpinned {
                         community_id,
                         channel_id,
@@ -4055,10 +3965,6 @@ async fn message_event(
                     }
                 }
             };
-
-            message_document
-                .update(&this.ipfs, keypair, message, None, keystore.as_ref(), None)
-                .await?;
 
             channel
                 .update_message_document(&this.ipfs, &message_document)
@@ -4085,34 +3991,9 @@ async fn message_event(
 
             let mut message_document = channel.get_message_document(&this.ipfs, message_id).await?;
 
-            let mut message = message_document
-                .resolve(&this.ipfs, keypair, true, keystore.as_ref())
-                .await?;
-
-            let reactions = message.reactions_mut();
-
             match state {
                 ReactionState::Add => {
-                    if reactions.len() >= MAX_REACTIONS {
-                        return Err(Error::InvalidLength {
-                            context: "reactions".into(),
-                            current: reactions.len(),
-                            minimum: None,
-                            maximum: Some(MAX_REACTIONS),
-                        });
-                    }
-
-                    let entry = reactions.entry(emoji.clone()).or_default();
-
-                    if entry.contains(&reactor) {
-                        return Err(Error::ReactionExist);
-                    }
-
-                    entry.push(reactor.clone());
-
-                    message_document
-                        .update(&this.ipfs, keypair, message, None, keystore.as_ref(), None)
-                        .await?;
+                    message_document.add_reaction(&emoji, reactor.clone())?;
 
                     channel
                         .update_message_document(&this.ipfs, &message_document)
@@ -4134,25 +4015,7 @@ async fn message_event(
                     }
                 }
                 ReactionState::Remove => {
-                    match reactions.entry(emoji.clone()) {
-                        indexmap::map::Entry::Occupied(mut e) => {
-                            let list = e.get_mut();
-
-                            if !list.contains(&reactor) {
-                                return Err(Error::ReactionDoesntExist);
-                            }
-
-                            list.retain(|did| did != &reactor);
-                            if list.is_empty() {
-                                e.swap_remove();
-                            }
-                        }
-                        indexmap::map::Entry::Vacant(_) => return Err(Error::ReactionDoesntExist),
-                    };
-
-                    message_document
-                        .update(&this.ipfs, keypair, message, None, keystore.as_ref(), None)
-                        .await?;
+                    message_document.remove_reaction(&emoji, own_did.clone())?;
 
                     channel
                         .update_message_document(&this.ipfs, &message_document)
