@@ -499,8 +499,8 @@ pub struct FileAttachmentDocument {
 }
 
 impl FileAttachmentDocument {
-    pub async fn new(ipfs: &Ipfs, file: &File) -> Result<Self, Error> {
-        let file_document = FileDocument::new(ipfs, file).await?;
+    pub fn new(file: &File) -> Result<Self, Error> {
+        let file_document = FileDocument::new(file);
         file_document.to_attachment()
     }
 
