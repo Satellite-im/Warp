@@ -127,10 +127,11 @@ impl MessageReferenceList {
         if let Ok(message_document) = ipfs
             .get_dag(path)
             .timeout(Duration::from_secs(10))
-            .deserialized()
+            .deserialized::<MessageDocument>()
             .await
         {
             //We can ignore the error
+            message_document.verify()?;
             return Ok(message_document);
         }
 
@@ -142,7 +143,7 @@ impl MessageReferenceList {
             .deserialized::<MessageReferenceList>()
             .await?;
 
-        return refs_list.get(ipfs, message_id).await;
+        refs_list.get(ipfs, message_id).await
     }
 
     #[async_recursion::async_recursion]
