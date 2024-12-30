@@ -1486,7 +1486,7 @@ impl CommunityTask {
                     });
                 }
 
-                let document = FileDocument::new(&self.ipfs, &file).await?;
+                let document = FileDocument::new(&file);
                 let cid = document
                     .reference
                     .as_ref()
@@ -2963,7 +2963,7 @@ impl CommunityTask {
         let message_id = message.id();
         let keystore = pubkey_or_keystore(&*self)?;
 
-        let message = MessageDocument::new(&self.ipfs, keypair, message, keystore.as_ref()).await?;
+        let message = MessageDocument::new(keypair, message, keystore.as_ref())?;
 
         let channel = match self.document.channels.get_mut(&channel_id.to_string()) {
             Some(c) => c,
@@ -3191,7 +3191,7 @@ impl CommunityTask {
 
         let keystore = pubkey_or_keystore(&*self)?;
 
-        let message = MessageDocument::new(&self.ipfs, keypair, message, keystore.as_ref()).await?;
+        let message = MessageDocument::new(keypair, message, keystore.as_ref())?;
 
         let message_id = message.id;
 
@@ -3605,7 +3605,6 @@ impl CommunityTask {
         let keystore = pubkey_or_keystore(&*self)?;
 
         let stream = AttachmentStream::new(
-            &self.ipfs,
             self.root.keypair(),
             &self.identity.did_key(),
             &self.file,

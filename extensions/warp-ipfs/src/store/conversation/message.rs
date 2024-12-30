@@ -86,8 +86,7 @@ impl Ord for MessageDocument {
 }
 
 impl MessageDocument {
-    pub async fn new(
-        ipfs: &Ipfs,
+    pub fn new(
         keypair: &Keypair,
         message: Message,
         key: Either<&DID, &Keystore>,
@@ -122,14 +121,10 @@ impl MessageDocument {
             });
         }
 
-        let attachments = FuturesUnordered::from_iter(
-            attachments
-                .iter()
-                .map(|file| FileAttachmentDocument::new(ipfs, file).into_future()),
-        )
-        .filter_map(|result| async move { result.ok() })
-        .collect::<Vec<_>>()
-        .await;
+        let attachments = attachments
+            .iter()
+            .filter_map(|file| FileAttachmentDocument::new(file).ok())
+            .collect::<Vec<_>>();
 
         if !lines.is_empty() {
             let lines_value_length: usize = lines
