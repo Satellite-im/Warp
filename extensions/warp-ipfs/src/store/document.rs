@@ -10,6 +10,7 @@ use pollable_map::futures::FutureMap;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::future::IntoFuture;
+use std::hash::{Hash, Hasher};
 use std::{collections::BTreeMap, path::Path, str::FromStr, time::Duration};
 use uuid::Uuid;
 
@@ -498,9 +499,20 @@ pub struct FileAttachmentDocument {
     pub data: String,
 }
 
+impl Hash for FileAttachmentDocument {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+        self.name.hash(state);
+        self.size.hash(state);
+        self.creation.hash(state);
+        self.thumbnail.hash(state);
+        self.data.hash(state);
+    }
+}
+
 impl FileAttachmentDocument {
-    pub fn new(file: &File) -> Result<Self, Error> {
-        let file_document = FileDocument::new(file);
+    pub fn new(file: impl Into<FileDocument>) -> Result<Self, Error> {
+        let file_document = file.into();
         file_document.to_attachment()
     }
 

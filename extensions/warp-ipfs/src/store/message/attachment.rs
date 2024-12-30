@@ -1,4 +1,4 @@
-use crate::store::conversation::message::MessageDocument;
+use crate::store::conversation::message::{MessageDocument, MessageDocumentBuilder};
 use crate::store::files::FileStore;
 use crate::store::keystore::Keystore;
 use crate::store::message::CHAT_DIRECTORY;
@@ -456,19 +456,23 @@ impl Stream for AttachmentStream {
                             let keypair = this.keypair.clone();
                             let mut atx = this.attachment_tx.clone();
                             let final_fut = async move {
-                                let mut message = warp::raygun::Message::default();
-                                message.set_id(message_id);
-                                message.set_message_type(MessageType::Attachment);
-                                message.set_conversation_id(conversation_id);
-                                message.set_sender(local_did);
-                                message.set_attachment(attachments);
-                                if let Some(messages) = messages {
-                                    message.set_lines(messages);
-                                }
-                                message.set_replied(reply_id);
+                                let mut message_builder =
+                                    MessageDocumentBuilder::new(&keypair, keystore.as_ref())
+                                        .set_message_id(message_id)
+                                        .set_message_type(MessageType::Attachment)
+                                        .set_conversation_id(conversation_id)
+                                        .set_sender(local_did)
+                                        .set_replied(reply_id);
 
-                                let message =
-                                    MessageDocument::new(&keypair, message, keystore.as_ref())?;
+                                if let Some(messages) = messages {
+                                    message_builder = message_builder.set_message(messages)?;
+                                }
+
+                                for file in attachments {
+                                    message_builder = message_builder.add_attachment(file)?;
+                                }
+
+                                let message = message_builder.build()?;
 
                                 let (tx, rx) = oneshot::channel();
                                 _ = atx.send((message, tx)).await;

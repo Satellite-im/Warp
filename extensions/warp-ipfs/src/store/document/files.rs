@@ -189,6 +189,18 @@ pub struct FileDocument {
     pub hash: Hash,
 }
 
+impl From<File> for FileDocument {
+    fn from(file: File) -> Self {
+        Self::new(&file)
+    }
+}
+
+impl From<&File> for FileDocument {
+    fn from(file: &File) -> Self {
+        Self::new(file)
+    }
+}
+
 impl FileDocument {
     pub fn new(file: &File) -> FileDocument {
         let mut document = FileDocument {
