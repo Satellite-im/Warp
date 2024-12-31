@@ -363,6 +363,10 @@ impl DiscoveryPeerTask {
         };
 
         self.ping_fut = Some(Box::pin(fut));
+
+        if let Some(waker) = self.waker.take() {
+            waker.wake();
+        }
     }
 }
 
@@ -603,6 +607,10 @@ impl DiscoveryTask {
             }
             DiscoveryConfig::None => {}
         }
+
+        if let Some(waker) = self.waker.take() {
+            waker.wake();
+        }
     }
 
     pub fn publish_discovery(&mut self) {
@@ -657,6 +665,10 @@ impl DiscoveryTask {
         };
 
         self.discovery_publish_fut = Some(fut);
+
+        if let Some(waker) = self.waker.take() {
+            waker.wake();
+        }
     }
 
     pub fn dht_discovery(&mut self, namespace: String) {
@@ -679,6 +691,10 @@ impl DiscoveryTask {
         };
 
         self.discovery_fut.replace(Box::pin(fut));
+
+        if let Some(waker) = self.waker.take() {
+            waker.wake();
+        }
     }
 
     pub fn rz_discovery(&mut self, namespace: String, rz_peer_id: PeerId) {
@@ -699,6 +715,10 @@ impl DiscoveryTask {
             Ok::<_, Error>(peers)
         };
         self.discovery_fut.replace(Box::pin(fut));
+
+        if let Some(waker) = self.waker.take() {
+            waker.wake();
+        }
     }
 }
 
