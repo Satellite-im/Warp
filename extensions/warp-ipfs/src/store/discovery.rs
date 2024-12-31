@@ -1,33 +1,28 @@
-use futures::{FutureExt, SinkExt, Stream, StreamExt};
-use pollable_map::futures::FutureMap;
-use rust_ipfs::libp2p::request_response::InboundRequestId;
-use rust_ipfs::{
-    libp2p::swarm::dial_opts::DialOpts, ConnectionEvents, Ipfs, Keypair, Multiaddr,
-    PeerConnectionEvents, PeerId,
-};
-use std::cmp::Ordering;
-use std::{collections::HashSet, fmt::Debug, hash::Hash};
-
-use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
+use async_rt::AbortableJoinHandle;
 use bytes::Bytes;
 use futures::channel::oneshot;
 use futures::future::BoxFuture;
 use futures::stream::BoxStream;
+use futures::{FutureExt, SinkExt, Stream, StreamExt};
 use futures_timer::Delay;
 use indexmap::IndexSet;
+use pollable_map::futures::FutureMap;
 use pollable_map::stream::StreamMap;
+use rust_ipfs::libp2p::request_response::InboundRequestId;
+use rust_ipfs::libp2p::swarm::dial_opts::DialOpts;
 use rust_ipfs::libp2p::swarm::ConnectionId;
 use rust_ipfs::p2p::MultiaddrExt;
+use rust_ipfs::{ConnectionEvents, Ipfs, Keypair, Multiaddr, PeerConnectionEvents, PeerId};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt::Debug;
 use std::future::Future;
-use std::hash::Hasher;
+use std::hash::{Hash, Hasher};
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
-use tokio::time::Instant;
-
 use warp::{crypto::DID, error::Error};
 
 use super::{protocols, DidExt, PeerIdExt, PeerType};
@@ -49,7 +44,6 @@ impl Discovery {
         config: &DiscoveryConfig,
         relays: &[Multiaddr],
     ) -> Self {
-        let executor = LocalExecutor;
         let (command_tx, command_rx) = futures::channel::mpsc::channel(0);
         let (broadcast_tx, _) = broadcast::channel(2048);
         let mut task = DiscoveryTask::new(
@@ -64,7 +58,7 @@ impl Discovery {
 
         task.publish_discovery();
 
-        let _handle = executor.spawn_abortable(task);
+        let _handle = async_rt::task::spawn_abortable(task);
         Self {
             command_tx,
             config: config.clone(),

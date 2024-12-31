@@ -50,7 +50,6 @@ use super::{
     topics::IDENTITY_ANNOUNCEMENT,
     MAX_IMAGE_SIZE, MAX_METADATA_ENTRIES, MAX_METADATA_KEY_LENGTH, MAX_METADATA_VALUE_LENGTH,
 };
-use crate::rt::{Executor, LocalExecutor};
 use crate::shuttle::identity::protocol::{
     LookupResponse, MailboxResponse, RegisterResponse, Response, SynchronizedResponse,
 };
@@ -87,8 +86,6 @@ pub struct IdentityStore {
     span: Span,
 
     event: EventSubscription<MultiPassEventKind>,
-
-    executor: LocalExecutor,
 }
 
 #[derive(Debug, Clone, Eq, Serialize, Deserialize)]
@@ -361,12 +358,11 @@ impl IdentityStore {
             phonebook: phonebook.clone(),
             signal,
             span: span.clone(),
-            executor: LocalExecutor,
         };
 
         // Move shuttle logic logic into its own task
         // TODO: Maybe push into a joinset or futureunordered and poll?
-        store.executor.dispatch({
+        async_rt::task::dispatch({
             let mut store = store.clone();
             async move {
                 if let Ok(ident) = store.own_identity().await {
@@ -416,7 +412,7 @@ impl IdentityStore {
             }
         }
 
-        store.executor.dispatch({
+        async_rt::task::dispatch({
             let mut store = store.clone();
             async move {
                 let event_stream = store
@@ -1260,7 +1256,7 @@ impl IdentityStore {
                                     } else {
                                         let identity_meta_cid =
                                             identity.metadata.arb_data.expect("Cid is provided");
-                                        self.executor.spawn({
+                                        async_rt::task::spawn({
                                             let ipfs = self.ipfs.clone();
                                             let store = self.clone();
                                             let did = in_did.clone();
@@ -1310,7 +1306,7 @@ impl IdentityStore {
                                             .metadata
                                             .profile_picture
                                             .expect("Cid is provided");
-                                        self.executor.spawn({
+                                        async_rt::task::spawn({
                                             let ipfs = self.ipfs.clone();
                                             let store = self.clone();
                                             let did = in_did.clone();
@@ -1323,21 +1319,19 @@ impl IdentityStore {
                                                     false,
                                                     Some(MAX_IMAGE_SIZE),
                                                 )
-                                                    .await
-                                                    .map_err(|e| {
-                                                        tracing::error!(
-                                                            "Error fetching image from {did}: {e}"
-                                                        );
-                                                        e
-                                                    })?;
+                                                .await
+                                                .map_err(|e| {
+                                                    tracing::error!(
+                                                        "Error fetching image from {did}: {e}"
+                                                    );
+                                                    e
+                                                })?;
 
                                                 tracing::trace!("Image pointed to {identity_profile_picture} for {did} downloaded");
 
                                                 store
                                                     .emit_event(
-                                                        MultiPassEventKind::IdentityUpdate {
-                                                            did,
-                                                        },
+                                                        MultiPassEventKind::IdentityUpdate { did },
                                                     )
                                                     .await;
 
@@ -1375,7 +1369,7 @@ impl IdentityStore {
                                             .metadata
                                             .profile_banner
                                             .expect("Cid is provided");
-                                        self.executor.dispatch({
+                                        async_rt::task::dispatch({
                                             let ipfs = self.ipfs.clone();
                                             let did = in_did.clone();
                                             let store = self.clone();
@@ -1389,21 +1383,19 @@ impl IdentityStore {
                                                     false,
                                                     Some(MAX_IMAGE_SIZE),
                                                 )
-                                                    .await
-                                                    .map_err(|e| {
-                                                        tracing::error!(
-                                                            "Error fetching image from {did}: {e}"
-                                                        );
-                                                        e
-                                                    })?;
+                                                .await
+                                                .map_err(|e| {
+                                                    tracing::error!(
+                                                        "Error fetching image from {did}: {e}"
+                                                    );
+                                                    e
+                                                })?;
 
                                                 tracing::trace!("Image pointed to {identity_profile_banner} for {did} downloaded");
 
                                                 store
                                                     .emit_event(
-                                                        MultiPassEventKind::IdentityUpdate {
-                                                            did,
-                                                        },
+                                                        MultiPassEventKind::IdentityUpdate { did },
                                                     )
                                                     .await;
 
@@ -1435,35 +1427,32 @@ impl IdentityStore {
                                         .await?;
                                 } else {
                                     if let Some(picture) = picture {
-                                        self.executor.dispatch({
+                                        async_rt::task::dispatch({
                                             let ipfs = self.ipfs.clone();
                                             let did = in_did.clone();
                                             let store = self.clone();
                                             async move {
                                                 let peer_id = vec![did.to_peer_id()?];
-                                                let _ =
-                                                    super::document::image_dag::get_image(
-                                                        &ipfs,
-                                                        picture,
-                                                        &peer_id,
-                                                        false,
-                                                        Some(MAX_IMAGE_SIZE),
-                                                    )
-                                                        .await
-                                                        .map_err(|e| {
-                                                            tracing::error!(
-                                                            "Error fetching image from {did}: {e}"
-                                                        );
-                                                            e
-                                                        })?;
+                                                let _ = super::document::image_dag::get_image(
+                                                    &ipfs,
+                                                    picture,
+                                                    &peer_id,
+                                                    false,
+                                                    Some(MAX_IMAGE_SIZE),
+                                                )
+                                                .await
+                                                .map_err(|e| {
+                                                    tracing::error!(
+                                                        "Error fetching image from {did}: {e}"
+                                                    );
+                                                    e
+                                                })?;
 
                                                 tracing::trace!("Image pointed to {picture} for {did} downloaded");
 
                                                 store
                                                     .emit_event(
-                                                        MultiPassEventKind::IdentityUpdate {
-                                                            did,
-                                                        },
+                                                        MultiPassEventKind::IdentityUpdate { did },
                                                     )
                                                     .await;
 
@@ -1472,36 +1461,33 @@ impl IdentityStore {
                                         });
                                     }
                                     if let Some(banner) = banner {
-                                        self.executor.dispatch({
+                                        async_rt::task::dispatch({
                                             let store = self.clone();
                                             let ipfs = self.ipfs.clone();
 
                                             let did = in_did.clone();
                                             async move {
                                                 let peer_id = vec![did.to_peer_id()?];
-                                                let _ =
-                                                    super::document::image_dag::get_image(
-                                                        &ipfs,
-                                                        banner,
-                                                        &peer_id,
-                                                        false,
-                                                        Some(MAX_IMAGE_SIZE),
-                                                    )
-                                                        .await
-                                                        .map_err(|e| {
-                                                            tracing::error!(
-                                                            "Error fetching image from {did}: {e}"
-                                                        );
-                                                            e
-                                                        })?;
+                                                let _ = super::document::image_dag::get_image(
+                                                    &ipfs,
+                                                    banner,
+                                                    &peer_id,
+                                                    false,
+                                                    Some(MAX_IMAGE_SIZE),
+                                                )
+                                                .await
+                                                .map_err(|e| {
+                                                    tracing::error!(
+                                                        "Error fetching image from {did}: {e}"
+                                                    );
+                                                    e
+                                                })?;
 
                                                 tracing::trace!("Image pointed to {banner} for {did} downloaded");
 
                                                 store
                                                     .emit_event(
-                                                        MultiPassEventKind::IdentityUpdate {
-                                                            did,
-                                                        },
+                                                        MultiPassEventKind::IdentityUpdate { did },
                                                     )
                                                     .await;
 
@@ -1524,7 +1510,7 @@ impl IdentityStore {
                 if cache.metadata.profile_picture == Some(cid)
                     || cache.metadata.profile_banner == Some(cid)
                 {
-                    self.executor.dispatch({
+                    async_rt::task::dispatch({
                         let store = self.clone();
                         let did = in_did.clone();
                         async move {

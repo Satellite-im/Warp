@@ -1,10 +1,9 @@
 #[cfg(not(target_arch = "wasm32"))]
 use std::ffi::OsStr;
 
+use async_rt::AbortableJoinHandle;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use std::{collections::VecDeque, path::PathBuf, sync::Arc};
-
 use futures::{
     channel::{mpsc, oneshot},
     future::BoxFuture,
@@ -12,6 +11,7 @@ use futures::{
     FutureExt, SinkExt, StreamExt, TryStreamExt,
 };
 use futures_finally::try_stream::FinallyTryStreamExt;
+use std::{collections::VecDeque, path::PathBuf, sync::Arc};
 
 use rust_ipfs::{unixfs::UnixfsStatus, Ipfs, IpfsPath};
 
@@ -30,7 +30,6 @@ use super::{
     document::root::RootDocumentMap, event_subscription::EventSubscription,
     MAX_THUMBNAIL_STREAM_SIZE,
 };
-use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
 use crate::{
     config::{self, Config},
     thumbnail::ThumbnailGenerator,
@@ -54,7 +53,6 @@ impl FileStore {
         constellation_tx: EventSubscription<ConstellationEventKind>,
         span: &Span,
     ) -> Self {
-        let executor = LocalExecutor;
         let config = config.clone();
 
         let index = Directory::new("root");
@@ -78,7 +76,6 @@ impl FileStore {
             signal_tx,
             signal_rx,
             command_receiver,
-            executor: LocalExecutor,
         };
 
         if let Err(e) = task.import_v1().await {
@@ -94,7 +91,8 @@ impl FileStore {
 
         let span = span.clone();
 
-        let _handle = executor.spawn_abortable(async move { task.run().await }.instrument(span));
+        let _handle =
+            async_rt::task::spawn_abortable(async move { task.run().await }.instrument(span));
 
         FileStore {
             index,
@@ -389,8 +387,6 @@ struct FileTask {
     thumbnail_store: ThumbnailGenerator,
     constellation_tx: EventSubscription<ConstellationEventKind>,
     command_receiver: futures::channel::mpsc::Receiver<FileTaskCommand>,
-    #[allow(dead_code)]
-    executor: LocalExecutor,
 }
 
 impl FileTask {
