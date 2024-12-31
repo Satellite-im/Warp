@@ -1,7 +1,7 @@
-use crate::rt::{AbortableJoinHandle, Executor, LocalExecutor};
 use crate::store::document::identity::IdentityDocument;
 use crate::store::payload::PayloadMessage;
 use crate::store::topics::{PeerTopic, IDENTITY_ANNOUNCEMENT};
+use async_rt::AbortableJoinHandle;
 use chrono::{DateTime, Utc};
 use futures::future::BoxFuture;
 use futures::{FutureExt, StreamExt};
@@ -39,8 +39,6 @@ impl Hotspot {
         relay_config: Option<RelayConfig>,
         ext: bool,
     ) -> anyhow::Result<Self> {
-        let executor = LocalExecutor;
-
         let addrs = match listen_addrs {
             [] => vec![
                 "/ip4/0.0.0.0/tcp/0".parse().unwrap(),
@@ -97,7 +95,7 @@ impl Hotspot {
 
         let task = HotspotTask::new(&_ipfs).await;
 
-        let _handle = executor.spawn_abortable(task);
+        let _handle = async_rt::task::spawn_abortable(task);
 
         let hotspot = Hotspot { _ipfs, _handle };
 

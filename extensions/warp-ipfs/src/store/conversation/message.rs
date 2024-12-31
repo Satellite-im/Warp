@@ -1,3 +1,4 @@
+use crate::store::document::files::FileDocument;
 use crate::store::document::FileAttachmentDocument;
 use crate::store::keystore::Keystore;
 use crate::store::{
@@ -8,10 +9,11 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use either::Either;
 use futures::stream::{FuturesUnordered, StreamExt};
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use rust_ipfs::{Ipfs, Keypair};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::future::IntoFuture;
+use std::hash::{Hash, Hasher};
 use uuid::Uuid;
 use warp::crypto::cipher::Cipher;
 use warp::crypto::hash::sha256_iter;
@@ -26,7 +28,7 @@ pub enum MessageVersion {
     V0,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageDocument {
     pub id: Uuid,
     pub message_type: MessageType,
@@ -35,9 +37,9 @@ pub struct MessageDocument {
     pub sender: DIDEd25519Reference,
     pub date: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub reactions: IndexMap<String, Vec<DID>>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub attachments: Vec<FileAttachmentDocument>,
+    pub reactions: IndexMap<String, IndexSet<DID>>,
+    #[serde(default, skip_serializing_if = "IndexSet::is_empty")]
+    pub attachments: IndexSet<FileAttachmentDocument>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub modified: Option<DateTime<Utc>>,
     #[serde(default)]
@@ -48,6 +50,83 @@ pub struct MessageDocument {
     pub message: Option<Bytes>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature: Option<MessageSignature>,
+}
+
+impl MessageDocument {
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    pub fn message_type(&self) -> MessageType {
+        self.message_type
+    }
+
+    pub fn conversation_id(&self) -> Uuid {
+        self.conversation_id
+    }
+
+    pub fn version(&self) -> MessageVersion {
+        self.version
+    }
+
+    pub fn sender(&self) -> DID {
+        self.sender.to_did()
+    }
+
+    pub fn date(&self) -> DateTime<Utc> {
+        self.date
+    }
+
+    pub fn reactions(&self) -> &IndexMap<String, IndexSet<DID>> {
+        &self.reactions
+    }
+
+    pub fn modified(&self) -> Option<DateTime<Utc>> {
+        self.modified
+    }
+
+    pub fn pinned(&self) -> bool {
+        self.pinned
+    }
+
+    pub fn replied(&self) -> Option<Uuid> {
+        self.replied
+    }
+}
+
+impl PartialEq for MessageDocument {
+    fn eq(&self, other: &Self) -> bool {
+        self.id.eq(&other.id) && self.conversation_id.eq(&other.conversation_id)
+    }
+}
+
+impl Eq for MessageDocument {}
+
+impl Hash for MessageDocument {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+        self.conversation_id.hash(state);
+    }
+}
+
+impl MessageDocument {
+    pub fn empty() -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            message_type: MessageType::Message,
+            conversation_id: Uuid::nil(),
+            version: MessageVersion::V0,
+            sender: DIDEd25519Reference([0; 32]),
+            date: Utc::now(),
+            reactions: IndexMap::new(),
+            attachments: IndexSet::new(),
+            modified: None,
+            pinned: false,
+            replied: None,
+            message: None,
+            signature: None,
+        }
+    }
 }
 
 impl From<MessageDocument> for MessageReference {
@@ -85,54 +164,81 @@ impl Ord for MessageDocument {
     }
 }
 
-impl MessageDocument {
-    pub async fn new(
-        ipfs: &Ipfs,
-        keypair: &Keypair,
-        message: Message,
-        key: Either<&DID, &Keystore>,
-    ) -> Result<Self, Error> {
-        let id = message.id();
-        let message_type = message.message_type();
-        let conversation_id = message.conversation_id();
-        let date = message.date();
-        let sender = message.sender();
-        let pinned = message.pinned();
-        let modified = message.modified();
-        let replied = message.replied();
-        let lines = message.lines();
-        let reactions = message.reactions().to_owned();
-        let attachments = message.attachments();
+pub struct MessageDocumentBuilder<'a> {
+    keypair: &'a Keypair,
+    keystore: Either<&'a DID, &'a Keystore>,
+    message_document: MessageDocument,
+}
 
-        if attachments.len() > MAX_ATTACHMENT {
+impl<'a> MessageDocumentBuilder<'a> {
+    pub fn new(keypair: &'a Keypair, keystore: Either<&'a DID, &'a Keystore>) -> Self {
+        Self {
+            keypair,
+            keystore,
+            message_document: MessageDocument::empty(),
+        }
+    }
+
+    pub fn set_message_id(mut self, id: Uuid) -> Self {
+        self.message_document.id = id;
+        self
+    }
+
+    pub fn set_conversation_id(mut self, id: Uuid) -> Self {
+        self.message_document.conversation_id = id;
+        self
+    }
+
+    pub fn set_message_type(mut self, message_type: MessageType) -> Self {
+        self.message_document.message_type = message_type;
+        self
+    }
+
+    pub fn set_sender(mut self, sender: DID) -> Self {
+        self.message_document.sender = DIDEd25519Reference::from_did(&sender);
+        self
+    }
+
+    pub fn set_pin(mut self, pinned: bool) -> Self {
+        self.message_document.pinned = pinned;
+        self
+    }
+
+    pub fn set_replied(mut self, replied: impl Into<Option<Uuid>>) -> Self {
+        self.message_document.replied = replied.into();
+        self
+    }
+
+    pub fn set_date(mut self, date: DateTime<Utc>) -> Self {
+        self.message_document.date = date;
+        self
+    }
+
+    pub fn set_modified(mut self, modified: DateTime<Utc>) -> Self {
+        self.message_document.modified = Some(modified);
+        self
+    }
+
+    pub fn add_attachment(mut self, attachment: impl Into<FileDocument>) -> Result<Self, Error> {
+        let amount = self.message_document.attachments.len();
+        if amount > MAX_ATTACHMENT {
             return Err(Error::InvalidLength {
                 context: "attachments".into(),
-                current: attachments.len(),
+                current: amount,
                 minimum: None,
                 maximum: Some(MAX_ATTACHMENT),
             });
         }
+        let attachment = FileAttachmentDocument::new(attachment)?;
+        self.message_document.attachments.insert(attachment);
+        Ok(self)
+    }
 
-        if reactions.len() > MAX_REACTIONS {
-            return Err(Error::InvalidLength {
-                context: "reactions".into(),
-                current: reactions.len(),
-                minimum: None,
-                maximum: Some(MAX_REACTIONS),
-            });
-        }
+    pub fn set_message(mut self, message: Vec<String>) -> Result<Self, Error> {
+        let sender = self.message_document.sender.to_did();
 
-        let attachments = FuturesUnordered::from_iter(
-            attachments
-                .iter()
-                .map(|file| FileAttachmentDocument::new(ipfs, file).into_future()),
-        )
-        .filter_map(|result| async move { result.ok() })
-        .collect::<Vec<_>>()
-        .await;
-
-        if !lines.is_empty() {
-            let lines_value_length: usize = lines
+        if !message.is_empty() {
+            let lines_value_length: usize = message
                 .iter()
                 .filter(|s| !s.is_empty())
                 .map(|s| s.trim())
@@ -149,49 +255,236 @@ impl MessageDocument {
             }
         }
 
-        let bytes = serde_json::to_vec(&lines)?;
+        let bytes = serde_json::to_vec(&message)?;
 
-        let data = match key {
+        let data = match self.keystore {
             Either::Right(keystore) => {
-                let key = keystore.get_latest(keypair, sender)?;
+                let key = keystore.get_latest(self.keypair, &sender)?;
+                Cipher::direct_encrypt(&bytes, &key)?.into()
+            }
+            Either::Left(key) => ecdh_encrypt(self.keypair, Some(key), &bytes)?.into(),
+        };
+
+        self.message_document.message = Some(data);
+        Ok(self)
+    }
+
+    pub fn build(self) -> Result<MessageDocument, Error> {
+        self.message_document.sign(self.keypair)
+    }
+}
+
+impl MessageDocument {
+    pub fn set_pin(&mut self, pinned: bool) {
+        self.pinned = pinned;
+    }
+
+    pub fn set_replied(&mut self, replied: Uuid) {
+        self.replied = Some(replied);
+    }
+
+    pub fn set_modified(&mut self, modified: DateTime<Utc>) {
+        self.modified = Some(modified);
+    }
+
+    pub fn add_attachment(&mut self, attachment: impl Into<FileDocument>) -> Result<(), Error> {
+        let amount = self.attachments.len();
+        if amount > MAX_ATTACHMENT {
+            return Err(Error::InvalidLength {
+                context: "attachments".into(),
+                current: amount,
+                minimum: None,
+                maximum: Some(MAX_ATTACHMENT),
+            });
+        }
+        let attachment = FileAttachmentDocument::new(attachment)?;
+        self.attachments.insert(attachment);
+        Ok(())
+    }
+
+    pub fn remove_attachment(&mut self, file_id: Uuid) -> bool {
+        self.attachments
+            .retain(|attachment| attachment.id != file_id);
+        self.attachments
+            .iter()
+            .any(|attachment| attachment.id == file_id)
+    }
+
+    pub fn add_reaction(&mut self, emoji: impl Into<String>, reactor: DID) -> Result<(), Error> {
+        let emoji = emoji.into();
+        let size = self.reactions.len();
+        match self.reactions.entry(emoji) {
+            indexmap::map::Entry::Occupied(mut entry) => {
+                let list = entry.get_mut();
+                if list.contains(&reactor) {
+                    return Err(Error::ReactionExist);
+                }
+                list.insert(reactor);
+            }
+            indexmap::map::Entry::Vacant(entry) => {
+                if size > MAX_REACTIONS {
+                    return Err(Error::InvalidLength {
+                        context: "reactions".into(),
+                        current: size,
+                        minimum: None,
+                        maximum: Some(MAX_REACTIONS),
+                    });
+                }
+                let list = IndexSet::from_iter([reactor]);
+                entry.insert(list);
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn remove_reaction(&mut self, emoji: impl Into<String>, reactor: DID) -> Result<(), Error> {
+        let emoji = emoji.into();
+        if !self.reactions.contains_key(&emoji) {
+            return Err(Error::ReactionDoesntExist);
+        }
+
+        if let indexmap::map::Entry::Occupied(mut entry) = self.reactions.entry(emoji) {
+            let list = entry.get_mut();
+            if !list.contains(&reactor) {
+                return Err(Error::ReactionDoesntExist);
+            }
+            list.shift_remove(&reactor);
+            if entry.get().is_empty() {
+                entry.shift_remove();
+            }
+        }
+        Ok(())
+    }
+
+    pub fn set_message(
+        &mut self,
+        keypair: &Keypair,
+        keystore: Either<&DID, &Keystore>,
+        message: &[String],
+    ) -> Result<(), Error> {
+        let sender = self.sender.to_did();
+
+        if !message.is_empty() {
+            let lines_value_length: usize = message
+                .iter()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.trim())
+                .map(|s| s.chars().count())
+                .sum();
+
+            if lines_value_length > MAX_MESSAGE_SIZE {
+                return Err(Error::InvalidLength {
+                    context: "message".into(),
+                    current: lines_value_length,
+                    minimum: None,
+                    maximum: Some(MAX_MESSAGE_SIZE),
+                });
+            }
+        }
+
+        let bytes = serde_json::to_vec(message)?;
+
+        let data = match keystore {
+            Either::Right(keystore) => {
+                let key = keystore.get_latest(keypair, &sender)?;
                 Cipher::direct_encrypt(&bytes, &key)?.into()
             }
             Either::Left(key) => ecdh_encrypt(keypair, Some(key), &bytes)?.into(),
         };
 
-        let message = Some(data);
-
-        let sender = DIDEd25519Reference::from_did(sender);
-
-        let document = MessageDocument {
-            id,
-            message_type,
-            sender,
-            conversation_id,
-            version: MessageVersion::default(),
-            date,
-            reactions,
-            attachments,
-            message,
-            pinned,
-            modified,
-            replied,
-            signature: None,
-        };
-
-        document.sign(keypair)
+        self.message = Some(data);
+        self.sign_in_place(keypair)
     }
 
-    pub fn verify(&self) -> bool {
+    pub fn set_message_with_nonce(
+        &mut self,
+        keypair: &Keypair,
+        keystore: Either<&DID, &Keystore>,
+        modified: DateTime<Utc>,
+        message: Vec<String>,
+        signature: Option<Vec<u8>>,
+        nonce: Option<&[u8]>,
+    ) -> Result<(), Error> {
+        let own_did = keypair.to_did()?;
+        let sender = self.sender.to_did();
+
+        self.modified = Some(modified);
+
+        if !message.is_empty() {
+            let lines_value_length: usize = message
+                .iter()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.trim())
+                .map(|s| s.chars().count())
+                .sum();
+
+            if lines_value_length > MAX_MESSAGE_SIZE {
+                return Err(Error::InvalidLength {
+                    context: "message".into(),
+                    current: lines_value_length,
+                    minimum: None,
+                    maximum: Some(MAX_MESSAGE_SIZE),
+                });
+            }
+        }
+
+        let current_nonce = self.nonce_from_message()?;
+
+        if matches!(nonce, Some(nonce) if nonce.eq(current_nonce)) {
+            // Since the nonce from the current message matches the new one sent,
+            // we would consider this as an invalid message as a nonce should
+            // NOT be reused
+            // TODO: Maybe track previous nonces?
+            return Err(Error::InvalidMessage);
+        }
+
+        let bytes = serde_json::to_vec(&message)?;
+
+        let data = match (keystore, nonce) {
+            (Either::Right(keystore), Some(nonce)) => {
+                let key = keystore.get_latest(keypair, &sender)?;
+                Cipher::direct_encrypt_with_nonce(&bytes, &key, nonce)?
+            }
+            (Either::Left(key), Some(nonce)) => {
+                ecdh_encrypt_with_nonce(keypair, Some(key), &bytes, nonce)?
+            }
+            (Either::Right(keystore), None) => {
+                let key = keystore.get_latest(keypair, &sender)?;
+                Cipher::direct_encrypt(&bytes, &key)?
+            }
+            (Either::Left(key), None) => ecdh_encrypt(keypair, Some(key), &bytes)?,
+        };
+
+        self.message = (!data.is_empty()).then_some(data.into());
+
+        match (sender.eq(&own_did), signature) {
+            (true, None) => {
+                self.sign_in_place(keypair)?;
+            }
+            (false, None) | (true, Some(_)) => return Err(Error::InvalidMessage),
+            (false, Some(sig)) => {
+                let new_signature = MessageSignature::try_from(sig)?;
+                self.signature.replace(new_signature);
+                self.verify()?;
+            }
+        };
+
+        Ok(())
+    }
+}
+
+impl MessageDocument {
+    pub fn verify(&self) -> Result<(), Error> {
         let Some(signature) = self.signature else {
-            return false;
+            return Err(Error::InvalidSignature);
         };
 
         let sender = self.sender.to_did();
         let Ok(sender_pk) = sender.to_public_key() else {
             // Note: Although unlikely, we will return false instead of refactoring this function to return an error
             //       since an invalid public key also signals a invalid message.
-            return false;
+            return Err(Error::PublicKeyInvalid);
         };
 
         let attachments_hash = sha256_iter(
@@ -220,7 +513,29 @@ impl MessageDocument {
             ),
         };
 
-        sender_pk.verify(&hash, signature.as_ref())
+        if !sender_pk.verify(&hash, signature.as_ref()) {
+            return Err(Error::InvalidMessage);
+        }
+
+        if self.reactions.len() > MAX_REACTIONS {
+            return Err(Error::InvalidLength {
+                context: "reactions".into(),
+                current: self.reactions.len(),
+                minimum: None,
+                maximum: Some(MAX_REACTIONS),
+            });
+        }
+
+        if self.attachments.len() > MAX_ATTACHMENT {
+            return Err(Error::InvalidLength {
+                context: "attachments".into(),
+                current: self.attachments.len(),
+                minimum: None,
+                maximum: Some(MAX_ATTACHMENT),
+            });
+        }
+
+        Ok(())
     }
 
     pub fn raw_encrypted_message(&self) -> Result<&Bytes, Error> {
@@ -234,179 +549,22 @@ impl MessageDocument {
         Ok(nonce)
     }
 
-    pub fn attachments(&self) -> &[FileAttachmentDocument] {
-        &self.attachments
+    pub fn attachments(&self) -> impl Iterator<Item = &FileAttachmentDocument> {
+        self.attachments.iter()
     }
 
-    pub async fn update(
-        &mut self,
-        ipfs: &Ipfs,
-        keypair: &Keypair,
-        message: Message,
-        signature: Option<Vec<u8>>,
-        key: Either<&DID, &Keystore>,
-        nonce: Option<&[u8]>,
-    ) -> Result<(), Error> {
-        let did = &keypair.to_did()?;
-        tracing::info!(id = %self.conversation_id, message_id = %self.id, "Updating message");
-        let old_message = self.resolve(ipfs, keypair, true, key).await?;
-
-        let sender = self.sender.to_did();
-
-        if message.id() != self.id
-            || message.conversation_id() != self.conversation_id
-            || message.sender() != &sender
-        {
-            tracing::error!(id = %self.conversation_id, message_id = %self.id, "Message does not exist, is invalid or has invalid sender");
-            //TODO: Maybe remove message from this point?
-            return Err(Error::InvalidMessage);
-        }
-
-        self.pinned = message.pinned();
-        self.modified = message.modified();
-
-        let reactions = message.reactions();
-        if reactions.len() > MAX_REACTIONS {
-            return Err(Error::InvalidLength {
-                context: "reactions".into(),
-                current: reactions.len(),
-                minimum: None,
-                maximum: Some(MAX_REACTIONS),
-            });
-        }
-
-        self.reactions = reactions.to_owned();
-
-        if message.lines() != old_message.lines() {
-            let lines = message.lines();
-            if !lines.is_empty() {
-                let lines_value_length: usize = lines
-                    .iter()
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.trim())
-                    .map(|s| s.chars().count())
-                    .sum();
-
-                if lines_value_length > MAX_MESSAGE_SIZE {
-                    return Err(Error::InvalidLength {
-                        context: "message".into(),
-                        current: lines_value_length,
-                        minimum: None,
-                        maximum: Some(MAX_MESSAGE_SIZE),
-                    });
-                }
-            }
-
-            let current_nonce = self.nonce_from_message()?;
-
-            if matches!(nonce, Some(nonce) if nonce.eq(current_nonce)) {
-                // Since the nonce from the current message matches the new one sent,
-                // we would consider this as an invalid message as a nonce should
-                // NOT be reused
-                // TODO: Maybe track previous nonces?
-                return Err(Error::InvalidMessage);
-            }
-
-            let bytes = serde_json::to_vec(&lines)?;
-
-            let data = match (key, nonce) {
-                (Either::Right(keystore), Some(nonce)) => {
-                    let key = keystore.get_latest(keypair, &sender)?;
-                    Cipher::direct_encrypt_with_nonce(&bytes, &key, nonce)?
-                }
-                (Either::Left(key), Some(nonce)) => {
-                    ecdh_encrypt_with_nonce(keypair, Some(key), &bytes, nonce)?
-                }
-                (Either::Right(keystore), None) => {
-                    let key = keystore.get_latest(keypair, &sender)?;
-                    Cipher::direct_encrypt(&bytes, &key)?
-                }
-                (Either::Left(key), None) => ecdh_encrypt(keypair, Some(key), &bytes)?,
-            };
-
-            self.message = (!data.is_empty()).then_some(data.into());
-
-            match (sender.eq(did), signature) {
-                (true, None) => {
-                    let new_documeent = self.clone();
-                    *self = new_documeent.sign(keypair)?;
-                }
-                (false, None) | (true, Some(_)) => return Err(Error::InvalidMessage),
-                (false, Some(sig)) => {
-                    let new_signature = MessageSignature::try_from(sig)?;
-                    self.signature.replace(new_signature);
-                    if !self.verify() {
-                        return Err(Error::InvalidSignature);
-                    }
-                }
-            };
-        }
-
-        tracing::info!(id = %self.conversation_id, message_id = %self.id, "Message is updated");
-        Ok(())
-    }
-
-    pub async fn resolve(
+    pub fn message(
         &self,
-        ipfs: &Ipfs,
         keypair: &Keypair,
-        local: bool,
-        key: Either<&DID, &Keystore>,
-    ) -> Result<Message, Error> {
-        if !self.verify() {
-            return Err(Error::InvalidMessage);
-        }
+        keystore: Either<&DID, &Keystore>,
+    ) -> Result<Vec<String>, Error> {
         let message_cipher = self.message.as_ref().ok_or(Error::MessageNotFound)?;
-        let mut message = Message::default();
-        message.set_id(self.id);
-        message.set_message_type(self.message_type);
-        message.set_conversation_id(self.conversation_id);
-        message.set_sender(self.sender.to_did());
-        message.set_date(self.date);
-        if let Some(date) = self.modified {
-            message.set_modified(date);
-        }
-        message.set_pinned(self.pinned);
-        message.set_replied(self.replied);
 
-        let attachments = self.attachments();
-
-        if self.attachments.len() > MAX_ATTACHMENT {
-            return Err(Error::InvalidLength {
-                context: "attachments".into(),
-                current: attachments.len(),
-                minimum: None,
-                maximum: Some(MAX_ATTACHMENT),
-            });
-        }
-
-        let files = FuturesUnordered::from_iter(
-            attachments
-                .iter()
-                .map(|document| document.resolve_to_file(ipfs, local).into_future()),
-        )
-        .filter_map(|result| async move { result.ok() })
-        .collect::<Vec<_>>()
-        .await;
-
-        message.set_attachment(files);
-
-        if self.reactions.len() > MAX_REACTIONS {
-            return Err(Error::InvalidLength {
-                context: "reactions".into(),
-                current: self.reactions.len(),
-                minimum: None,
-                maximum: Some(MAX_REACTIONS),
-            });
-        }
-
-        message.set_reactions(self.reactions.clone());
-
-        let sender = self.sender.to_did();
-
-        let data = match key {
+        let data = match keystore {
             Either::Left(exchange) => ecdh_decrypt(keypair, Some(exchange), message_cipher)?,
-            Either::Right(keystore) => keystore.try_decrypt(keypair, &sender, message_cipher)?,
+            Either::Right(keystore) => {
+                keystore.try_decrypt(keypair, &self.sender(), message_cipher)?
+            }
         };
 
         let lines: Vec<String> = serde_json::from_slice(&data)?;
@@ -427,17 +585,72 @@ impl MessageDocument {
             });
         }
 
-        message.set_lines(lines);
+        Ok(lines)
+    }
+
+    pub async fn resolve(
+        &self,
+        ipfs: &Ipfs,
+        keypair: &Keypair,
+        local: bool,
+        key: Either<&DID, &Keystore>,
+    ) -> Result<Message, Error> {
+        self.verify()?;
+
+        let mut message = Message::default();
+        message.set_id(self.id);
+        message.set_message_type(self.message_type);
+        message.set_conversation_id(self.conversation_id);
+        message.set_sender(self.sender.to_did());
+        message.set_date(self.date);
+        if let Some(date) = self.modified {
+            message.set_modified(date);
+        }
+        message.set_pinned(self.pinned);
+        message.set_replied(self.replied);
+
+        let attachments = self.attachments();
+
+        let attachments = attachments.collect::<Vec<_>>();
+
+        let files = FuturesUnordered::from_iter(
+            attachments
+                .into_iter()
+                .map(|document| document.resolve_to_file(ipfs, local).into_future()),
+        )
+        .filter_map(|result| async move { result.ok() })
+        .collect::<Vec<_>>()
+        .await;
+
+        message.set_attachment(files);
+
+        message.set_reactions(self.reactions.clone());
+
+        match self.message(keypair, key) {
+            Ok(lines) => {
+                message.set_lines(lines);
+            }
+            Err(_) if self.message_type == MessageType::Attachment => {}
+            Err(e) => return Err(e),
+        }
 
         Ok(message)
     }
 
     fn sign(mut self, keypair: &Keypair) -> Result<MessageDocument, Error> {
+        self.sign_in_place(keypair)?;
+        Ok(self)
+    }
+
+    fn sign_in_place(&mut self, keypair: &Keypair) -> Result<(), Error> {
         let did = &keypair.to_did()?;
         let sender = self.sender.to_did();
+
         if !sender.eq(did) {
             return Err(Error::PublicKeyInvalid);
         }
+
+        self.modified = Some(Utc::now());
 
         let attachments_hash = sha256_iter(
             self.attachments
@@ -466,7 +679,7 @@ impl MessageDocument {
         let signature = keypair.sign(&hash).expect("not RSA");
 
         self.signature = Some(MessageSignature::try_from(signature)?);
-        Ok(self)
+        Ok(())
     }
 }
 
