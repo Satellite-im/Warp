@@ -351,11 +351,7 @@ pub trait RayGunCommunity: Sync + Send {
     ) -> Result<CommunityInvite, Error> {
         Err(Error::Unimplemented)
     }
-    async fn accept_community_invite(
-        &mut self,
-        _community_id: Uuid,
-        _invite_id: Uuid,
-    ) -> Result<(), Error> {
+    async fn request_join_community(&mut self, _community_id: Uuid) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
     async fn edit_community_invite(
