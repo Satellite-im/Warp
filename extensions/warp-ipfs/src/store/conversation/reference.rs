@@ -1,10 +1,14 @@
 use crate::store::conversation::MessageDocument;
+use futures::future::BoxFuture;
 use futures::stream::BoxStream;
-use futures::{stream, StreamExt};
+use futures::{FutureExt, Stream, StreamExt};
 use indexmap::IndexMap;
 use ipld_core::cid::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
 use serde::{Deserialize, Serialize};
+use std::future::IntoFuture;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::time::Duration;
 use uuid::Uuid;
 use warp::error::Error;
@@ -110,54 +114,8 @@ impl MessageReferenceList {
         Ok(cid)
     }
 
-    pub fn list(&self, ipfs: &Ipfs) -> BoxStream<'_, MessageDocument> {
-        let cid = match self.messages {
-            Some(cid) => cid,
-            None => return stream::empty().boxed(),
-        };
-
-        let ipfs = ipfs.clone();
-
-        let stream = async_stream::stream! {
-            let list = match ipfs
-                .get_dag(cid)
-                .timeout(Duration::from_secs(10))
-                .deserialized::<IndexMap<String, Option<Cid>>>()
-                .await
-            {
-                Ok(list) => list,
-                Err(_) => return
-            };
-
-            for message_cid in list.values() {
-                let Some(cid) = message_cid else {
-                    continue;
-                };
-
-                if let Ok(message_document) = ipfs.get_dag(*cid).deserialized::<MessageDocument>().await {
-                    yield message_document;
-                }
-            }
-
-            let Some(next) = self.next else {
-                return;
-            };
-
-            let Ok(refs) = ipfs.get_dag(next)
-                .timeout(Duration::from_secs(10))
-                .deserialized::<MessageReferenceList>()
-                .await else {
-                    return;
-                };
-
-            let stream = refs.list(&ipfs);
-
-            for await item in stream {
-                yield item;
-            }
-        };
-
-        stream.boxed()
+    pub fn list(&self, ipfs: &Ipfs) -> ReferenceListStream {
+        ReferenceListStream::new(ipfs, self)
     }
 
     #[async_recursion::async_recursion]
@@ -313,4 +271,153 @@ impl MessageReferenceList {
         }
         Ok(new_list)
     }
+}
+
+pub struct ReferenceListStream {
+    ipfs: Ipfs,
+    reference_list: MessageReferenceList,
+    state: ReferenceState,
+}
+
+impl ReferenceListStream {
+    pub fn new(ipfs: &Ipfs, reference_list: &MessageReferenceList) -> Self {
+        Self {
+            ipfs: ipfs.clone(),
+            reference_list: *reference_list,
+            state: ReferenceState::Init,
+        }
+    }
+}
+
+enum ReferenceState {
+    Init,
+    RefSetPending(BoxFuture<'static, Result<IndexMap<String, Option<Cid>>, anyhow::Error>>),
+    RefSet {
+        map: IndexMap<String, Option<Cid>>,
+        next_document: Option<BoxFuture<'static, Result<MessageDocument, anyhow::Error>>>,
+    },
+    NextPending {
+        ref_fut: BoxFuture<'static, Result<MessageReferenceList, anyhow::Error>>,
+    },
+    Next {
+        st: BoxStream<'static, MessageDocument>,
+    },
+    Done,
+}
+
+impl Stream for ReferenceListStream {
+    type Item = MessageDocument;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = &mut *self;
+        loop {
+            match this.state {
+                ReferenceState::Init => {
+                    let Some(messages) = this.reference_list.messages else {
+                        this.state = ReferenceState::RefSet {
+                            map: IndexMap::new(),
+                            next_document: None,
+                        };
+                        continue;
+                    };
+
+                    let fut = this
+                        .ipfs
+                        .get_dag(messages)
+                        .deserialized::<IndexMap<String, Option<Cid>>>()
+                        .into_future();
+
+                    this.state = ReferenceState::RefSetPending(fut);
+                }
+                ReferenceState::RefSetPending(ref mut fut) => {
+                    let ref_list = match futures::ready!(fut.poll_unpin(cx)) {
+                        Ok(map) => map,
+                        Err(_) => {
+                            this.state = ReferenceState::RefSet {
+                                map: IndexMap::new(),
+                                next_document: None,
+                            };
+                            continue;
+                        }
+                    };
+
+                    this.state = ReferenceState::RefSet {
+                        map: ref_list,
+                        next_document: None,
+                    };
+                }
+                ReferenceState::RefSet {
+                    ref mut map,
+                    ref mut next_document,
+                } => {
+                    if let Some(document_fut) = next_document.as_mut() {
+                        let document = futures::ready!(document_fut.poll_unpin(cx)).ok();
+                        next_document.take();
+                        if let Some(document) = document {
+                            return Poll::Ready(Some(document));
+                        }
+                    }
+
+                    match pop_front(map) {
+                        Some(cid) => {
+                            let fut = this
+                                .ipfs
+                                .get_dag(cid)
+                                .deserialized::<MessageDocument>()
+                                .into_future();
+
+                            next_document.replace(fut);
+                            continue;
+                        }
+                        None => {
+                            if let Some(next_ref) = this.reference_list.next {
+                                let ref_fut = this
+                                    .ipfs
+                                    .get_dag(next_ref)
+                                    .deserialized::<MessageReferenceList>()
+                                    .into_future();
+
+                                this.state = ReferenceState::NextPending { ref_fut };
+                                continue;
+                            }
+                            this.state = ReferenceState::Done;
+                        }
+                    };
+                }
+                ReferenceState::NextPending { ref mut ref_fut } => {
+                    let Ok(ref_list) = futures::ready!(ref_fut.poll_unpin(cx)) else {
+                        this.state = ReferenceState::Done;
+                        continue;
+                    };
+
+                    let st = ReferenceListStream::new(&this.ipfs, &ref_list);
+
+                    this.state = ReferenceState::Next { st: st.boxed() }
+                }
+                ReferenceState::Next { ref mut st } => {
+                    let output = match futures::ready!(st.poll_next_unpin(cx)) {
+                        Some(document) => document,
+                        None => {
+                            this.state = ReferenceState::Done;
+                            continue;
+                        }
+                    };
+
+                    return Poll::Ready(Some(output));
+                }
+                ReferenceState::Done => return Poll::Ready(None),
+            }
+        }
+    }
+}
+
+fn pop_front(map: &mut IndexMap<String, Option<Cid>>) -> Option<Cid> {
+    let (key, value) = map.iter_mut().next()?;
+    let k = key.to_string();
+    let val = *value;
+    map.shift_remove(&k);
+    if map.is_empty() {
+        map.shrink_to_fit();
+    }
+    val
 }
