@@ -118,6 +118,9 @@ pub(super) mod topics {
         fn exchange_topic(&self, did: &DID) -> String {
             format!("{}/exchange/{}", self.base(), did)
         }
+        fn join_topic(&self) -> String {
+            format!("{}/join", self.base())
+        }
     }
 
     impl ConversationTopic for Uuid {
@@ -322,8 +325,15 @@ pub enum ConversationEvents {
 
     NewCommunityInvite {
         community_id: Uuid,
-        community_document: CommunityDocument,
         invite: CommunityInviteDocument,
+    },
+    DeleteCommunityInvite {
+        community_id: Uuid,
+        invite: CommunityInviteDocument,
+    },
+    JoinCommunity {
+        community_id: Uuid,
+        community_document: Option<CommunityDocument>,
     },
     DeleteCommunity {
         community_id: Uuid,
@@ -455,6 +465,10 @@ pub enum CommunityMessagingEvents {
         state: ReactionState,
         emoji: String,
     },
+    JoinedCommunity {
+        community_id: Uuid,
+        user: DID,
+    },
     UpdateCommunity {
         community: CommunityDocument,
         kind: CommunityUpdateKind,
@@ -466,6 +480,14 @@ pub enum CommunityMessagingEvents {
         event: MessageEvent,
         cancelled: bool,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum CommunityJoinEvents {
+    Join,
+    DeleteInvite { invite_id: Uuid },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -493,10 +515,6 @@ pub enum CommunityUpdateKind {
     },
     DeleteCommunityInvite {
         invite_id: Uuid,
-    },
-    AcceptCommunityInvite {
-        invite_id: Uuid,
-        user: DID,
     },
     EditCommunityInvite {
         invite_id: Uuid,
