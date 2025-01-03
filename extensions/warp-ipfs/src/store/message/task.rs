@@ -1122,8 +1122,6 @@ impl ConversationTask {
                         match data.message(keypair) {
                             Ok(message) => message,
                             _ => {
-                                // If we are not able to get the latest key from the store, this is because we are still awaiting on the response from the key exchange
-                                // So what we should so instead is set aside the payload until we receive the key exchange then attempt to process it again
                                 _ = self.ping(&sender).await;
 
                                 // If we are not able to get the latest key from the store, this is because we are still awaiting on the response from the key exchange
