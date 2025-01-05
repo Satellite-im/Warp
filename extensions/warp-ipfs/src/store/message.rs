@@ -52,7 +52,6 @@ use crate::store::{
 
 use crate::store::community::CommunityDocument;
 use chrono::{DateTime, Utc};
-use futures::channel::mpsc::Receiver;
 use warp::raygun::community::{
     Community, CommunityChannel, CommunityChannelPermission, CommunityChannelType, CommunityInvite,
     CommunityPermission, CommunityRole, RoleId,
@@ -2164,13 +2163,11 @@ impl ConversationInner {
         )
         .await?;
 
-        let conversation_task = async_rt::task::spawn_coroutine_with_context(
-            task,
-            move |mut fut, rx: Receiver<ConversationTaskCommand>| async move {
+        let conversation_task =
+            async_rt::task::spawn_coroutine_with_context(task, move |mut fut, rx| async move {
                 fut.set_receiver(rx);
                 fut.run().await;
-            },
-        );
+            });
 
         tracing::info!(%conversation_id, "started conversation");
 
