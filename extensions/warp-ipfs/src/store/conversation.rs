@@ -273,8 +273,6 @@ impl ConversationDocument {
                         .iter()
                         .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
                 )),
-                self.icon.map(|s| s.hash().digest().to_vec()),
-                self.banner.map(|s| s.hash().digest().to_vec()),
             ]
             .into_iter(),
             None,
@@ -313,8 +311,6 @@ impl ConversationDocument {
                             .iter()
                             .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
                     )),
-                    self.icon.map(|s| s.hash().digest().to_vec()),
-                    self.banner.map(|s| s.hash().digest().to_vec()),
                 ]
                 .into_iter(),
                 None,
