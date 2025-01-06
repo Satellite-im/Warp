@@ -2,10 +2,11 @@ use bytes::Bytes;
 use either::Either;
 use futures::channel::oneshot;
 use futures::stream::BoxStream;
-use futures::{Stream, StreamExt, TryFutureExt};
+use futures::{StreamExt, TryFutureExt};
 use futures_timer::Delay;
 use indexmap::{IndexMap, IndexSet};
 use ipld_core::cid::Cid;
+use pollable_map::stream::optional::OptionalStream;
 use rust_ipfs::{libp2p::gossipsub::Message, Ipfs};
 use rust_ipfs::{IpfsPath, PeerId, SubscriptionStream};
 use serde::{Deserialize, Serialize};
@@ -248,7 +249,7 @@ pub struct ConversationTask {
     event_broadcast: tokio::sync::broadcast::Sender<MessageEventKind>,
     event_subscription: EventSubscription<RayGunEventKind>,
 
-    command_rx: BoxStream<'static, ConversationTaskCommand>,
+    command_rx: OptionalStream<futures::channel::mpsc::Receiver<ConversationTaskCommand>>,
 
     //TODO: replace queue
     queue: HashMap<DID, Vec<QueueItem>>,
@@ -329,7 +330,7 @@ impl ConversationTask {
             attachment_rx: arx,
             event_broadcast: btx,
             event_subscription,
-            command_rx: futures::stream::empty().boxed(),
+            command_rx: Default::default(),
             queue: Default::default(),
             terminate: ConversationTermination::default(),
         };
@@ -385,11 +386,8 @@ impl ConversationTask {
         Ok(task)
     }
 
-    pub fn set_receiver(
-        &mut self,
-        st: impl Stream<Item = ConversationTaskCommand> + 'static + Send,
-    ) {
-        self.command_rx = Box::pin(st);
+    pub fn set_receiver(&mut self, st: futures::channel::mpsc::Receiver<ConversationTaskCommand>) {
+        self.command_rx.replace(st);
     }
 }
 
