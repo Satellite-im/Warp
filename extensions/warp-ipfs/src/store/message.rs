@@ -6,7 +6,7 @@ use community_task::CommunityTaskCommand;
 use futures_timer::Delay;
 use task::ConversationTaskCommand;
 
-use async_rt::AbortableJoinHandle;
+use async_rt::{AbortableJoinHandle, CommunicationTask};
 use bytes::Bytes;
 use std::borrow::BorrowMut;
 use std::path::PathBuf;
@@ -243,7 +243,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::FavoriteConversation {
                 favorite,
@@ -265,7 +264,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::GetMessage {
                 message_id,
@@ -287,7 +285,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::GetMessages {
                 options: opt,
@@ -305,7 +302,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::GetMessagesCount { response: tx })
             .await;
@@ -324,7 +320,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::GetMessageReference {
                 message_id,
@@ -346,7 +341,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::GetMessageReferences {
                 options: opt,
@@ -368,7 +362,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::UpdateConversationName {
                 name: name.to_string(),
@@ -390,7 +383,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::UpdateConversationPermissions {
                 permissions: permissions.into(),
@@ -413,7 +405,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::AddParticipant {
                 member: did.clone(),
@@ -431,7 +422,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::RemoveParticipant {
                 member: did.clone(),
@@ -454,7 +444,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::MessageStatus {
                 message_id,
@@ -476,7 +465,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::SendMessage {
                 lines,
@@ -499,7 +487,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::EditMessage {
                 message_id,
@@ -523,7 +510,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::ReplyMessage {
                 message_id,
@@ -546,7 +532,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::DeleteMessage {
                 message_id,
@@ -569,7 +554,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::PinMessage {
                 message_id,
@@ -594,7 +578,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::ReactMessage {
                 message_id,
@@ -620,7 +603,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::AttachMessage {
                 message_id,
@@ -647,7 +629,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::DownloadAttachment {
                 message_id,
@@ -672,7 +653,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::DownloadAttachmentStream {
                 message_id,
@@ -695,7 +675,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::SendEvent {
                 event,
@@ -717,7 +696,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::CancelEvent {
                 event,
@@ -739,7 +717,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::UpdateIcon {
                 location,
@@ -761,7 +738,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::UpdateBanner {
                 location,
@@ -782,7 +758,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::GetIcon { response: tx })
             .await;
@@ -800,7 +775,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::GetBanner { response: tx })
             .await;
@@ -815,7 +789,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::RemoveIcon { response: tx })
             .await;
@@ -830,7 +803,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::RemoveBanner { response: tx })
             .await;
@@ -848,7 +820,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::SetDescription {
                 desc: desc.map(|s| s.to_string()),
@@ -865,7 +836,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::ArchivedConversation { response: tx })
             .await;
@@ -880,7 +850,6 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
         let (tx, rx) = oneshot::channel();
         let _ = conversation_meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::UnarchivedConversation { response: tx })
             .await;
@@ -2114,11 +2083,6 @@ impl ConversationTask {
     }
 }
 
-#[derive(Clone, Debug)]
-struct ConversationInnerMeta {
-    pub command_tx: mpsc::Sender<ConversationTaskCommand>,
-    pub handle: AbortableJoinHandle<()>,
-}
 #[derive(Clone)]
 struct CommunityInnerMeta {
     pub command_tx: mpsc::Sender<CommunityTaskCommand>,
@@ -2127,7 +2091,7 @@ struct CommunityInnerMeta {
 
 struct ConversationInner {
     ipfs: Ipfs,
-    conversation_task: HashMap<Uuid, ConversationInnerMeta>,
+    conversation_task: HashMap<Uuid, CommunicationTask<ConversationTaskCommand>>,
     community_task: HashMap<Uuid, CommunityInnerMeta>,
     community_invites: Vec<(Uuid, CommunityInviteDocument)>,
     root: RootDocumentMap,
@@ -2188,8 +2152,6 @@ impl ConversationInner {
     }
 
     async fn create_conversation_task(&mut self, conversation_id: Uuid) -> Result<(), Error> {
-        let (ctx, crx) = mpsc::channel(256);
-
         let task = task::ConversationTask::new(
             conversation_id,
             &self.ipfs,
@@ -2197,21 +2159,20 @@ impl ConversationInner {
             &self.identity,
             &self.file,
             &self.discovery,
-            crx,
             self.event.clone(),
         )
         .await?;
 
-        let handle = async_rt::task::spawn_abortable(task.run());
+        let conversation_task =
+            async_rt::task::spawn_coroutine_with_context(task, move |mut fut, rx| async move {
+                fut.set_receiver(rx);
+                fut.run().await;
+            });
 
         tracing::info!(%conversation_id, "started conversation");
 
-        let inner_meta = ConversationInnerMeta {
-            command_tx: ctx,
-            handle,
-        };
-
-        self.conversation_task.insert(conversation_id, inner_meta);
+        self.conversation_task
+            .insert(conversation_id, conversation_task);
 
         Ok(())
     }
@@ -2439,14 +2400,11 @@ impl ConversationInner {
 
         let (tx, rx) = oneshot::channel();
         let _ = meta
-            .command_tx
-            .clone()
             .send(ConversationTaskCommand::Delete { response: tx })
             .await;
         rx.await.map_err(anyhow::Error::from)??;
 
-        meta.command_tx.close_channel();
-        meta.handle.abort();
+        meta.abort();
 
         Ok(conversation)
     }
@@ -2518,7 +2476,6 @@ impl ConversationInner {
 
         let (tx, rx) = oneshot::channel();
         let _ = meta
-            .command_tx
             .clone()
             .send(ConversationTaskCommand::EventHandler { response: tx })
             .await;
@@ -3162,7 +3119,6 @@ async fn process_conversation(
                 .ok_or(Error::InvalidConversation)?;
             let (tx, rx) = oneshot::channel();
             let _ = conversation_meta
-                .command_tx
                 .clone()
                 .send(ConversationTaskCommand::AddExclusion {
                     member: recipient,
@@ -3372,15 +3328,13 @@ async fn process_identity_events(
                             .ok_or(Error::InvalidConversation)?;
 
                         let (tx, rx) = oneshot::channel();
-                        let _ = conversation_meta
-                            .command_tx
-                            .clone()
-                            .send(ConversationTaskCommand::RemoveParticipant {
+                        let _ = conversation_meta.clone().try_send(
+                            ConversationTaskCommand::RemoveParticipant {
                                 member: did.clone(),
                                 broadcast: true,
                                 response: tx,
-                            })
-                            .await;
+                            },
+                        );
 
                         let Ok(result) = rx.await else {
                             continue;
@@ -3394,7 +3348,6 @@ async fn process_identity_events(
                         if this.root.is_blocked(&did).await.unwrap_or_default() {
                             let (tx, rx) = oneshot::channel();
                             let _ = conversation_meta
-                                .command_tx
                                 .clone()
                                 .send(ConversationTaskCommand::AddRestricted {
                                     member: did.clone(),
@@ -3430,7 +3383,6 @@ async fn process_identity_events(
 
                 let (tx, rx) = oneshot::channel();
                 let _ = conversation_meta
-                    .command_tx
                     .clone()
                     .send(ConversationTaskCommand::AddRestricted {
                         member: did.clone(),
@@ -3468,7 +3420,6 @@ async fn process_identity_events(
 
                         let (tx, rx) = oneshot::channel();
                         let _ = conversation_meta
-                            .command_tx
                             .clone()
                             .send(ConversationTaskCommand::RemoveParticipant {
                                 member: did.clone(),

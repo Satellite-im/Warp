@@ -6,6 +6,7 @@ use futures::{StreamExt, TryFutureExt};
 use futures_timer::Delay;
 use indexmap::{IndexMap, IndexSet};
 use ipld_core::cid::Cid;
+use pollable_map::stream::optional::OptionalStream;
 use rust_ipfs::{libp2p::gossipsub::Message, Ipfs};
 use rust_ipfs::{IpfsPath, PeerId, SubscriptionStream};
 use serde::{Deserialize, Serialize};
@@ -225,6 +226,9 @@ pub enum ConversationTaskCommand {
     },
 }
 
+unsafe impl Send for ConversationTaskCommand {}
+unsafe impl Sync for ConversationTaskCommand {}
+
 pub struct ConversationTask {
     conversation_id: Uuid,
     ipfs: Ipfs,
@@ -245,13 +249,16 @@ pub struct ConversationTask {
     event_broadcast: tokio::sync::broadcast::Sender<MessageEventKind>,
     event_subscription: EventSubscription<RayGunEventKind>,
 
-    command_rx: futures::channel::mpsc::Receiver<ConversationTaskCommand>,
+    command_rx: OptionalStream<futures::channel::mpsc::Receiver<ConversationTaskCommand>>,
 
     //TODO: replace queue
     queue: HashMap<DID, Vec<QueueItem>>,
 
     terminate: ConversationTermination,
 }
+
+unsafe impl Send for ConversationTask {}
+unsafe impl Sync for ConversationTask {}
 
 #[derive(Default, Debug)]
 struct ConversationTermination {
@@ -289,7 +296,6 @@ impl ConversationTask {
         identity: &IdentityStore,
         file: &FileStore,
         discovery: &Discovery,
-        command_rx: futures::channel::mpsc::Receiver<ConversationTaskCommand>,
         event_subscription: EventSubscription<RayGunEventKind>,
     ) -> Result<Self, Error> {
         let document = root.get_conversation_document(conversation_id).await?;
@@ -324,7 +330,7 @@ impl ConversationTask {
             attachment_rx: arx,
             event_broadcast: btx,
             event_subscription,
-            command_rx,
+            command_rx: Default::default(),
             queue: Default::default(),
             terminate: ConversationTermination::default(),
         };
@@ -378,6 +384,10 @@ impl ConversationTask {
 
         tracing::info!(%conversation_id, "conversation task created");
         Ok(task)
+    }
+
+    pub fn set_receiver(&mut self, st: futures::channel::mpsc::Receiver<ConversationTaskCommand>) {
+        self.command_rx.replace(st);
     }
 }
 
