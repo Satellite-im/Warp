@@ -2297,7 +2297,7 @@ impl ConversationInner {
             })
             .await;
 
-        Ok(Conversation::from(&conversation))
+        Ok(Conversation::from(conversation))
     }
 
     pub async fn create_group_conversation<P: Into<GroupPermissionOpt> + Send + Sync>(
@@ -2415,7 +2415,7 @@ impl ConversationInner {
             .emit(RayGunEventKind::ConversationCreated { conversation_id })
             .await;
 
-        Ok(Conversation::from(&conversation))
+        Ok(Conversation::from(conversation))
     }
 
     async fn get(&self, id: Uuid) -> Result<ConversationDocument, Error> {
