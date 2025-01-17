@@ -435,13 +435,9 @@ impl IdentityStore {
                 futures::pin_mut!(event_stream);
                 futures::pin_mut!(friend_stream);
 
-                let auto_push = store.config.store_setting().auto_push.is_some();
+                let interval = store.config.store_setting().auto_push_duration;
 
-                let interval = store
-                    .config
-                    .store_setting()
-                    .auto_push
-                    .unwrap_or(Duration::from_millis(300000));
+                assert!(interval != Duration::ZERO);
 
                 let mut tick = Delay::new(interval);
 
@@ -474,6 +470,12 @@ impl IdentityStore {
                                     continue
                                 }
                             };
+
+                            if identity.verify().is_err() {
+                                tracing::warn!(from = %from_did, "invalid identity document");
+                                //TODO: Blacklist?
+                                continue;
+                            }
 
                             //Maybe establish a connection?
                             //Note: Although it would be prefer not to establish a connection, it may be ideal to check to determine
@@ -599,9 +601,7 @@ impl IdentityStore {
                             }
                         }
                         _ = &mut tick => {
-                            if auto_push {
-                                store.push_to_all().await;
-                            }
+                            store.push_to_all().await;
                             tick.reset(interval)
                         }
                     }
@@ -859,41 +859,21 @@ impl IdentityStore {
         Ok(())
     }
 
-    async fn push_iter<I: IntoIterator<Item = DID>>(&self, list: I) {
-        for did in list {
-            if let Err(e) = self.push(&did).await {
-                tracing::error!("Error pushing identity to {did}: {e}");
-            }
-        }
-    }
-
     pub async fn push_to_all(&self) {
-        //TODO: Possibly announce only to mesh, though this *might* require changing the logic to establish connection
-        //      if profile pictures and banners are supplied in this push too.
-        let list = self
-            .discovery
-            .list()
-            .await
-            .iter()
-            .filter_map(|entry| entry.peer_id().to_did().ok())
-            .collect::<Vec<_>>();
-        self.push_iter(list).await;
         let _ = self.announce_identity_to_mesh().await;
     }
 
     pub async fn announce_identity_to_mesh(&self) -> Result<(), Error> {
-        if self.config.store_setting().announce_to_mesh {
-            let kp = self.ipfs.keypair();
-            let document = self.own_identity_document().await?;
-            tracing::debug!("announcing identity to mesh");
-            let payload = PayloadBuilder::new(kp, document)
-                .from_ipfs(&self.ipfs)
-                .await?;
-            let bytes = payload.to_bytes()?;
-            match self.ipfs.pubsub_publish(IDENTITY_ANNOUNCEMENT, bytes).await {
-                Ok(_) => tracing::debug!("identity announced to mesh"),
-                Err(_) => tracing::warn!("unable to announce identity to mesh"),
-            }
+        let kp = self.ipfs.keypair();
+        let document = self.own_identity_document().await?;
+        tracing::debug!("announcing identity to mesh");
+        let payload = PayloadBuilder::new(kp, document)
+            .from_ipfs(&self.ipfs)
+            .await?;
+        let bytes = payload.to_bytes()?;
+        match self.ipfs.pubsub_publish(IDENTITY_ANNOUNCEMENT, bytes).await {
+            Ok(_) => tracing::debug!("identity announced to mesh"),
+            Err(_) => tracing::warn!("unable to announce identity to mesh"),
         }
 
         Ok(())

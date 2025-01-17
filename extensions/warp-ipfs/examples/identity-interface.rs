@@ -53,6 +53,8 @@ struct Opt {
     import: Option<PathBuf>,
     #[clap(long)]
     phrase: Option<String>,
+    #[clap(long)]
+    bootstrap_preload: Vec<Multiaddr>,
 }
 
 async fn account(
@@ -92,6 +94,8 @@ async fn account(
     if opt.disable_relay {
         *config.enable_relay_mut() = false;
     }
+
+    config.ipfs_setting_mut().preload = opt.bootstrap_preload.clone();
 
     if opt.upnp {
         config.ipfs_setting_mut().portmapping = true;

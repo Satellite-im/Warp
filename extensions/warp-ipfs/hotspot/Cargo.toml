@@ -1,0 +1,19 @@
+[package]
+name = "hotspot"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+warp-ipfs = { path = "../" }
+rust-ipfs = { workspace = true, features = ["webrtc_transport", "experimental_stream"] }
+anyhow.workspace = true
+serde.workspace = true
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+clap = { version = "4.4", features = ["derive"] }
+zeroize.workspace = true
+base64 = "0.22"
+
+tokio = { workspace = true }
+toml = "0.8.19"
